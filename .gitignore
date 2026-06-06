@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# turbo
+.turbo/
+
+# typescript
+*.tsbuildinfo

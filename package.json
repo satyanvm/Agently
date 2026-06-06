@@ -1,0 +1,17 @@
+{
+  "name": "agently",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI Agent Hosting Platform — deploy, run, and monitor AI agents.",
+  "scripts": {
+    "dev:web": "pnpm --filter @agently/web dev",
+    "dev:worker": "pnpm --filter @agently/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "packageManager": "pnpm@10.19.0",
+  "engines": {
+    "node": ">=20"
+  }
+}
