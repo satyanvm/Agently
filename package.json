@@ -5,8 +5,9 @@
   "description": "AI Agent Hosting Platform — deploy, run, and monitor AI agents.",
   "scripts": {
     "dev:web": "pnpm --filter @agently/web dev",
-    "dev:worker": "pnpm --filter @agently/worker dev",
+    "dev:api": "cd apps/api && go run ./cmd/server",
     "build": "pnpm -r build",
+    "build:api": "cd apps/api && go build -o ../../bin/api ./cmd/server",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
   },

@@ -1,8 +1,8 @@
 /**
  * Frontend domain model for the Agently control plane.
  *
- * This extends the shared vocabulary in @agently/core (Agent / Run / LogEntry)
- * with the richer, UI-facing concepts the product surfaces: multi-agent
+ * This mirrors the canonical vocabulary served by the Go API (apps/api —
+ * Agent / Run / LogEntry) with the richer, UI-facing concepts the product surfaces: multi-agent
  * workflows, agent graphs, browser sessions, artifacts, cost, and notifications.
  * All data is mock — see lib/mock-data.ts.
  */
