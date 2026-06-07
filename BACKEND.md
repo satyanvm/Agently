@@ -1,14 +1,21 @@
-# Agently — Backend Foundations
+# Agently — Backend
 
-This document describes the backend foundations built to support the existing
-frontend. The frontend is unchanged and still runs entirely on its own mock data
-(`apps/web/lib/mock-data.ts`); everything here runs **alongside** it, ready to be
-wired in later with minimal refactoring.
+The backend is a standalone **Go** service in [`apps/api`](apps/api/README.md). It
+serves the HTTP contract the frontend consumes (same paths, JSON shapes, seed
+world, and SSE behavior the earlier TypeScript backend served). The frontend
+stays in TypeScript and, in development, proxies `/api/*` to the Go server on
+`:8080` via `apps/web/next.config.ts`. The frontend still renders its own mock
+data (`apps/web/lib/mock-data.ts`); the API is verified independently.
 
-The guiding rule: build only what the *current frontend obviously requires* and
-what is *likely to survive* future decisions about the agent framework,
-orchestration, browser infrastructure, and cloud provisioning. None of those are
-assumed anywhere below.
+Run it: `pnpm dev:api` (Go API) + `pnpm dev:web` (frontend). See
+[`apps/api/README.md`](apps/api/README.md) for architecture and endpoints.
+
+> **History.** The backend was originally built in TypeScript (`@agently/core`
+> platform + Next.js API routes + a worker stub). It has since been rewritten in
+> Go, package-for-package; the sections below describe that original design,
+> which the Go layout mirrors 1:1 (`internal/domain` ← contracts,
+> `internal/platform` ← core platform, `internal/services` ← services,
+> `internal/handler` ← API routes).
 
 ---
 

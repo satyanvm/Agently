@@ -1,18 +1,19 @@
 import type { NextConfig } from "next";
 
+// The backend is the standalone Go API (apps/api), served on :8080. In
+// development we proxy /api/* to it so the frontend keeps calling same-origin
+// /api paths with no CORS and no URL changes. Override the target with
+// API_PROXY_TARGET when the API runs elsewhere.
+const API_TARGET = process.env.API_PROXY_TARGET ?? "http://localhost:8080";
+
 const nextConfig: NextConfig = {
-  // Workspace packages are plain TS consumed directly from source; let Next
-  // transpile them (route handlers import @agently/core/platform + contracts).
-  transpilePackages: ["@agently/core", "@agently/contracts"],
-  webpack: (config) => {
-    // The workspace packages use NodeNext-style ".js" import specifiers that
-    // actually resolve to ".ts" source. Teach webpack to try ".ts" first.
-    config.resolve.extensionAlias = {
-      ".js": [".ts", ".tsx", ".js", ".jsx"],
-      ".mjs": [".mts", ".mjs"],
-      ".cjs": [".cts", ".cjs"],
-    };
-    return config;
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${API_TARGET}/api/:path*`,
+      },
+    ];
   },
 };
 
