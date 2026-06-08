@@ -17,18 +17,30 @@ type RunMeta struct {
 	WorkflowSlug string
 	WorkflowName string
 	Number       int
+	Email        string // recipient from run.input.email (optional)
 }
 
-// LoadRunMeta fetches the notification-relevant fields for a run.
+// LoadRunMeta fetches the notification-relevant fields for a run, including the
+// recipient email from the run's input (so "email me the digest" is honored).
 func (q *Queue) LoadRunMeta(ctx context.Context, runID string) (RunMeta, error) {
 	row := q.pool.QueryRow(ctx,
-		`select r.workspace_id, w.slug, w.name, r.number
+		`select r.workspace_id, w.slug, w.name, r.number, coalesce(r.input->>'email','')
 		   from runs r join workflows w on w.id = r.workflow_id where r.id=$1`, runID)
 	var m RunMeta
-	if err := row.Scan(&m.WorkspaceID, &m.WorkflowSlug, &m.WorkflowName, &m.Number); err != nil {
+	if err := row.Scan(&m.WorkspaceID, &m.WorkflowSlug, &m.WorkflowName, &m.Number, &m.Email); err != nil {
 		return RunMeta{}, fmt.Errorf("load run meta: %w", err)
 	}
 	return m, nil
+}
+
+// LoadDigest returns the content of the run's primary result artifact (the digest
+// the Editor produced), for inclusion in the notification body. Empty if none.
+func (q *Queue) LoadDigest(ctx context.Context, runID string) string {
+	row := q.pool.QueryRow(ctx,
+		`select coalesce(preview,'') from artifacts where run_id=$1 order by created_at desc limit 1`, runID)
+	var preview string
+	_ = row.Scan(&preview)
+	return preview
 }
 
 // CreateNotification inserts an in-app notification for a run outcome. severity is

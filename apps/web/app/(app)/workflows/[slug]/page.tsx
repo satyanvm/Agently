@@ -1,41 +1,78 @@
-import { notFound } from "next/navigation";
+"use client";
+
+import * as React from "react";
+import { useParams } from "next/navigation";
 import { TopBar } from "@/components/shell/topbar";
 import { PageContainer } from "@/components/shell/page";
 import { WorkflowDetail } from "@/components/workflow-detail";
-import {
-  getWorkflow,
-  agentsForWorkflow,
-  runsForWorkflow,
-  workflows,
-  runs as allRuns,
-} from "@/lib/mock-data";
+import { fetchWorkflow, fetchWorkflowRuns, fetchRun } from "@/lib/api";
+import type { Workflow, WorkflowRun, AgentNode } from "@/lib/types";
 
-export function generateStaticParams() {
-  return workflows.map((w) => ({ slug: w.slug }));
-}
+export default function WorkflowPage() {
+  const { slug } = useParams<{ slug: string }>();
+  const [wf, setWf] = React.useState<Workflow | null>(null);
+  const [runs, setRuns] = React.useState<WorkflowRun[]>([]);
+  const [agents, setAgents] = React.useState<AgentNode[]>([]);
+  const [state, setState] = React.useState<"loading" | "ready" | "notfound">("loading");
 
-export default async function WorkflowPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
-  const { slug } = await params;
-  const wf = getWorkflow(slug);
-  if (!wf) notFound();
+  React.useEffect(() => {
+    if (!slug) return;
+    let active = true;
+    const load = async () => {
+      const w = await fetchWorkflow(slug);
+      if (!active) return;
+      if (!w) {
+        setState("notfound");
+        return;
+      }
+      setWf(w);
+      const wfRuns = await fetchWorkflowRuns(slug);
+      if (!active) return;
+      setRuns(wfRuns);
+      // Derive the agent graph from the most recent run (live statuses); empty
+      // until the workflow has been run at least once.
+      if (wfRuns.length > 0) {
+        const detail = await fetchRun(wfRuns[0]!.id);
+        if (active && detail) setAgents(detail.agents);
+      }
+      setState("ready");
+    };
+    load();
+    const t = setInterval(load, 3000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [slug]);
 
-  const agents = agentsForWorkflow(wf);
-  const wfRuns = runsForWorkflow(wf.id);
-  // Ensure at least a couple of timeline entries even for sparse workflows.
-  const timeline = (wfRuns.length ? wfRuns : allRuns.slice(0, 3)).slice(0, 6);
-  const activeRun = wfRuns.find((r) => r.status === "running") ?? null;
+  if (state === "notfound") {
+    return (
+      <>
+        <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: "Not found" }]} />
+        <PageContainer>
+          <div className="py-20 text-center text-sm text-faint">Workflow not found.</div>
+        </PageContainer>
+      </>
+    );
+  }
+  if (!wf) {
+    return (
+      <>
+        <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: "Loading…" }]} />
+        <PageContainer>
+          <div className="py-20 text-center text-sm text-faint">Loading workflow…</div>
+        </PageContainer>
+      </>
+    );
+  }
+
+  const activeRun = runs.find((r) => r.status === "running") ?? null;
 
   return (
     <>
-      <TopBar
-        crumbs={[{ label: "Workflows", href: "/workflows" }, { label: wf.name }]}
-      />
+      <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: wf.name }]} />
       <PageContainer>
-        <WorkflowDetail wf={wf} agents={agents} runs={timeline} activeRun={activeRun} />
+        <WorkflowDetail wf={wf} agents={agents} runs={runs.slice(0, 6)} activeRun={activeRun} />
       </PageContainer>
     </>
   );

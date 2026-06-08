@@ -8,6 +8,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -32,7 +33,8 @@ type Claimed struct {
 	WorkflowName string
 	Number       int
 	StepsTotal   int
-	StepsDone    int // > 0 on a resumed run — the agent skips already-done steps
+	StepsDone    int            // > 0 on a resumed run — the agent skips already-done steps
+	Input        map[string]any // the run's task parameters (sources, topic, email…)
 }
 
 // Queue wraps a connection pool with the worker's queue operations.
@@ -52,14 +54,19 @@ func (q *Queue) Claim(ctx context.Context, workerID string) (Claimed, error) {
 	// via a CTE so it stays atomic.
 	row := q.pool.QueryRow(ctx,
 		`with c as (select * from claim_next_run($1))
-		 select c.id, c.workflow_id, w.name, c.number, c.steps_total, c.steps_done
+		 select c.id, c.workflow_id, w.name, c.number, c.steps_total, c.steps_done, c.input
 		   from c join workflows w on w.id = c.workflow_id`, workerID)
 	var c Claimed
-	if err := row.Scan(&c.ID, &c.WorkflowID, &c.WorkflowName, &c.Number, &c.StepsTotal, &c.StepsDone); err != nil {
+	var input []byte
+	if err := row.Scan(&c.ID, &c.WorkflowID, &c.WorkflowName, &c.Number, &c.StepsTotal, &c.StepsDone, &input); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Claimed{}, ErrNoRun
 		}
 		return Claimed{}, fmt.Errorf("claim: %w", err)
+	}
+	c.Input = map[string]any{}
+	if len(input) > 0 {
+		_ = json.Unmarshal(input, &c.Input)
 	}
 	return c, nil
 }

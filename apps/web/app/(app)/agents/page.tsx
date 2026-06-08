@@ -1,15 +1,26 @@
+"use client";
+
+import * as React from "react";
 import { Wrench } from "lucide-react";
 import { TopBar } from "@/components/shell/topbar";
 import { PageContainer, PageTitle } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge } from "@/components/ui/status";
 import { AgentGlyph, roleMeta } from "@/components/agent-glyph";
-import { agentLibrary } from "@/lib/mock-data";
-import { formatCost, formatCompact } from "@/lib/utils";
+import { fetchAgents, type AgentDefinition } from "@/lib/api";
+import type { AgentRole } from "@/lib/types";
 
 export default function AgentsPage() {
+  const [agentLibrary, setAgentLibrary] = React.useState<AgentDefinition[]>([]);
+  React.useEffect(() => {
+    let active = true;
+    fetchAgents().then((a) => active && setAgentLibrary(a)).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <>
       <TopBar
@@ -28,18 +39,16 @@ export default function AgentsPage() {
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {agentLibrary.map((a) => {
-            const m = roleMeta(a.role);
+            const role = a.role as AgentRole;
+            const m = roleMeta(role);
             return (
               <Card key={a.id} hover className="flex flex-col p-4">
                 <div className="flex items-start gap-3">
-                  <AgentGlyph role={a.role} size="lg" />
+                  <AgentGlyph role={role} size="lg" />
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="truncate text-[14px] font-semibold tracking-tight text-fg">
-                        {a.name}
-                      </h3>
-                      <StatusBadge status={a.status} size="sm" />
-                    </div>
+                    <h3 className="truncate text-[14px] font-semibold tracking-tight text-fg">
+                      {a.name}
+                    </h3>
                     <span className={`text-[11px] font-medium ${m.tone}`}>{m.label}</span>
                   </div>
                 </div>
@@ -54,15 +63,9 @@ export default function AgentsPage() {
                   ))}
                 </div>
 
-                <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3">
-                  <Metric label="Model" value={a.model.replace("claude-", "").replace(/-/g, " ")} mono />
-                  <Metric label="Runs · 7d" value={formatCompact(a.runs7d)} />
-                  <Metric label="Avg cost" value={formatCost(a.avgCostUsd)} />
-                </div>
-
-                <div className="mt-3 flex items-center gap-1.5 text-[11px] text-faint">
+                <div className="mt-4 flex items-center gap-1.5 border-t border-border pt-3 text-[11px] text-faint">
                   <Wrench className="size-3" />
-                  Used in {a.workflows.length} workflow{a.workflows.length > 1 ? "s" : ""}
+                  <span className="font-mono">{a.model.replace("claude-", "")}</span>
                 </div>
               </Card>
             );

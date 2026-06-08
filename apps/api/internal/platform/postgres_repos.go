@@ -338,7 +338,7 @@ type pgRunRepo struct{ s *pgStore }
 
 // runCols selects from runs joined to workflows for the derived name/slug.
 const runSelect = `select r.id, r.workspace_id, r.workflow_id, r.workflow_version_id,
-  w.name, w.slug, r.number, r.status, r.trigger, r.triggered_by, r.region,
+  w.name, w.slug, r.number, r.status, r.trigger, r.input, r.triggered_by, r.region,
   r.steps_done, r.steps_total, r.current_step, r.cost_usd::float8,
   r.tokens_in, r.tokens_out, r.error, r.browser_session_id,
   r.queued_at, r.started_at, r.finished_at
@@ -349,7 +349,7 @@ func scanRun(row pgx.Row) (domain.Run, error) {
 	var id, ws, wf string
 	var verID *string
 	var wfName, wfSlug, status, trigger, region, currentStep string
-	var triggeredBy []byte
+	var triggeredBy, input []byte
 	var number, stepsDone, stepsTotal int
 	var costUsd float64
 	var tokensIn, tokensOut int64
@@ -357,10 +357,12 @@ func scanRun(row pgx.Row) (domain.Run, error) {
 	var queued any
 	var started, finished any
 	if err := row.Scan(&id, &ws, &wf, &verID, &wfName, &wfSlug, &number, &status, &trigger,
-		&triggeredBy, &region, &stepsDone, &stepsTotal, &currentStep, &costUsd,
+		&input, &triggeredBy, &region, &stepsDone, &stepsTotal, &currentStep, &costUsd,
 		&tokensIn, &tokensOut, &errStr, &bsID, &queued, &started, &finished); err != nil {
 		return rn, err
 	}
+	rn.Input = map[string]any{}
+	jsonInto(input, &rn.Input)
 	rn.ID = domain.RunId(id)
 	rn.WorkspaceID = domain.WorkspaceId(ws)
 	rn.WorkflowID = domain.WorkflowId(wf)
@@ -434,11 +436,11 @@ func collectRuns(s *pgStore, rows pgx.Rows) []domain.Run {
 func (r *pgRunRepo) Insert(run domain.Run) domain.Run {
 	_, err := r.s.pool.Exec(bg(),
 		`insert into runs (id, workspace_id, workflow_id, workflow_version_id, number, status,
-		   trigger, triggered_by, region, steps_done, steps_total, current_step, cost_usd,
+		   trigger, input, triggered_by, region, steps_done, steps_total, current_step, cost_usd,
 		   tokens_in, tokens_out, error, browser_session_id, queued_at, started_at, finished_at)
-		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 		string(run.ID), string(run.WorkspaceID), string(run.WorkflowID), idPtrArg(run.WorkflowVersionID),
-		run.Number, string(run.Status), string(run.Trigger), jsonArg(run.TriggeredBy), run.Region,
+		run.Number, string(run.Status), string(run.Trigger), jsonArg(orEmptyMap(run.Input)), jsonArg(run.TriggeredBy), run.Region,
 		run.Steps.Done, run.Steps.Total, run.CurrentStep, run.CostUsd,
 		run.Usage.TokensIn, run.Usage.TokensOut, strArg(run.Error), idPtrArg(run.BrowserSessionID),
 		tsArg(run.QueuedAt), tsPtrArg(run.StartedAt), tsPtrArg(run.FinishedAt))
@@ -1146,6 +1148,14 @@ func idPtrArg[T ~string](p *T) any {
 		return nil
 	}
 	return string(*p)
+}
+
+// orEmptyMap ensures a nil map marshals as {} not null (the column is NOT NULL).
+func orEmptyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
 }
 
 // noteArg maps an empty note to SQL NULL (the column is nullable text).

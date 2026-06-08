@@ -4,7 +4,7 @@
  * This mirrors the canonical vocabulary served by the Go API (apps/api —
  * Agent / Run / LogEntry) with the richer, UI-facing concepts the product surfaces: multi-agent
  * workflows, agent graphs, browser sessions, artifacts, cost, and notifications.
- * All data is mock — see lib/mock-data.ts.
+ * These are the UI-facing shapes; the live Go API is mapped onto them in lib/api.ts.
  */
 
 export type RunStatus =

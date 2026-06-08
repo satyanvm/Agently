@@ -2,14 +2,11 @@
  * Real API client for the Go backend (apps/api), reached via the same-origin
  * /api/* proxy configured in next.config.ts.
  *
- * This is the bridge off mock data. The backend's JSON is almost identical to
- * the frontend's UI types (lib/types.ts) — the only shape gaps are normalized
- * here (e.g. the API nests token usage under `usage`, the UI wants it flat), so
- * components keep consuming the types they already know.
- *
- * Scope note: as of the first cut, only the Runs surface is wired to the live API
- * (the demo's center of gravity — a worker-created run appears here). Other pages
- * still read lib/mock-data.ts until they're migrated. Each is labeled in-page.
+ * Every page consumes the live Go API through this module — there is no mock
+ * data anymore. The backend's JSON is almost identical to the frontend's UI types
+ * (lib/types.ts); the only shape gaps are normalized here (e.g. the API nests
+ * token usage under `usage`, the UI wants it flat), so components keep consuming
+ * the types they already know.
  */
 
 import type { WorkflowRun, LogEntry, AgentNode, AgentMessage, BrowserSession } from "./types";
@@ -241,11 +238,104 @@ export async function fetchRunLogsAfter(runId: string, sinceSeq: number): Promis
   return page.items;
 }
 
-/** Launch a run for a workflow slug; returns the created run's id. */
-export async function launchRun(slug: string): Promise<string> {
+/** Launch a run for a workflow slug with optional task input; returns the run id. */
+export async function launchRun(slug: string, input?: Record<string, unknown>): Promise<string> {
   const run = await getJSON<{ id: string }>(`/api/workflows/${slug}/runs`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(input ? { input } : {}),
   });
   return run.id;
+}
+
+/* ---------------------- additional live-data fetchers --------------------- */
+
+import type { Workflow, ActivityItem, AppNotification } from "./types";
+
+/** Dashboard KPI stats. The API shape matches the UI's dashboardStats 1:1. */
+export interface DashboardStats {
+  activeRuns: number;
+  runsToday: number;
+  successRate: number;
+  spendTodayUsd: number;
+  spendBudgetUsd: number;
+  computeHours: number;
+  tokensToday: number;
+  runVolume: number[];
+  spendSeries: number[];
+}
+
+export async function fetchDashboard(): Promise<DashboardStats> {
+  return getJSON<DashboardStats>("/api/dashboard");
+}
+
+/** Workflows list (API WorkflowSummary ≈ UI Workflow). */
+export async function fetchWorkflows(): Promise<Workflow[]> {
+  const page = await getJSON<Page<Workflow>>("/api/workflows");
+  return page.items;
+}
+
+export async function fetchWorkflow(slug: string): Promise<Workflow | null> {
+  try {
+    return await getJSON<Workflow>(`/api/workflows/${slug}`);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("API 404")) return null;
+    throw e;
+  }
+}
+
+/** Runs for one workflow (newest first), normalized. */
+export async function fetchWorkflowRuns(slug: string): Promise<WorkflowRun[]> {
+  const page = await getJSON<Page<ApiRun>>(`/api/workflows/${slug}/runs`);
+  return page.items.map(toWorkflowRun);
+}
+
+/** Agent definitions (library). */
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  role: string;
+  model: string;
+  description: string;
+  tools: string[];
+}
+
+export async function fetchAgents(): Promise<AgentDefinition[]> {
+  const page = await getJSON<Page<AgentDefinition>>("/api/agents");
+  return page.items;
+}
+
+/** Activity feed. */
+export async function fetchActivity(): Promise<ActivityItem[]> {
+  const page = await getJSON<Page<ActivityItem>>("/api/activity");
+  return page.items;
+}
+
+/** Notifications: API uses readAt/createdAt; UI wants read/at. */
+interface ApiNotification {
+  id: string;
+  type: AppNotification["type"];
+  title: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+  workflowSlug?: string | null;
+  runNumber?: number | null;
+}
+
+export async function fetchNotifications(): Promise<AppNotification[]> {
+  const page = await getJSON<Page<ApiNotification>>("/api/notifications");
+  return page.items.map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    at: n.createdAt,
+    read: n.readAt != null,
+    workflowSlug: n.workflowSlug ?? undefined,
+    runNumber: n.runNumber ?? undefined,
+  }));
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await fetch(`/api/notifications/${id}/read`, { method: "POST" });
 }

@@ -18,7 +18,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/smtp"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -30,6 +32,8 @@ type Event struct {
 	Number       int    `json:"number"`
 	Status       string `json:"status"` // succeeded | failed | canceled
 	URL          string `json:"url"`    // deep link to the run in the UI
+	Digest       string `json:"digest"` // the run's result content (e.g. the AI digest)
+	To           string `json:"-"`      // per-run recipient override (run.input.email)
 }
 
 // Logger is the small logging surface notifiers use.
@@ -56,8 +60,19 @@ func New(log Logger) *Notifier {
 	if url := os.Getenv("NOTIFICATION_WEBHOOK_URL"); url != "" {
 		chans = append(chans, &webhook{url: url, http: &http.Client{Timeout: 10 * time.Second}})
 	}
-	if to := os.Getenv("NOTIFICATION_EMAIL_TO"); to != "" {
-		chans = append(chans, &email{to: to, log: log})
+	// Email via SMTP. Configured with SMTP_HOST/PORT/USER/PASS/FROM (Gmail: host
+	// smtp.gmail.com:587, user = your address, pass = an app password). A default
+	// recipient comes from NOTIFICATION_EMAIL_TO; a run can override via input.email.
+	if host := os.Getenv("SMTP_HOST"); host != "" {
+		chans = append(chans, &email{
+			host:      host,
+			port:      envOr("SMTP_PORT", "587"),
+			user:      os.Getenv("SMTP_USER"),
+			pass:      os.Getenv("SMTP_PASS"),
+			from:      envOr("SMTP_FROM", os.Getenv("SMTP_USER")),
+			defaultTo: os.Getenv("NOTIFICATION_EMAIL_TO"),
+			log:       log,
+		})
 	}
 	return &Notifier{channels: chans, log: log}
 }
@@ -107,18 +122,59 @@ func (w *webhook) Send(ctx context.Context, e Event) error {
 
 /* -------------------------------- email ---------------------------------- */
 
-// email is structured + logged for now. The trigger and payload are correct; a
-// real SMTP / provider (SES, Resend, Postmark) send drops in behind Send().
+// email sends a real message over SMTP (STARTTLS via net/smtp.SendMail). The body
+// carries the run's digest, so "email me the AI digest" actually delivers content.
 type email struct {
-	to  string
-	log Logger
+	host, port, user, pass, from, defaultTo string
+	log                                     Logger
 }
 
 func (m *email) Name() string { return "email" }
 
 func (m *email) Send(ctx context.Context, e Event) error {
+	to := firstNonEmpty(e.To, m.defaultTo)
+	if to == "" {
+		return fmt.Errorf("no recipient (set NOTIFICATION_EMAIL_TO or run input.email)")
+	}
 	subject := fmt.Sprintf("Agently: %s #%d %s", e.WorkflowName, e.Number, e.Status)
-	m.log.Info("email notification (logged; SMTP send is a follow-up)",
-		"to", m.to, "subject", subject, "url", e.URL)
+	body := e.Digest
+	if body == "" {
+		body = fmt.Sprintf("Your run %s finished with status: %s.", e.WorkflowName, e.Status)
+	}
+	body += "\n\n—\nView the full run: " + e.URL
+
+	msg := buildMessage(m.from, to, subject, body)
+	addr := m.host + ":" + m.port
+	auth := smtp.PlainAuth("", m.user, m.pass, m.host)
+	// net/smtp.SendMail does EHLO + STARTTLS + AUTH + send (works with Gmail :587).
+	if err := smtp.SendMail(addr, auth, m.from, []string{to}, msg); err != nil {
+		return fmt.Errorf("smtp send: %w", err)
+	}
 	return nil
+}
+
+func buildMessage(from, to, subject, body string) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", from)
+	fmt.Fprintf(&b, "To: %s\r\n", to)
+	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(body)
+	return []byte(b.String())
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
 }
