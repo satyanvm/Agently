@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, Bell, Plus, ChevronRight } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
 import { Avatar } from "@/components/ui/avatar";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { CommandPalette } from "./command-palette";
 
 export interface Crumb {
@@ -70,6 +71,8 @@ export function TopBar({
               <Kbd>K</Kbd>
             </span>
           </button>
+
+          <ThemeToggle />
 
           <Link
             href="/notifications"

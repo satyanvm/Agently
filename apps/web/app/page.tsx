@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { StatusBadge, StatusDot } from "@/components/ui/status";
 import { LivePill } from "@/components/live";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 export default function LandingPage() {
   return (
@@ -37,7 +38,7 @@ function LandingNav() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-bg/70 backdrop-blur-xl">
       <div className="mx-auto flex h-15 max-w-[1180px] items-center gap-8 px-6 py-3.5">
         <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(79,57,230,0.5)]">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(94,79,242,0.5)]">
             <Star className="h-4 w-4 text-white" />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">Agently</span>
@@ -50,6 +51,7 @@ function LandingNav() {
           <a className="transition-colors hover:text-fg" href="#">Docs</a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
           <Link
             href="/dashboard"
             className="hidden h-9 items-center rounded-md px-3 text-[13px] font-medium text-muted transition-colors hover:text-fg sm:flex"
@@ -69,11 +71,49 @@ function LandingNav() {
   );
 }
 
+/* Scattered decorative squares floating behind the hero — grey + faint
+   lavender, varied sizes, low opacity. Purely ornamental. */
+function HeroDecor() {
+  const squares = [
+    // left cluster
+    { top: "16%", left: "5%", size: 22, tone: "grey" },
+    { top: "20%", left: "8.5%", size: 14, tone: "grey" },
+    // right side
+    { top: "24%", right: "7%", size: 26, tone: "lavender" },
+    { top: "44%", right: "4.5%", size: 16, tone: "grey" },
+    { top: "66%", right: "8%", size: 20, tone: "grey" },
+    { top: "82%", right: "5%", size: 24, tone: "lavender" },
+    // bottom-center drift
+    { top: "90%", left: "38%", size: 18, tone: "lavender" },
+    { top: "86%", left: "41%", size: 12, tone: "grey" },
+  ] as const;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+      {squares.map((s, i) => (
+        <span
+          key={i}
+          className={`absolute rounded-[3px] ${
+            s.tone === "lavender" ? "bg-accent/[0.12]" : "bg-fg/[0.05]"
+          }`}
+          style={{
+            top: s.top,
+            left: "left" in s ? s.left : undefined,
+            right: "right" in s ? s.right : undefined,
+            width: s.size,
+            height: s.size,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- Hero */
 function Hero() {
   return (
     <section className="relative">
-      <div className="bg-grid pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,black,transparent)]" />
+      <HeroDecor />
       <div className="relative mx-auto max-w-[1180px] px-6 pb-10 pt-20 text-center md:pt-28">
         <div className="animate-in mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface/60 px-3 py-1 text-[12px] text-muted">
           <Sparkles className="size-3.5 text-accent-soft" />
@@ -124,7 +164,7 @@ function Hero() {
 function HeroPreview() {
   return (
     <div className="animate-in relative mx-auto mt-16 max-w-[1000px]">
-      <div className="absolute -inset-x-10 -top-10 bottom-0 -z-10 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(79,57,230,0.18),transparent_70%)] blur-2xl" />
+      <div className="absolute -inset-x-10 -top-10 bottom-0 -z-10 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(94,79,242,0.18),transparent_70%)] blur-2xl" />
       <div className="overflow-hidden rounded-xl border border-border-strong bg-surface shadow-pop">
         {/* window chrome */}
         <div className="flex items-center gap-2 border-b border-border bg-surface-2/60 px-4 py-2.5">

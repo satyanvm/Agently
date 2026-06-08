@@ -30,11 +30,11 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-[244px] flex-col border-r border-border bg-surface/40">
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-[244px] flex-col border-r border-border bg-bg">
       {/* Brand + workspace switcher */}
       <div className="px-3 pt-3.5">
         <button className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2">
-          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(79,57,230,0.5)]">
+          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(94,79,242,0.5)]">
             <Logo className="h-4 w-4 text-white" />
           </span>
           <span className="min-w-0 flex-1">

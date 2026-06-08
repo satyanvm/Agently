@@ -28,7 +28,7 @@ export function AgentVisualization({
     : messages;
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
       {/* Graph canvas */}
       <Card className="bg-surface/60">
         <div className="flex items-center justify-between border-b border-border px-5 py-3">

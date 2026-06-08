@@ -42,7 +42,7 @@ export function BrowserSessionView({ session }: { session: BrowserSession }) {
   const shot = session.shots[shotIdx]!;
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
       {/* Viewport */}
       <div className="space-y-3">
         <Card className="overflow-hidden p-0">
