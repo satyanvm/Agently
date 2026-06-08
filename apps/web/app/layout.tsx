@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://agently.dev"),
 };
 
+// Runs before paint to apply the saved/system theme with no flash of the
+// wrong mode. Kept as a tiny string so it can be inlined in <head>.
+const themeInit = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
+
 export default function RootLayout({
   children,
 }: {
@@ -21,6 +25,9 @@ export default function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );

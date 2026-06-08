@@ -55,7 +55,7 @@ export function AgentGraph({
   ).filter(Boolean) as { from: AgentNode; to: AgentNode; kind: EdgeKind }[];
 
   return (
-    <div className={cn("relative w-full overflow-x-auto", className)}>
+    <div className={cn("relative w-full min-w-0 max-w-full overflow-x-auto", className)}>
       <div className="relative" style={{ width, height, minWidth: width }}>
         {/* edges */}
         <svg

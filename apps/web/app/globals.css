@@ -10,7 +10,7 @@
 
 @theme {
   /* ---- Surfaces ---- */
-  --color-bg: #f8f8fb;            /* app canvas (near-white, faint lavender) */
+  --color-bg: #ffffff;            /* app canvas (pure white) */
   --color-surface: #ffffff;       /* cards / panels */
   --color-surface-2: #f3f3f8;     /* elevated / hover */
   --color-surface-3: #e9e9f2;     /* active / popovers */
@@ -27,10 +27,10 @@
   --color-ghost: #b6bac8;         /* faint dividers / placeholders */
 
   /* ---- Accent (Relevance indigo-purple) ---- */
-  --color-accent: #4f39e6;
-  --color-accent-soft: #6f5cf5;
+  --color-accent: #5e4ff2;
+  --color-accent-soft: #7d70ff;
   --color-accent-fg: #ffffff;
-  --color-accent-bg: rgba(79, 57, 230, 0.1);
+  --color-accent-bg: rgba(94, 79, 242, 0.1);
 
   /* ---- Functional status (contrast-tuned for white) ---- */
   --color-success: #15a34a;
@@ -80,20 +80,8 @@
     letter-spacing: -0.011em;
   }
 
-  /* Ambient top-of-page wash — barely-there indigo depth on white. */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background:
-      radial-gradient(900px 480px at 80% -10%, rgba(79, 57, 230, 0.07), transparent 60%),
-      radial-gradient(720px 420px at 6% -12%, rgba(37, 99, 235, 0.05), transparent 55%);
-  }
-
   ::selection {
-    background: rgba(79, 57, 230, 0.18);
+    background: rgba(94, 79, 242, 0.18);
     color: #0b0e1a;
   }
 
@@ -145,7 +133,7 @@
   }
 
   .text-gradient-accent {
-    background: linear-gradient(110deg, #6f5cf5 0%, #4f39e6 60%, #3a2ad6 110%);
+    background: linear-gradient(110deg, #7d70ff 0%, #5e4ff2 60%, #4636dd 110%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -162,24 +150,27 @@
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
-  /* Soft elevated card shadow tuned for light UI */
+  /* Soft elevated card shadow tuned for light UI — layered for real depth */
   .shadow-card {
     box-shadow:
-      0 1px 2px rgba(16, 18, 40, 0.04),
-      0 6px 18px -10px rgba(16, 18, 40, 0.16);
+      0 1px 1px rgba(16, 18, 40, 0.04),
+      0 2px 4px -1px rgba(16, 18, 40, 0.06),
+      0 6px 12px -2px rgba(16, 18, 40, 0.08),
+      0 16px 32px -12px rgba(16, 18, 40, 0.12);
   }
 
   .shadow-pop {
     box-shadow:
       0 0 0 1px var(--color-border),
-      0 18px 48px -14px rgba(16, 18, 40, 0.24);
+      0 4px 12px -2px rgba(16, 18, 40, 0.1),
+      0 24px 56px -16px rgba(16, 18, 40, 0.3);
   }
 
   /* Accent glow for primary CTAs */
   .glow-accent {
     box-shadow:
-      0 1px 2px rgba(79, 57, 230, 0.28),
-      0 10px 26px -8px rgba(79, 57, 230, 0.5);
+      0 1px 2px rgba(94, 79, 242, 0.28),
+      0 10px 26px -8px rgba(94, 79, 242, 0.5);
   }
 
   .animate-in {
@@ -267,3 +258,106 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ------------------------------------------------------------------ *
+   DARK MODE
+   Activated by `.dark` on <html>. Overrides the design tokens (so every
+   bg-surface / text-fg / border-border / accent / status utility flips
+   automatically) plus the handful of mode-specific effect utilities and
+   raw palette shades used by the log viewer & agent glyphs.
+ * ------------------------------------------------------------------ */
+:root.dark {
+  color-scheme: dark;
+
+  --color-bg: #0a0b0f;
+  --color-surface: #14161c;
+  --color-surface-2: #1c1f27;
+  --color-surface-3: #262a34;
+  --color-inset: #0b0d13;
+
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+
+  --color-fg: #edeef1;
+  --color-muted: #9ba1ad;
+  --color-faint: #6b717e;
+  --color-ghost: #444a55;
+
+  --color-accent: #7d70ff;
+  --color-accent-soft: #9b90ff;
+  --color-accent-fg: #ffffff;
+  --color-accent-bg: rgba(125, 112, 255, 0.16);
+
+  --color-success: #3ad07a;
+  --color-success-bg: rgba(58, 208, 122, 0.13);
+  --color-running: #3b9eff;
+  --color-running-bg: rgba(59, 158, 255, 0.13);
+  --color-warn: #f2b84b;
+  --color-warn-bg: rgba(242, 184, 75, 0.13);
+  --color-danger: #ff6172;
+  --color-danger-bg: rgba(255, 97, 114, 0.13);
+  --color-neutral: #7b818d;
+  --color-neutral-bg: rgba(255, 255, 255, 0.08);
+}
+
+:root.dark ::selection {
+  background: rgba(155, 144, 255, 0.32);
+  color: #fff;
+}
+
+:root.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  background-clip: padding-box;
+}
+:root.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: padding-box;
+}
+
+.dark .bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+.dark .bg-dots {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
+
+.dark .text-gradient {
+  background: linear-gradient(180deg, #fff 0%, #b9bcc6 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dark .shadow-card {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+.dark .shadow-pop {
+  box-shadow:
+    0 0 0 1px var(--color-border-strong),
+    0 24px 56px -16px rgba(0, 0, 0, 0.72);
+}
+.dark .glow-accent {
+  box-shadow:
+    0 0 0 1px rgba(125, 112, 255, 0.5),
+    0 10px 30px -6px rgba(125, 112, 255, 0.55);
+}
+
+/* Lift the raw palette shades used by the log viewer + glyphs so they read on
+   dark surfaces (they were tuned at -600 for white backgrounds). */
+.dark .text-slate-400 { color: #828a99; }
+.dark .text-slate-500 { color: #98a0af; }
+.dark .text-slate-600 { color: #aab2c0; }
+.dark .text-blue-600 { color: #7ba6ff; }
+.dark .text-sky-600 { color: #6fc1ff; }
+.dark .text-emerald-600 { color: #57d695; }
+.dark .text-fuchsia-600 { color: #e784ec; }
+.dark .text-amber-600 { color: #f1c356; }
+.dark .text-red-600 { color: #ff8088; }
+.dark .text-rose-600 { color: #ff8aa3; }
+.dark .text-teal-600 { color: #56d6c2; }
+.dark .text-violet-600 { color: #a89dff; }
