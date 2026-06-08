@@ -19,7 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
-import { notifications as seed } from "@/lib/mock-data";
+import { fetchNotifications } from "@/lib/api";
 import type { AppNotification, NotificationType } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -35,8 +35,19 @@ const TYPE_META: Record<NotificationType, { icon: typeof CheckCircle2; tone: str
 type Filter = "all" | "unread" | "failures" | "cost" | "browser";
 
 export default function NotificationsPage() {
-  const [items, setItems] = React.useState<AppNotification[]>(seed);
+  const [items, setItems] = React.useState<AppNotification[]>([]);
   const [filter, setFilter] = React.useState<Filter>("all");
+
+  React.useEffect(() => {
+    let active = true;
+    const load = () => fetchNotifications().then((n) => active && setItems(n)).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, []);
 
   const unread = items.filter((n) => !n.read).length;
 

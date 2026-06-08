@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Kbd } from "@/components/ui/kbd";
-import { workflows } from "@/lib/mock-data";
+import { fetchWorkflows } from "@/lib/api";
+import type { Workflow as WorkflowModel } from "@/lib/types";
 
 interface Item {
   id: string;
@@ -47,6 +48,16 @@ export function CommandPalette({
   const router = useRouter();
   const [q, setQ] = React.useState("");
   const [active, setActive] = React.useState(0);
+  const [workflows, setWorkflows] = React.useState<WorkflowModel[]>([]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let live = true;
+    fetchWorkflows().then((w) => live && setWorkflows(w)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   const items: Item[] = React.useMemo(() => {
     const wf: Item[] = workflows.map((w) => ({
@@ -61,7 +72,7 @@ export function CommandPalette({
     if (!q) return all;
     const needle = q.toLowerCase();
     return all.filter((i) => i.label.toLowerCase().includes(needle));
-  }, [q]);
+  }, [q, workflows]);
 
   React.useEffect(() => setActive(0), [q]);
 

@@ -10,6 +10,7 @@ import (
 	"github.com/agently/worker/internal/browser"
 	"github.com/agently/worker/internal/llm"
 	"github.com/agently/worker/internal/queue"
+	"github.com/agently/worker/internal/sources"
 )
 
 // dag.go executes a run's AGENT GRAPH (the run_agents DAG) instead of a fixed
@@ -84,7 +85,7 @@ func (s *dagState) snapshot() (done, failed map[string]bool, outputs map[string]
 // concurrently. Returns true iff every agent succeeded. Resume-safe: agents
 // already 'succeeded' from a prior attempt are skipped and their summaries remain
 // available to downstream agents.
-func (rt *Runtime) RunDAG(ctx context.Context, runID string, agents []queue.GraphAgent) bool {
+func (rt *Runtime) RunDAG(ctx context.Context, runID string, agents []queue.GraphAgent, input map[string]any) bool {
 	start := time.Now()
 	firstSeq, err := rt.q.NextLogSeq(ctx, runID)
 	if err != nil {
@@ -146,7 +147,7 @@ func (rt *Runtime) RunDAG(ctx context.Context, runID string, agents []queue.Grap
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				ok, summary := rt.runAgent(ctx, runID, ag, byID, st, start)
+				ok, summary := rt.runAgent(ctx, runID, ag, byID, st, start, input)
 				if ok {
 					st.markDone(ag.ID, summary)
 				} else if ctx.Err() == nil {
@@ -178,7 +179,7 @@ func (rt *Runtime) RunDAG(ctx context.Context, runID string, agents []queue.Grap
 
 // runAgent executes a single agent node. Returns (ok, summary). All log emission
 // goes through st.nextSeq so concurrent agents never collide on seq.
-func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAgent, byID map[string]queue.GraphAgent, st *dagState, start time.Time) (bool, string) {
+func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAgent, byID map[string]queue.GraphAgent, st *dagState, start time.Time, input map[string]any) (bool, string) {
 	agentStart := time.Now()
 
 	if err := rt.q.SetAgentStatus(ctx, runID, rt.workerID, ag.ID, "running"); err != nil {
@@ -196,16 +197,25 @@ func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAge
 		}
 	}
 
-	// Browser-role agents actually drive a browser session first; the observations
-	// feed into the prompt so the LLM reasons over what was "seen".
+	// Fetcher agents pull REAL content from public APIs (arXiv/HN/Reddit/web) and
+	// feed it into the prompt, so the LLM summarizes real data, not its imagination.
+	var fetched string
+	if items := rt.fetchForAgent(ctx, runID, ag, st, start, input); items != "" {
+		fetched = items
+	}
+
+	// Browser-role agents may also drive a browser session (for JS-heavy/auth sites).
 	var browserNotes string
-	if ag.Role == "browser" && rt.browser != nil {
+	if ag.Role == "browser" && rt.browser != nil && rt.browser.Name() != "simulated" {
 		browserNotes = rt.runBrowser(ctx, runID, ag, st, start)
 	}
 
 	// Read upstream outputs (snapshot) to build a context-aware prompt.
 	_, _, outputs := st.snapshot()
 	prompt := buildAgentPrompt(ag, byID, outputs)
+	if fetched != "" {
+		prompt += "\n\nReal fetched content (summarize the most important items):\n" + fetched
+	}
 	if browserNotes != "" {
 		prompt += "\n\nBrowser observations:\n" + browserNotes
 	}
@@ -226,8 +236,7 @@ func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAge
 	_ = rt.q.AddUsage(ctx, runID, rt.workerID, res.TokensIn, res.TokensOut, cost)
 
 	runtimeMs := int(time.Since(agentStart).Milliseconds())
-	summary := summarize(res.Text)
-	_ = rt.q.SetAgentResult(ctx, ag.ID, summary, res.TokensIn+res.TokensOut, cost, 1.0, 1, runtimeMs)
+	_ = rt.q.SetAgentResult(ctx, ag.ID, summarize(res.Text), res.TokensIn+res.TokensOut, cost, 1.0, 1, runtimeMs)
 	if err := rt.q.SetAgentStatus(ctx, runID, rt.workerID, ag.ID, "succeeded"); err != nil {
 		if err == queue.ErrLeaseLost {
 			return false, ""
@@ -235,7 +244,9 @@ func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAge
 	}
 	rt.emitSeq(ctx, runID, st, start, "success", "agent", ag.Name,
 		fmt.Sprintf("%s succeeded", ag.Name), false, nil)
-	return true, summary
+	// Return the FULL text (not the truncated summary): it feeds downstream prompts
+	// and becomes the digest artifact / email body. The per-agent DB summary stays short.
+	return true, res.Text
 }
 
 // emitSeq appends one log line, allocating its seq atomically from st. Used by all
@@ -282,6 +293,104 @@ func (rt *Runtime) runBrowser(ctx context.Context, runID string, ag queue.GraphA
 	_ = sess.Close(ctx, ok)
 	rt.emitSeq(ctx, runID, st, start, "success", "browser", ag.Name, "browser session closed", false, nil)
 	return notes.String()
+}
+
+// fetchForAgent pulls real content for a fetcher agent based on its name and the
+// run's input. Returns a formatted text block of items (empty if this agent isn't
+// a fetcher or the fetch failed — non-fatal, the agent proceeds with what it has).
+func (rt *Runtime) fetchForAgent(ctx context.Context, runID string, ag queue.GraphAgent, st *dagState, start time.Time, input map[string]any) string {
+	topic := inputString(input, "topic", "AI")
+	name := strings.ToLower(ag.Name)
+
+	var items []sources.Item
+	var err error
+	switch {
+	case strings.Contains(name, "arxiv"):
+		items, err = sources.ArXiv(ctx, inputString(input, "arxivQuery", "cat:cs.AI OR cat:cs.LG OR cat:cs.CL"), 8)
+	case strings.Contains(name, "hn") || strings.Contains(name, "hacker"):
+		items, err = sources.HackerNews(ctx, topic, 10)
+	case strings.Contains(name, "reddit"):
+		items, err = fetchReddit(ctx, input)
+	case strings.Contains(name, "web"):
+		items, err = fetchWebList(ctx, input)
+	default:
+		return "" // not a fetcher agent
+	}
+
+	if err != nil {
+		rt.emitSeq(ctx, runID, st, start, "warn", "tool", ag.Name,
+			fmt.Sprintf("fetch failed: %v", err), false, nil)
+		return ""
+	}
+	if len(items) == 0 {
+		rt.emitSeq(ctx, runID, st, start, "info", "tool", ag.Name, "no items fetched", false, nil)
+		return ""
+	}
+	rt.emitSeq(ctx, runID, st, start, "success", "tool", ag.Name,
+		fmt.Sprintf("fetched %d items from %s", len(items), items[0].Source), false, nil)
+
+	var b strings.Builder
+	for _, it := range items {
+		fmt.Fprintf(&b, "- [%s] %s (%s)\n  %s\n", it.Source, it.Title, it.URL, it.Summary)
+	}
+	return b.String()
+}
+
+func fetchReddit(ctx context.Context, input map[string]any) ([]sources.Item, error) {
+	subs := inputStrings(input, "subreddits", []string{"MachineLearning", "artificial"})
+	var all []sources.Item
+	for _, s := range subs {
+		items, err := sources.Reddit(ctx, s, 6)
+		if err != nil {
+			continue // skip a failing subreddit, keep the rest
+		}
+		all = append(all, items...)
+	}
+	return all, nil
+}
+
+func fetchWebList(ctx context.Context, input map[string]any) ([]sources.Item, error) {
+	urls := inputStrings(input, "urls", nil)
+	var all []sources.Item
+	for _, u := range urls {
+		it, err := sources.Web(ctx, u)
+		if err != nil {
+			continue
+		}
+		all = append(all, it)
+	}
+	return all, nil
+}
+
+// inputString reads a string from the run input, with a default.
+func inputString(input map[string]any, key, def string) string {
+	if input != nil {
+		if v, ok := input[key].(string); ok && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return def
+}
+
+// inputStrings reads a []string from the run input (JSON array), with a default.
+func inputStrings(input map[string]any, key string, def []string) []string {
+	if input == nil {
+		return def
+	}
+	raw, ok := input[key].([]any)
+	if !ok {
+		return def
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return def
+	}
+	return out
 }
 
 // readyAgents returns not-done/not-failed agents whose every dependency is done.

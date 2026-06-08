@@ -113,7 +113,7 @@ func (r *Runner) execute(ctx context.Context, c queue.Claimed) {
 	var ok bool
 	var stepsReached int
 	if len(graph) > 0 {
-		ok = rt.RunDAG(runCtx, c.ID, graph)
+		ok = rt.RunDAG(runCtx, c.ID, graph, c.Input)
 		stepsReached = c.StepsTotal // progress is tracked per-agent; mark the bar full on success
 	} else {
 		plan := agent.BuildPlan(c.WorkflowName, c.Number)
@@ -168,9 +168,15 @@ func (r *Runner) notify(ctx context.Context, c queue.Claimed, status string) {
 		r.log.Error("notify: create in-app notification", "runId", c.ID, "error", err.Error())
 	}
 	if r.notifier != nil {
+		// Include the produced digest in the external payload + email body, and honor
+		// a per-run recipient (run.input.email). This is the "email me the result".
+		digest := ""
+		if status == "succeeded" {
+			digest = r.q.LoadDigest(ctx, c.ID)
+		}
 		r.notifier.Notify(ctx, notifier.Event{
 			RunID: c.ID, WorkflowName: meta.WorkflowName, WorkflowSlug: meta.WorkflowSlug,
-			Number: meta.Number, Status: status,
+			Number: meta.Number, Status: status, Digest: digest, To: meta.Email,
 			URL: fmt.Sprintf("%s/runs/%s", r.cfg.AppBaseURL, c.ID),
 		})
 	}

@@ -11,35 +11,36 @@ func newTestPlatform() *Platform {
 	return NewPlatform(Options{})
 }
 
-func TestSeedRunDetail(t *testing.T) {
+func TestSeedWorkflow(t *testing.T) {
 	p := newTestPlatform()
-	detail, err := p.Runs.Get("run_8842")
-	if err != nil {
-		t.Fatalf("get run_8842: %v", err)
+	// The bootstrap seeds the AI Digest workflow and NO runs (system starts empty).
+	wf, ok := p.Repos.Workflows.GetBySlug("ai-digest")
+	if !ok {
+		t.Fatal("expected ai-digest workflow to be seeded")
 	}
-	if detail.Number != 142 || detail.Status != domain.RunRunning {
-		t.Fatalf("unexpected run: number=%d status=%s", detail.Number, detail.Status)
+	if wf.AgentCount != 5 {
+		t.Fatalf("expected 5 agents in AI Digest, got %d", wf.AgentCount)
 	}
-	if len(detail.Agents) != 7 || len(detail.Messages) != 8 || len(detail.Artifacts) != 6 {
-		t.Fatalf("unexpected children: agents=%d messages=%d artifacts=%d", len(detail.Agents), len(detail.Messages), len(detail.Artifacts))
+	if runs := p.Repos.Runs.All(); len(runs) != 0 {
+		t.Fatalf("expected no seeded runs, got %d", len(runs))
 	}
 }
 
 func TestLaunchThenCancel(t *testing.T) {
 	p := newTestPlatform()
-	detail, err := p.Runs.Launch("competitive-intelligence-sweep", validate.LaunchRunInput{Trigger: domain.TriggerManual})
+	detail, err := p.Runs.Launch("ai-digest", validate.LaunchRunInput{Trigger: domain.TriggerManual})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	// Launch enqueues; a worker claims it later. (Pre-worker this was RunRunning.)
+	// Launch enqueues; a worker claims it later.
 	if detail.Status != domain.RunQueued {
 		t.Fatalf("expected queued, got %s", detail.Status)
 	}
-	if detail.Number != 143 {
-		t.Fatalf("expected run number 143, got %d", detail.Number)
+	if detail.Number != 1 {
+		t.Fatalf("expected first run number 1, got %d", detail.Number)
 	}
-	if len(detail.Agents) != 7 {
-		t.Fatalf("expected 7 materialized agents, got %d", len(detail.Agents))
+	if len(detail.Agents) != 5 {
+		t.Fatalf("expected 5 materialized agents, got %d", len(detail.Agents))
 	}
 	canceled, err := p.Runs.Cancel(detail.ID)
 	if err != nil {
@@ -63,7 +64,7 @@ func TestLaunchUnknownWorkflow(t *testing.T) {
 
 func TestEmittedEventsBuffered(t *testing.T) {
 	p := newTestPlatform()
-	_, _ = p.Runs.Launch("inbox-triage-autopilot", validate.LaunchRunInput{Trigger: domain.TriggerManual})
+	_, _ = p.Runs.Launch("ai-digest", validate.LaunchRunInput{Trigger: domain.TriggerManual})
 	events := p.Bus.ReplayAfter("")
 	var queued, started, logged int
 	for _, e := range events {

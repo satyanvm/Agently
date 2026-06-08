@@ -147,16 +147,21 @@ func (m *mock) Complete(ctx context.Context, system string, msgs []Message) (Res
 	if len(msgs) > 0 {
 		last = msgs[len(msgs)-1].Content
 	}
-	text := fmt.Sprintf(
-		"Based on the objective, here is my analysis.\n\n"+
-			"Task: %s\n\n"+
-			"I considered the available information and reached a structured conclusion. "+
-			"Key points:\n"+
-			"  1. The objective is well-scoped and actionable.\n"+
-			"  2. The relevant factors were weighed against each other.\n"+
-			"  3. A concrete recommendation follows from the analysis.\n\n"+
-			"Recommendation: proceed with the plan as outlined.",
-		truncate(strings.TrimSpace(last), 160))
+	// If the prompt carries real fetched content (the fetcher/editor agents append
+	// it under these markers), echo the actual items back so the mock digest
+	// reflects REAL data — not just boilerplate. This proves content flows through
+	// even without an LLM key; a real model would synthesize rather than echo.
+	var text string
+	if bullets := extractBullets(last); bullets != "" {
+		text = "Here is a structured digest of the fetched items:\n\n" + bullets +
+			"\nThese are the most notable items; full synthesis requires a live LLM key."
+	} else {
+		text = fmt.Sprintf(
+			"Based on the objective, here is my analysis.\n\nTask: %s\n\n"+
+				"I considered the available information and reached a structured conclusion.\n"+
+				"Recommendation: proceed with the plan as outlined.",
+			truncate(strings.TrimSpace(last), 160))
+	}
 	in := (len(system) + len(last)) / 4
 	out := len(text) / 4
 	return Result{Text: text, TokensIn: in, TokensOut: out, Model: "mock"}, nil
@@ -169,6 +174,22 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// extractBullets pulls the "- ..." lines (fetched items / upstream summaries) out
+// of a prompt, returning up to ~12 of them. Lets the mock reflect real content.
+func extractBullets(prompt string) string {
+	var out []string
+	for _, line := range strings.Split(prompt, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "• ") {
+			out = append(out, t)
+			if len(out) >= 12 {
+				break
+			}
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // EstimateCostUSD is a rough blended price so the product's cost number is

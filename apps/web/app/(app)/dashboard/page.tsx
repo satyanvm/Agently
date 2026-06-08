@@ -1,3 +1,6 @@
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -19,15 +22,37 @@ import { Sparkline, BarChart } from "@/components/ui/sparkline";
 import { ActiveRunCard, RunRow } from "@/components/run-row";
 import { WorkflowHealthRow } from "@/components/workflow-row";
 import { LivePill } from "@/components/live";
-import {
-  runs,
-  workflows,
-  dashboardStats as s,
-  activity,
-} from "@/lib/mock-data";
+import { fetchRuns, fetchWorkflows, fetchDashboard, fetchActivity, type DashboardStats } from "@/lib/api";
+import type { WorkflowRun, Workflow, ActivityItem } from "@/lib/types";
 import { formatCompact, formatCost, timeAgo } from "@/lib/utils";
 
+const EMPTY_STATS: DashboardStats = {
+  activeRuns: 0, runsToday: 0, successRate: 0, spendTodayUsd: 0, spendBudgetUsd: 100,
+  computeHours: 0, tokensToday: 0, runVolume: [], spendSeries: [],
+};
+
 export default function DashboardPage() {
+  const [runs, setRuns] = React.useState<WorkflowRun[]>([]);
+  const [workflows, setWorkflows] = React.useState<Workflow[]>([]);
+  const [s, setStats] = React.useState<DashboardStats>(EMPTY_STATS);
+  const [activity, setActivity] = React.useState<ActivityItem[]>([]);
+
+  React.useEffect(() => {
+    let on = true;
+    const load = () => {
+      fetchRuns().then((r) => on && setRuns(r)).catch(() => {});
+      fetchWorkflows().then((w) => on && setWorkflows(w)).catch(() => {});
+      fetchDashboard().then((d) => on && setStats(d)).catch(() => {});
+      fetchActivity().then((a) => on && setActivity(a)).catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 3000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, []);
+
   const active = runs.filter((r) => r.status === "running");
   const recent = runs.filter((r) => r.status !== "running" && r.status !== "queued").slice(0, 5);
 
@@ -67,8 +92,8 @@ export default function DashboardPage() {
           <Stat
             label="Spend today"
             icon={<CircleDollarSign className="size-3.5 text-warn" />}
-            value={formatCost(s.spendToday)}
-            sub={`of $${s.spendBudget} budget`}
+            value={formatCost(s.spendTodayUsd)}
+            sub={`of $${s.spendBudgetUsd} budget`}
             visual={<Sparkline data={s.spendSeries} width={90} height={36} stroke="var(--color-warn)" />}
           />
         </div>

@@ -161,6 +161,7 @@ type Run struct {
 	Number            int                `json:"number"`
 	Status            RunStatus          `json:"status"`
 	Trigger           TriggerType        `json:"trigger"`
+	Input             map[string]any     `json:"input"`
 	TriggeredBy       Principal          `json:"triggeredBy"`
 	Region            string             `json:"region"`
 	Steps             StepProgress       `json:"steps"`

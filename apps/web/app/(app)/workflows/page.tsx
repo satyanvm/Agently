@@ -8,20 +8,29 @@ import { Segmented } from "@/components/ui/segmented";
 import { SearchInput } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WorkflowCard } from "@/components/workflow-row";
-import { workflows } from "@/lib/mock-data";
-import type { RunStatus } from "@/lib/types";
+import { fetchWorkflows } from "@/lib/api";
+import type { RunStatus, Workflow } from "@/lib/types";
 
 type Filter = "all" | "running" | "succeeded" | "failed" | "paused";
 
 export default function WorkflowsPage() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [q, setQ] = React.useState("");
+  const [workflows, setWorkflows] = React.useState<Workflow[]>([]);
+
+  React.useEffect(() => {
+    let active = true;
+    fetchWorkflows().then((w) => active && setWorkflows(w)).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const counts = React.useMemo(() => {
     const c: Record<string, number> = { all: workflows.length };
     for (const w of workflows) c[w.status] = (c[w.status] ?? 0) + 1;
     return c;
-  }, []);
+  }, [workflows]);
 
   const list = workflows.filter((w) => {
     const okStatus = filter === "all" || w.status === (filter as RunStatus);

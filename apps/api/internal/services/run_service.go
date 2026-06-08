@@ -96,7 +96,7 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	run := domain.Run{
 		ID: runID, WorkspaceID: wf.WorkspaceID, WorkflowID: wf.ID, WorkflowVersionID: wf.CurrentVersionID,
 		WorkflowName: wf.Name, WorkflowSlug: wf.Slug, Number: s.deps.Repos.Runs.NextNumber(wf.ID),
-		Status: domain.RunQueued, Trigger: input.Trigger, TriggeredBy: triggeredBy, Region: region,
+		Status: domain.RunQueued, Trigger: input.Trigger, Input: input.Input, TriggeredBy: triggeredBy, Region: region,
 		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: "Queued",
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
 		QueuedAt: now, StartedAt: nil, FinishedAt: nil,

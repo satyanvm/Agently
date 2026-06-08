@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 // browserbase.go is the managed-browser provider. It creates a real hosted
@@ -46,14 +49,23 @@ func (p *browserbaseProvider) Open(ctx context.Context, runID, agentName string,
 	_ = persist.RecordConsole(ctx, dbID, "info",
 		fmt.Sprintf("browserbase session %s started (live view available)", bbSession.ID))
 
-	return &browserbaseSession{
-		dbID:      dbID,
-		bbID:      bbSession.ID,
-		connectWS: bbSession.ConnectURL,
-		liveView:  liveView,
-		persist:   persist,
-		provider:  p,
-	}, nil
+	// Connect chromedp to the remote Chromium over Browserbase's CDP WebSocket.
+	// allocCtx/browserCtx are torn down in Close(). If the connection can't be
+	// established we still return a session (actions degrade to logging).
+	sess := &browserbaseSession{
+		dbID:     dbID,
+		bbID:     bbSession.ID,
+		liveView: liveView,
+		persist:  persist,
+		provider: p,
+	}
+	if bbSession.ConnectURL != "" {
+		allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), bbSession.ConnectURL)
+		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+		sess.cdp = browserCtx
+		sess.cancel = func() { cancelBrowser(); cancelAlloc() }
+	}
+	return sess, nil
 }
 
 type bbSession struct {
@@ -107,30 +119,70 @@ func (p *browserbaseProvider) liveViewURL(ctx context.Context, sessionID string)
 }
 
 type browserbaseSession struct {
-	dbID      string
-	bbID      string
-	connectWS string
-	liveView  string
-	persist   Persister
-	provider  *browserbaseProvider
+	dbID     string
+	bbID     string
+	liveView string
+	persist  Persister
+	provider *browserbaseProvider
+	cdp      context.Context // chromedp browser context (nil if connect failed)
+	cancel   func()          // tears down the chromedp contexts
 }
 
-func (s *browserbaseSession) ID() string          { return s.dbID }
-func (s *browserbaseSession) LiveViewURL() string  { return s.liveView }
+func (s *browserbaseSession) ID() string         { return s.dbID }
+func (s *browserbaseSession) LiveViewURL() string { return s.liveView }
 
-// Do records the requested action. Driving the remote page (navigate/click/etc.)
-// happens over the Playwright/CDP WebSocket at s.connectWS; that driver is the
-// follow-up. For now the session lifecycle + action logging are wired, which is
-// what surfaces in the UI and proves the integration shape.
+// Do drives the REAL remote browser over CDP. navigate loads the page and reads
+// its title; extract pulls visible text from the body (or a selector). Everything
+// is recorded to the DB. If CDP isn't connected, actions degrade to logging.
 func (s *browserbaseSession) Do(ctx context.Context, a Action) (Result, error) {
+	start := time.Now()
 	switch a.Type {
 	case "navigate":
-		title := titleFor(a.Target)
-		if err := s.persist.Navigate(ctx, s.dbID, a.Target, title, 0); err != nil {
-			return Result{}, err
+		if s.cdp == nil {
+			title := titleFor(a.Target)
+			_ = s.persist.Navigate(ctx, s.dbID, a.Target, title, 0)
+			return Result{OK: true, URL: a.Target, Title: title}, nil
 		}
+		var title string
+		actCtx, cancel := context.WithTimeout(s.cdp, 30*time.Second)
+		defer cancel()
+		err := chromedp.Run(actCtx,
+			chromedp.Navigate(a.Target),
+			chromedp.Title(&title),
+		)
+		dur := int(time.Since(start).Milliseconds())
+		if err != nil {
+			_ = s.persist.RecordAction(ctx, s.dbID, "navigate", a.Target, "", "error", dur)
+			return Result{}, fmt.Errorf("navigate: %w", err)
+		}
+		_ = s.persist.Navigate(ctx, s.dbID, a.Target, title, dur)
 		_ = s.persist.RecordShot(ctx, s.dbID, a.Target, title, "Loaded "+title, "")
-		return Result{OK: true, URL: a.Target, Title: title}, nil
+		return Result{OK: true, URL: a.Target, Title: title, Duration: dur}, nil
+
+	case "extract":
+		if s.cdp == nil {
+			_ = s.persist.RecordAction(ctx, s.dbID, "extract", a.Target, "", "ok", 0)
+			return Result{OK: true}, nil
+		}
+		sel := a.Target
+		if strings.TrimSpace(sel) == "" {
+			sel = "body"
+		}
+		var text string
+		actCtx, cancel := context.WithTimeout(s.cdp, 20*time.Second)
+		defer cancel()
+		err := chromedp.Run(actCtx, chromedp.Text(sel, &text, chromedp.NodeVisible, chromedp.ByQuery))
+		dur := int(time.Since(start).Milliseconds())
+		if err != nil {
+			_ = s.persist.RecordAction(ctx, s.dbID, "extract", sel, "", "error", dur)
+			return Result{}, fmt.Errorf("extract: %w", err)
+		}
+		if len(text) > 1200 {
+			text = text[:1200] + "…"
+		}
+		_ = s.persist.RecordAction(ctx, s.dbID, "extract", sel, "", "ok", dur)
+		return Result{OK: true, Output: text, Duration: dur}, nil
+
 	default:
 		_ = s.persist.RecordAction(ctx, s.dbID, a.Type, a.Target, a.Value, "ok", 0)
 		return Result{OK: true}, nil
@@ -138,7 +190,9 @@ func (s *browserbaseSession) Do(ctx context.Context, a Action) (Result, error) {
 }
 
 func (s *browserbaseSession) Close(ctx context.Context, ok bool) error {
-	// Best-effort: release the remote session, then mark the DB row terminal.
+	if s.cancel != nil {
+		s.cancel() // close the chromedp connection to the remote browser
+	}
 	_ = s.provider.releaseSession(ctx, s.bbID)
 	status := "succeeded"
 	if !ok {
