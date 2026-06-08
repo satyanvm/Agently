@@ -90,13 +90,16 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 		total = 1
 	}
 
+	// Created as QUEUED: the control plane (this API) only enqueues; the data
+	// plane (worker) claims it via claim_next_run() and drives execution. The old
+	// flow marked it RUNNING here because there was no worker — that's now wrong.
 	run := domain.Run{
 		ID: runID, WorkspaceID: wf.WorkspaceID, WorkflowID: wf.ID, WorkflowVersionID: wf.CurrentVersionID,
 		WorkflowName: wf.Name, WorkflowSlug: wf.Slug, Number: s.deps.Repos.Runs.NextNumber(wf.ID),
-		Status: domain.RunRunning, Trigger: input.Trigger, TriggeredBy: triggeredBy, Region: region,
-		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: "Provisioning sandbox",
+		Status: domain.RunQueued, Trigger: input.Trigger, TriggeredBy: triggeredBy, Region: region,
+		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: "Queued",
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
-		QueuedAt: now, StartedAt: domain.Ptr(now), FinishedAt: nil,
+		QueuedAt: now, StartedAt: nil, FinishedAt: nil,
 	}
 	s.deps.Repos.Runs.Insert(run)
 
@@ -113,15 +116,12 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	}
 	runAgents := make([]domain.RunAgent, 0, len(nodes))
 	for _, n := range nodes {
-		entry := len(n.DependsOn) == 0
+		// All agents start idle; the worker (data plane) drives their status as it
+		// executes the DAG. (Pre-worker, entry nodes were marked running here — the
+		// same control/data-plane leak we fixed for run status.)
 		status := domain.AgentIdle
 		var startedAt *domain.Timestamp
 		var runtimeMs *int
-		if entry {
-			status = domain.AgentRunning
-			startedAt = domain.Ptr(now)
-			runtimeMs = domain.Ptr(0)
-		}
 		deps := make([]domain.RunAgentId, 0, len(n.DependsOn))
 		for _, k := range n.DependsOn {
 			if id, ok := keyToID[k]; ok {

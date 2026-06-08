@@ -1,12 +1,8 @@
-module github.com/agently/api
+module github.com/agently/worker
 
 go 1.25.0
 
-require (
-	github.com/go-chi/chi/v5 v5.3.0
-	github.com/go-chi/cors v1.2.2
-	github.com/jackc/pgx/v5 v5.10.0
-)
+require github.com/jackc/pgx/v5 v5.10.0
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

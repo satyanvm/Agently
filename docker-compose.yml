@@ -1,0 +1,39 @@
+# Local development infrastructure for Agently.
+#
+#   docker compose up -d        start Postgres in the background
+#   docker compose down         stop it (keeps data in the named volume)
+#   docker compose down -v      stop it AND wipe the data (fresh schema next up)
+#
+# On first boot the mounted *.sql files are applied in filename order by the
+# postgres image's docker-entrypoint-initdb.d hook. That only runs when the data
+# volume is empty, so editing a migration means `down -v` then `up`.
+#
+# We mount ONLY 0001_init and 0003_queue: those are portable Postgres. 0002_rls
+# (auth.uid()) and 0004_realtime (supabase_realtime publication) are Supabase-only
+# and would fail here. Locally the Go API connects as a trusted service (RLS
+# bypassed) and live updates come from the in-process event bus, so neither is
+# needed for development.
+services:
+  postgres:
+    image: postgres:16
+    container_name: agently-postgres
+    environment:
+      POSTGRES_USER: agently
+      POSTGRES_PASSWORD: agently
+      POSTGRES_DB: agently
+    ports:
+      # Host 5433 → container 5432, to avoid clashing with a system Postgres.
+      - "5433:5432"
+    volumes:
+      - agently-pgdata:/var/lib/postgresql/data
+      - ./packages/db/migrations/0001_init.sql:/docker-entrypoint-initdb.d/0001_init.sql:ro
+      - ./packages/db/migrations/0003_queue.sql:/docker-entrypoint-initdb.d/0003_queue.sql:ro
+      - ./packages/db/migrations/0005_worker_claim.sql:/docker-entrypoint-initdb.d/0005_worker_claim.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agently -d agently"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  agently-pgdata:

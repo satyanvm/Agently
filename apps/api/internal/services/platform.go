@@ -3,6 +3,7 @@ package services
 import (
 	"github.com/agently/api/internal/domain"
 	"github.com/agently/api/internal/platform"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Platform assembles repositories, the event bus, services, a clock, and a
@@ -27,12 +28,18 @@ type Platform struct {
 
 // Options configure platform construction. All fields are optional; sensible
 // defaults (system clock, dev logger, in-memory seeded store) are used when nil.
+//
+// Storage selection: if Pool is non-nil, the platform uses Postgres-backed
+// repositories (seeding the DB from the canonical dataset on first boot).
+// Otherwise it falls back to the in-memory store. Explicit Repositories, if set,
+// override both. Tests pass neither and get the in-memory store.
 type Options struct {
 	Clock        platform.Clock
 	Logger       platform.Logger
 	Bus          platform.EventBus
 	Repositories *platform.Repositories
 	Seed         *platform.Seed
+	Pool         *pgxpool.Pool
 }
 
 // NewPlatform wires the platform together.
@@ -57,7 +64,14 @@ func NewPlatform(opts Options) *Platform {
 	}
 	repos := opts.Repositories
 	if repos == nil {
-		repos = platform.NewMemoryRepositories(seed.Data)
+		if opts.Pool != nil {
+			repos = platform.NewPostgresRepositories(opts.Pool, logger)
+			if err := platform.SeedPostgresIfEmpty(repos, opts.Pool, seed.Data, logger); err != nil {
+				logger.Error("postgres seed failed", "error", err.Error())
+			}
+		} else {
+			repos = platform.NewMemoryRepositories(seed.Data)
+		}
 	}
 
 	workspaceID := repos.Workspace.Get().ID

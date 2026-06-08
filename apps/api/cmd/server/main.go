@@ -21,10 +21,28 @@ func main() {
 	pretty := os.Getenv("ENV") != "production"
 	logger := platform.NewLogger(pretty, "svc", "api")
 
-	plat := services.NewPlatform(services.Options{
+	// Storage: if DATABASE_URL is set, use Postgres (durable, survives restarts);
+	// otherwise fall back to the in-memory seeded store (zero-setup dev/test).
+	opts := services.Options{
 		Clock:  platform.SystemClock,
 		Logger: logger,
-	})
+	}
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pool, err := platform.Connect(ctx, dbURL)
+		cancel()
+		if err != nil {
+			logger.Error("could not connect to Postgres", "error", err.Error())
+			os.Exit(1)
+		}
+		defer pool.Close()
+		logger.Info("connected to Postgres", "store", "postgres")
+		opts.Pool = pool
+	} else {
+		logger.Info("no DATABASE_URL set", "store", "in-memory")
+	}
+
+	plat := services.NewPlatform(opts)
 
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {

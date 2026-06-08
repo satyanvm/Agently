@@ -31,8 +31,9 @@ func TestLaunchThenCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if detail.Status != domain.RunRunning {
-		t.Fatalf("expected running, got %s", detail.Status)
+	// Launch enqueues; a worker claims it later. (Pre-worker this was RunRunning.)
+	if detail.Status != domain.RunQueued {
+		t.Fatalf("expected queued, got %s", detail.Status)
 	}
 	if detail.Number != 143 {
 		t.Fatalf("expected run number 143, got %d", detail.Number)
