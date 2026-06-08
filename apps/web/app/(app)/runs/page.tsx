@@ -9,7 +9,8 @@ import { SearchInput } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RunRow } from "@/components/run-row";
-import { runs } from "@/lib/mock-data";
+import { fetchRuns } from "@/lib/api";
+import type { WorkflowRun } from "@/lib/types";
 
 type Filter = "all" | "running" | "succeeded" | "failed" | "canceled";
 
@@ -17,17 +18,52 @@ export default function RunsPage() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [q, setQ] = React.useState("");
 
+  // Live data from the Go API. Polls every 2s so a run created by the worker
+  // appears here and a running run's progress updates without a refresh.
+  const [runs, setRuns] = React.useState<WorkflowRun[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const data = await fetchRuns();
+        if (active) {
+          setRuns(data);
+          setLoaded(true);
+          setError(null);
+        }
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : "Failed to load runs");
+      }
+    };
+    load();
+    const t = setInterval(load, 2000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, []);
+
   const counts = React.useMemo(() => {
     const c: Record<string, number> = { all: runs.length };
     for (const r of runs) c[r.status] = (c[r.status] ?? 0) + 1;
     return c;
-  }, []);
+  }, [runs]);
 
   const list = runs.filter((r) => {
     const okStatus = filter === "all" || r.status === filter;
     const okQ = !q || r.workflowName.toLowerCase().includes(q.toLowerCase()) || `${r.number}`.includes(q);
     return okStatus && okQ;
   });
+
+  const liveBadge = (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">
+      <span className="size-1.5 rounded-full bg-running animate-pulse" />
+      Live · {loaded ? `${runs.length} runs` : "connecting…"}
+    </span>
+  );
 
   return (
     <>
@@ -40,7 +76,16 @@ export default function RunsPage() {
         }
       />
       <PageContainer>
-        <PageTitle title="Runs" subtitle="Every execution across your workspace, newest first." />
+        <PageTitle
+          title="Runs"
+          subtitle="Every execution across your workspace, newest first."
+          actions={liveBadge}
+        />
+        {error && (
+          <div className="mb-4 rounded-md border border-danger/30 bg-danger-bg px-3 py-2 text-[12px] text-danger">
+            {error} — is the API running on :8080?
+          </div>
+        )}
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <Segmented<Filter>
