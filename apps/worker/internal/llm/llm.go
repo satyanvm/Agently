@@ -1,7 +1,8 @@
 // Package llm is the worker's model-calling layer, behind a provider interface so
 // the agent runtime doesn't care which model it talks to. Anthropic when
-// ANTHROPIC_API_KEY is set; a deterministic mock otherwise — so the whole system
-// runs and is testable with no key and no network.
+// ANTHROPIC_API_KEY is set, OpenAI when OPENAI_API_KEY is set; a deterministic
+// mock otherwise — so the whole system runs and is testable with no key and no
+// network.
 //
 // This is the same "interface + swappable implementation" seam as the storage
 // layer. The agent loop depends on Provider; we can add OpenAI, a local model,
@@ -41,8 +42,9 @@ type Provider interface {
 	Name() string
 }
 
-// New picks a provider from the environment: real Anthropic if a key is present,
-// otherwise the mock. Returning the interface keeps callers provider-agnostic.
+// New picks a provider from the environment: real Anthropic or OpenAI if a key is
+// present, otherwise the mock. Anthropic wins if both keys are set. Returning the
+// interface keeps callers provider-agnostic.
 func New() Provider {
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		model := os.Getenv("ANTHROPIC_MODEL")
@@ -50,6 +52,13 @@ func New() Provider {
 			model = "claude-sonnet-4-6"
 		}
 		return &anthropic{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		model := os.Getenv("OPENAI_MODEL")
+		if model == "" {
+			model = "gpt-4o"
+		}
+		return &openai{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}
 	}
 	return &mock{}
 }
@@ -125,6 +134,82 @@ func (a *anthropic) Complete(ctx context.Context, system string, msgs []Message)
 		TokensIn:  parsed.Usage.InputTokens,
 		TokensOut: parsed.Usage.OutputTokens,
 		Model:     a.model,
+	}, nil
+}
+
+/* --------------------------------- OpenAI -------------------------------- */
+
+type openai struct {
+	key   string
+	model string
+	http  *http.Client
+}
+
+func (o *openai) Name() string { return "openai:" + o.model }
+
+// Complete calls the OpenAI Chat Completions API. The Anthropic-style system
+// prompt becomes a leading system message; the rest map 1:1 (roles "user"/
+// "assistant" are shared between the two APIs).
+func (o *openai) Complete(ctx context.Context, system string, msgs []Message) (Result, error) {
+	type apiMsg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	out := make([]apiMsg, 0, len(msgs)+1)
+	if system != "" {
+		out = append(out, apiMsg{Role: "system", Content: system})
+	}
+	for _, m := range msgs {
+		out = append(out, apiMsg{Role: m.Role, Content: m.Content})
+	}
+	body := map[string]any{
+		"model":      o.model,
+		"max_tokens": 1024,
+		"messages":   out,
+	}
+	raw, _ := json.Marshal(body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.openai.com/v1/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return Result{}, err
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("authorization", "Bearer "+o.key)
+
+	resp, err := o.http.Do(req)
+	if err != nil {
+		return Result{}, fmt.Errorf("openai request: %w", err)
+	}
+	defer resp.Body.Close()
+	payload, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return Result{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, truncate(string(payload), 300))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return Result{}, fmt.Errorf("openai decode: %w", err)
+	}
+	var text string
+	if len(parsed.Choices) > 0 {
+		text = parsed.Choices[0].Message.Content
+	}
+	return Result{
+		Text:      text,
+		TokensIn:  parsed.Usage.PromptTokens,
+		TokensOut: parsed.Usage.CompletionTokens,
+		Model:     o.model,
 	}, nil
 }
 
