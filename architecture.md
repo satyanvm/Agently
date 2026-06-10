@@ -435,7 +435,7 @@ with a `started_at` (pre-worker leftover, same control/data-plane leak as run st
   at once (chunk 8 exploits this). Join = a node with many deps waits for all. Block = a node
   whose dep failed. One relation expresses the whole control flow.
 - **Data-flow vs control-flow are separate.** `depends_on` is control-flow (ordering);
-  passing `outputs[dep]` into the prompt is data-flow (what flows along the edge). Keep them
+  passing `outputs[dep]` into the prompt is data-flow (what flows along the edge). Keep them 
   distinct — a dependency might gate timing without passing data, or vice versa.
 - **Sequential first, parallel later — on purpose.** Getting topological *correctness* right
   with one-at-a-time execution means chunk 8's concurrency only has to add a worker pool, not
@@ -667,12 +667,143 @@ DATABASE_URL=postgres://agently:agently@localhost:5433/agently /tmp/agently-work
 
 ---
 
+## 18. Chunk 17 — the front door: a prompt becomes a running agent crew (DONE)
+
+**Why this chunk exists.** Everything before this built a world-class *engine* but no
+*front door*: the "New workflow", "Run now", and "New run" buttons were decorative (no
+`onClick`), and — more deeply — `WorkflowService.Create` produced a workflow with
+`current_version_id = nil` and `agent_count = 0`, i.e. **no graph**, so even a created
+workflow couldn't run. There was no way to go from an idea ("email me AI research every
+morning") to a runnable workflow. This chunk closes that gap: **you type a prompt, we
+compile it into an agent graph, and one click runs it** — the n8n-from-a-sentence flow.
+
+**The end-to-end flow now (trace it):**
+```
+You type a prompt in the New-workflow dialog (apps/web/components/create-workflow-dialog.tsx)
+   │  POST /api/workflows/plan   (debounced live PREVIEW — no save)
+   ▼
+API handler/workflows.go planWorkflow → services.WorkflowService.Plan
+   │
+   ▼
+services/planner.go  CompilePrompt(prompt)               ← the heart of this chunk
+   ├─ deterministicPlan(): keyword/regex parse (always works, no key)
+   └─ overlayLLM(): OpenAI/Anthropic JSON refines it (best-effort; falls back)
+   → returns { name, nodes[], defaultInput{topic,email,subreddits,urls,arxivQuery}, schedule, sources[] }
+   │  (the dialog renders the agents you'll get, live, before you commit)
+   ▼
+You click Create →  POST /api/workflows  →  WorkflowService.Create
+   ├─ insert workflow (current_version_id NULL — the FK-cycle two-pass, see chunk 1)
+   ├─ insert workflow_version (the GRAPH: fetchers col 0 → Editor col 1)
+   ├─ Workflows.Update → link current_version_id + agent_count   ← now RUNNABLE
+   └─ store default_input on the workflow (migration 0007)
+   ▼
+Redirect to /workflows/{slug}; click "Run now" (run-workflow-dialog.tsx)
+   │  POST /api/workflows/{slug}/runs  {input:{topic,email}}
+   ▼
+RunService.Launch merges workflow.default_input UNDER the per-run input → run.input
+   → materializes run_agents from the version graph → status=queued
+   ▼
+Worker claims it → RunDAG executes the graph → fetchers pull REAL data →
+Editor synthesizes → result.md artifact → SMTP email → notification.  (chunks 2–16)
+```
+
+**The compiler (`services/planner.go`) — the one idea to internalize.** A prompt is
+compiled into a graph the *existing* engine already knows how to run. The trick that
+makes this near-zero-code on the engine side: **the worker dispatches a fetcher to its
+source by matching the agent's NAME** (`fetchForAgent` in worker `internal/agent/dag.go`
+keys off "arxiv"/"hn"/"reddit"/"news"/"web"). So the planner's whole job is to emit nodes
+*named* for the sources it detected, plus an Editor that depends on all of them. The graph
+shape is identical to the seeded AI Digest (chunk 12) — we just generate it from a
+sentence instead of hand-writing it in `seed.go`.
+
+- **Hybrid + fail-safe.** `deterministicPlan` (pure regex/keyword) is the floor — it
+  works with no key and no network, and it already nails the common case (detects
+  arxiv/reddit/hn/news, extracts `r/Sub` names, an email, and "every morning" → a
+  schedule). `overlayLLM` then *overlays* a model's richer reading on top (OpenAI/Anthropic
+  via the tiny `services/llm.go`), and **any failure leaves the deterministic plan
+  intact**. This is the same provider-seam discipline as the worker, applied to planning.
+- **Why the LLM client is duplicated in the API.** The worker's `internal/llm` executes
+  *runs*; the API needs a model only to *plan at create time*. Rather than couple the two
+  Go modules, the API has its own ~110-line single-purpose JSON caller (`services/llm.go`).
+  It must never be load-bearing — hence the deterministic fallback.
+
+**`workflows.default_input` (migration 0007) — the template/instance split.** A run's
+own `input` (chunk 6's `0006`) is the *instance*; the workflow's `default_input` is the
+*template* the plan fills in (topic/email/sources/urls). `Launch` does
+`mergeInput(workflow.default_input, run.input)` so a one-click "Run now" inherits the
+plan while an explicit per-run value still wins. This is what lets "every run of THIS
+workflow emails YOU about THESE sources" work without re-typing — and it's where a future
+scheduler reads its parameters from.
+
+**The browser is the universal source (your design call).** Instead of writing a new
+source adapter per site (X, a blog, a docs page), the planner puts arbitrary URLs into
+`default_input.urls`, and the browser-role **Web Fetcher** visits them. Two precise edits
+made this real in worker `internal/agent/dag.go`:
+1. `fetchForAgent` gained a `news` case → `sources.GoogleNews` (a keyless Google News RSS
+   parse — the one genuinely-easy, high-value feed).
+2. `runBrowser` now reads its targets from `input["urls"]` (the prompt's sites) instead of
+   the old hardcoded `example.com`. So "summarize what's new on <site>" drives a real
+   Browserbase session to that site, extracts the text, and feeds it to the agent's prompt.
+   Arbitrary, JS-heavy, or auth-walled sites are the browser's job; clean feeds
+   (arxiv/hn/reddit/news) still use the fast keyless APIs. That's the n8n generality.
+
+**One resilience change worth knowing (worker `internal/llm/llm.go`).** A real provider is
+now wrapped in `withFallback`: if the model returns a *terminal, non-retryable* error
+(401/403/429/quota/rate-limit), the run degrades to the deterministic mock instead of
+failing. The mock **echoes the REAL fetched items** into the digest, so the run still
+produces useful output. Context-cancellation is *not* degraded (a canceled run must stop,
+not fake a result). This is the same graceful-degradation principle the sources and browser
+already follow, now applied to the model — so a dead/over-quota key never kills a run.
+
+**Ops glue.** Both `cmd/server` (API) and `cmd/worker` now `godotenv.Load` the repo-root
+`.env`, so `DATABASE_URL`, the LLM key the planner uses, SMTP creds, and
+`BROWSERBASE_API_KEY` are present without manual exporting (real env vars still win). Root
+`package.json` gained `dev:worker` / `build:worker`. Migration `0007` is mounted in
+`docker-compose.yml` for fresh installs and was applied to the running DB.
+
+**Files to read (in order):**
+- `apps/api/internal/services/planner.go` — `CompilePrompt`, `deterministicPlan`,
+  `overlayLLM`, `buildGraph`. The whole prompt→graph compiler.
+- `apps/api/internal/services/workflow_service.go` — `Create` (two-pass insert + link +
+  store default_input) and `Plan` (the dry-run).
+- `apps/api/internal/services/run_service.go` — `mergeInput` in `Launch`.
+- `apps/worker/internal/agent/dag.go` — the `news` case + `runBrowser` URL change.
+- `apps/web/components/create-workflow-dialog.tsx` — the composer with the live preview.
+- `apps/web/components/run-workflow-dialog.tsx` + `components/ui/dialog.tsx` — launch + the
+  modal primitive (modeled on `command-palette.tsx`, no new dep).
+
+**Verified end-to-end (real):** created `morning-ai-brief` from the prompt *"Every morning
+pull the latest AI research from arXiv and Reddit r/MachineLearning, plus AI news from
+Google News, and email me a digest…"* → a runnable 4-agent workflow persisted
+(`current_version_id` set, `agent_count=4`, `default_input.email` stored). Launched it →
+the worker fetched **8 real arXiv papers + 10 real Google News items**, ran the DAG to
+`succeeded`, produced `result.md` with the real items. Plan/create/list/detail all verified
+through the Next `/api/*` proxy (what the browser uses). **Two known external blockers,
+both user-side, surfaced honestly:** (1) the OpenAI key is over quota (HTTP 429) — the
+`withFallback` mock kept the run succeeding with real data, but real *prose* synthesis needs
+a funded key or a valid `ANTHROPIC_API_KEY`; (2) Gmail SMTP returned `535 BadCredentials`
+because `SMTP_PASS` is an account password — Gmail requires a 16-char **App Password** (2FA
+on → myaccount.google.com/apppasswords). Fix that one value and the digest emails land.
+
+**Deferred (recorded honestly):** scheduling. The prompt's "every morning" is *captured*
+(`schedule` stored, trigger flipped to `schedule`, shown in the UI) but **not executed yet**
+— there is no scheduler daemon. The clean follow-up is a tiny loop (in the worker or a new
+control-plane goroutine) that, each minute, finds `trigger='schedule'` workflows whose
+`schedule` is due and calls the existing `Launch` with `default_input`. All the pieces it
+needs (the stored schedule + default_input + a graph-materializing Launch) now exist; only
+the timer is missing.
+
+---
+
 ## Changelog
 
-- **Chunks 12–16 (DONE)** — real AI Digest product: minimal bootstrap (no demo data) + run
-  input (`0006`); real content sources (arXiv/HN/Reddit/web, `internal/sources`); Browserbase
-  CDP driver (chromedp); real SMTP email with the digest in the body; entire frontend on live
-  API (`mock-data.ts` deleted) with dashboard KPIs computed from real runs. Verified the AI
+- **Chunk 17 (DONE)** — the front door: prompt→workflow compiler (`services/planner.go`,
+  hybrid LLM+deterministic), `Create` now builds+links a runnable graph + stores
+  `default_input` (migration `0007`), `Launch` merges default/per-run input, worker gains a
+  Google News source + browser-visits-prompt-URLs + an LLM `withFallback` (degrade on
+  quota/auth), and the New-workflow / Run-now / New-run buttons are wired to real dialogs
+  (live graph preview). API+worker load `.env`. Verified end-to-end (real arXiv+Google News
+  → succeeded run → digest); email blocked only by a user-side Gmail App-Password.
   Digest end-to-end: fetched 8 arXiv + 10 HN items, emailed a real digest.
 - **Chunk 11 (DONE)** — notifications. On terminal run state, worker writes an in-app
   notification row + fans out to external channels (webhook real, email structured) via a

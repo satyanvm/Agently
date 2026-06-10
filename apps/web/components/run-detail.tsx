@@ -220,7 +220,7 @@ export function RunDetail({
         ))}
       {tab === "artifacts" && (
         run.artifacts.length ? (
-          <ArtifactList artifacts={run.artifacts} />
+          <ArtifactList artifacts={run.artifacts} runId={run.id} />
         ) : (
           <EmptyTab icon={Package} text="No artifacts produced yet." />
         )
@@ -405,7 +405,7 @@ function Overview({
             </button>
           </div>
           <div className="p-3 pt-2">
-            <ArtifactList artifacts={run.artifacts.slice(0, 3)} columns={false} />
+            <ArtifactList artifacts={run.artifacts.slice(0, 3)} columns={false} runId={run.id} />
           </div>
         </Card>
       </div>

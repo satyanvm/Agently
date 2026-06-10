@@ -25,3 +25,5 @@ pnpm-debug.log*
 
 # typescript
 *.tsbuildinfo
+notion.md
+product.md

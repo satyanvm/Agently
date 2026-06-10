@@ -247,6 +247,56 @@ export async function launchRun(slug: string, input?: Record<string, unknown>): 
   return run.id;
 }
 
+/** A node in a compiled workflow graph, as returned by the planner. */
+export interface PlanNode {
+  key: string;
+  name: string;
+  role: string;
+  model: string;
+  col: number;
+  row: number;
+  dependsOn: string[] | null;
+}
+
+/** The planner's output: the graph + default input a prompt compiles into. */
+export interface WorkflowPlan {
+  name: string;
+  description: string;
+  tags: string[];
+  nodes: PlanNode[];
+  defaultInput: Record<string, unknown>;
+  schedule: string | null;
+  sources: string[];
+}
+
+/** Dry-run: compile a prompt into a graph + default input WITHOUT saving (preview). */
+export async function planWorkflow(input: {
+  prompt: string;
+  name?: string;
+  email?: string;
+  schedule?: string;
+}): Promise<WorkflowPlan> {
+  return getJSON<WorkflowPlan>("/api/workflows/plan", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Create a workflow from a prompt (compiles + persists a runnable graph). Returns
+ *  the new workflow's slug so the caller can navigate to it. */
+export async function createWorkflow(input: {
+  prompt: string;
+  name?: string;
+  email?: string;
+  schedule?: string | null;
+}): Promise<{ slug: string; name: string }> {
+  const wf = await getJSON<{ slug: string; name: string }>("/api/workflows", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return { slug: wf.slug, name: wf.name };
+}
+
 /* ---------------------- additional live-data fetchers --------------------- */
 
 import type { Workflow, ActivityItem, AppNotification } from "./types";
@@ -281,6 +331,26 @@ export async function fetchWorkflow(slug: string): Promise<Workflow | null> {
     if (e instanceof Error && e.message.includes("API 404")) return null;
     throw e;
   }
+}
+
+/** The planned agent graph (current version's nodes), independent of any run. Lets
+ *  the UI show a workflow's agents the moment it's created, before it has run. */
+export async function fetchWorkflowGraph(slug: string): Promise<AgentNode[]> {
+  const res = await getJSON<{ nodes: PlanNode[] }>(`/api/workflows/${slug}/graph`);
+  return (res.nodes ?? []).map(
+    (n): AgentNode => ({
+      id: n.key,
+      name: n.name,
+      role: n.role as AgentNode["role"],
+      model: n.model,
+      status: "idle",
+      dependsOn: n.dependsOn ?? [],
+      col: n.col,
+      row: n.row,
+      summary: "",
+      metrics: { tokens: 0, costUsd: 0, runtimeMs: null, toolCalls: 0, progress: 0 },
+    }),
+  );
 }
 
 /** Runs for one workflow (newest first), normalized. */

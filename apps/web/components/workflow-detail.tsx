@@ -25,6 +25,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { AgentGraph, GraphLegend } from "@/components/agent-graph";
 import { AgentGlyph, roleMeta } from "@/components/agent-glyph";
 import { LiveTimer } from "@/components/live";
+import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 import {
   cn,
   formatCost,
@@ -53,6 +54,7 @@ export function WorkflowDetail({
 }) {
   const [selectedId, setSelectedId] = React.useState<string | null>(agents[0]?.id ?? null);
   const selected = agents.find((a) => a.id === selectedId) ?? agents[0];
+  const [runOpen, setRunOpen] = React.useState(false);
 
   return (
     <div className="space-y-6">
@@ -92,11 +94,13 @@ export function WorkflowDetail({
               <Pause className="size-4" /> Pause
             </Button>
           ) : null}
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => setRunOpen(true)}>
             <Play className="size-4" /> Run now
           </Button>
         </div>
       </div>
+
+      <RunWorkflowDialog open={runOpen} onOpenChange={setRunOpen} workflow={wf} />
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-4 lg:grid-cols-5">

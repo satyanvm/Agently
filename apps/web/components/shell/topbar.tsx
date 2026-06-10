@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Search, Bell, Plus, ChevronRight } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
 import { Avatar } from "@/components/ui/avatar";
@@ -94,10 +95,15 @@ export function TopBar({
   );
 }
 
-/** Convenience CTA used in several top bars. */
+/** Convenience CTA used in several top bars. Routes to the workflows list, where
+ *  every workflow's "Run now" launches it (a run always belongs to a workflow). */
 export function NewRunButton() {
+  const router = useRouter();
   return (
-    <button className="flex h-9 items-center gap-2 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent">
+    <button
+      onClick={() => router.push("/workflows")}
+      className="flex h-9 items-center gap-2 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+    >
       <Plus className="size-4" />
       New run
     </button>

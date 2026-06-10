@@ -45,22 +45,61 @@ type Provider interface {
 // New picks a provider from the environment: real Anthropic or OpenAI if a key is
 // present, otherwise the mock. Anthropic wins if both keys are set. Returning the
 // interface keeps callers provider-agnostic.
+//
+// A real provider is wrapped in withFallback: if the model is unreachable for a
+// reason retrying won't fix (quota exhausted, bad key, rate-limited), we degrade to
+// the mock instead of failing the run. The mock echoes the REAL fetched items into
+// the digest, so the run still produces useful output — graceful degradation, the
+// same principle applied to sources and the browser.
 func New() Provider {
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		model := os.Getenv("ANTHROPIC_MODEL")
 		if model == "" {
 			model = "claude-sonnet-4-6"
 		}
-		return &anthropic{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}
+		return &withFallback{primary: &anthropic{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}}
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		model := os.Getenv("OPENAI_MODEL")
 		if model == "" {
 			model = "gpt-4o"
 		}
-		return &openai{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}
+		return &withFallback{primary: &openai{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}}
 	}
 	return &mock{}
+}
+
+// withFallback runs a real provider but degrades to the mock when the provider
+// returns a terminal, non-retryable error (auth/quota/rate). Context cancellation is
+// NOT degraded — a canceled run must stop, not fake a result.
+type withFallback struct {
+	primary Provider
+	fb      mock
+}
+
+func (w *withFallback) Name() string { return w.primary.Name() }
+
+func (w *withFallback) Complete(ctx context.Context, system string, msgs []Message) (Result, error) {
+	res, err := w.primary.Complete(ctx, system, msgs)
+	if err == nil || ctx.Err() != nil {
+		return res, err
+	}
+	if isDegradable(err) {
+		return w.fb.Complete(ctx, system, msgs)
+	}
+	return res, err
+}
+
+// isDegradable reports whether an error means "this model won't work no matter how
+// many times we try" — quota exhausted, invalid/expired key, or rate limited.
+func isDegradable(err error) bool {
+	s := err.Error()
+	for _, marker := range []string{"status 401", "status 403", "status 429", "quota", "rate limit", "invalid_api_key"} {
+		if strings.Contains(strings.ToLower(s), marker) {
+			return true
+		}
+	}
+	return false
 }
 
 /* ------------------------------- Anthropic ------------------------------- */

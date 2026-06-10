@@ -41,6 +41,23 @@ export function AgentGraph({
   className?: string;
 }) {
   const byId = React.useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+
+  // Empty graph (e.g. a workflow that hasn't run yet, so no run_agents exist).
+  // Guard before any Math.max — Math.max(...[]) is -Infinity, which yields a
+  // non-finite width and crashes React's style serializer.
+  if (agents.length === 0) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-[160px] w-full items-center justify-center rounded-lg border border-dashed border-border text-[12px] text-faint",
+          className,
+        )}
+      >
+        Run this workflow to see its agent graph.
+      </div>
+    );
+  }
+
   const maxCol = Math.max(...agents.map((a) => a.col));
   const maxRow = Math.max(...agents.map((a) => a.row));
   const width = PAD_X * 2 + maxCol * COL_W + NODE_W;

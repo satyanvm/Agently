@@ -24,10 +24,16 @@ import (
 	"github.com/agently/worker/internal/queue"
 	"github.com/agently/worker/internal/runner"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Load .env from the repo root (best-effort) so DATABASE_URL, the LLM key, SMTP
+	// creds, and BROWSERBASE_API_KEY are present without manual exporting. Real env
+	// vars always win — godotenv does not overwrite what's already set.
+	_ = godotenv.Load(".env", "../.env", "../../.env")
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

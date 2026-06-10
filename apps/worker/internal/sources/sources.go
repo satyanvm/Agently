@@ -139,6 +139,54 @@ func HackerNews(ctx context.Context, query string, max int) ([]Item, error) {
 	return out, nil
 }
 
+/* ----------------------------- Google News ------------------------------- */
+
+// GoogleNews fetches recent news headlines for a query via Google News' public RSS
+// feed (keyless). This is the "AI news" / "Google News" source — a plain RSS/XML
+// parse, no scraping, no key. For sites that need a real browser (JS/auth) the
+// browser layer (Browserbase) handles arbitrary URLs instead.
+func GoogleNews(ctx context.Context, query string, max int) ([]Item, error) {
+	if query == "" {
+		query = "AI"
+	}
+	if max <= 0 {
+		max = 10
+	}
+	u := "https://news.google.com/rss/search?q=" + url.QueryEscape(query) + "&hl=en-US&gl=US&ceid=US:en"
+	body, err := get(ctx, u, "application/rss+xml")
+	if err != nil {
+		return nil, err
+	}
+	var feed struct {
+		Items []struct {
+			Title   string `xml:"title"`
+			Link    string `xml:"link"`
+			PubDate string `xml:"pubDate"`
+			Source  string `xml:"source"`
+		} `xml:"channel>item"`
+	}
+	if err := xml.Unmarshal(body, &feed); err != nil {
+		return nil, fmt.Errorf("google news parse: %w", err)
+	}
+	out := make([]Item, 0, len(feed.Items))
+	for i, it := range feed.Items {
+		if i >= max {
+			break
+		}
+		summary := it.Source
+		if it.PubDate != "" {
+			summary = clean(it.Source + " · " + it.PubDate)
+		}
+		out = append(out, Item{
+			Title:   clean(it.Title),
+			URL:     strings.TrimSpace(it.Link),
+			Summary: summary,
+			Source:  "Google News",
+		})
+	}
+	return out, nil
+}
+
 /* ------------------------------- Reddit ---------------------------------- */
 
 // Reddit fetches hot posts from a subreddit via its public JSON endpoint.

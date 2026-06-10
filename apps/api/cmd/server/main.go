@@ -15,9 +15,15 @@ import (
 	"github.com/agently/api/internal/handler"
 	"github.com/agently/api/internal/platform"
 	"github.com/agently/api/internal/services"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env from the repo root (best-effort) so DATABASE_URL, the LLM key the
+	// prompt-planner uses, and SMTP creds are present without manual exporting. Real
+	// env vars always win — godotenv does not overwrite what's already set.
+	_ = godotenv.Load(".env", "../.env", "../../.env")
+
 	pretty := os.Getenv("ENV") != "production"
 	logger := platform.NewLogger(pretty, "svc", "api")
 

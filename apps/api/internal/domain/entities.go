@@ -86,6 +86,7 @@ type Workflow struct {
 	OwnerID          *MemberId          `json:"ownerId"`
 	AgentCount       int                `json:"agentCount"`
 	CurrentVersionID *WorkflowVersionId `json:"currentVersionId"`
+	DefaultInput     map[string]any     `json:"defaultInput"`
 	CreatedAt        Timestamp          `json:"createdAt"`
 	UpdatedAt        Timestamp          `json:"updatedAt"`
 	ArchivedAt       *Timestamp         `json:"archivedAt"`

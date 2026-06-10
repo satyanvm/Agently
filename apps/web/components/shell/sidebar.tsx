@@ -52,7 +52,7 @@ export function Sidebar() {
       {/* New workflow */}
       <div className="px-3 py-3">
         <Link
-          href="/workflows"
+          href="/workflows?new=1"
           className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
         >
           <Plus className="size-4" />

@@ -205,9 +205,12 @@ func (rt *Runtime) runAgent(ctx context.Context, runID string, ag queue.GraphAge
 	}
 
 	// Browser-role agents may also drive a browser session (for JS-heavy/auth sites).
+	// The pages it visits come from the run input's "urls" (the planner extracts the
+	// exact sites a prompt names — X, a blog, etc.), so the browser is a universal
+	// source rather than a fixed crawl.
 	var browserNotes string
 	if ag.Role == "browser" && rt.browser != nil && rt.browser.Name() != "simulated" {
-		browserNotes = rt.runBrowser(ctx, runID, ag, st, start)
+		browserNotes = rt.runBrowser(ctx, runID, ag, st, start, input)
 	}
 
 	// Read upstream outputs (snapshot) to build a context-aware prompt.
@@ -263,7 +266,7 @@ func (rt *Runtime) emitSeq(ctx context.Context, runID string, st *dagState, star
 // navigate→extract sequence (all persisted to the browser_* tables + visible in
 // the UI Browser tab), and returns a notes string for the agent's prompt. Errors
 // are non-fatal: a browser hiccup logs and the agent proceeds with what it got.
-func (rt *Runtime) runBrowser(ctx context.Context, runID string, ag queue.GraphAgent, st *dagState, start time.Time) string {
+func (rt *Runtime) runBrowser(ctx context.Context, runID string, ag queue.GraphAgent, st *dagState, start time.Time, input map[string]any) string {
 	sess, err := rt.browser.Open(ctx, runID, ag.Name, rt.q)
 	if err != nil {
 		rt.emitSeq(ctx, runID, st, start, "warn", "browser", ag.Name,
@@ -273,8 +276,12 @@ func (rt *Runtime) runBrowser(ctx context.Context, runID string, ag queue.GraphA
 	rt.emitSeq(ctx, runID, st, start, "info", "browser", ag.Name,
 		fmt.Sprintf("browser session opened (%s)", rt.browser.Name()), false, nil)
 
-	// A small, representative crawl. Real targets would come from the agent's task.
-	targets := []string{"https://example.com", "https://competitor.example.com/pricing"}
+	// Targets come from the prompt (run input "urls"). Fall back to a representative
+	// page only if the prompt named no sites, so the session is never empty.
+	targets := inputStrings(input, "urls", nil)
+	if len(targets) == 0 {
+		targets = []string{"https://news.ycombinator.com"}
+	}
 	var notes strings.Builder
 	ok := true
 	for _, url := range targets {
@@ -311,6 +318,8 @@ func (rt *Runtime) fetchForAgent(ctx context.Context, runID string, ag queue.Gra
 		items, err = sources.HackerNews(ctx, topic, 10)
 	case strings.Contains(name, "reddit"):
 		items, err = fetchReddit(ctx, input)
+	case strings.Contains(name, "news"):
+		items, err = fetchNews(ctx, topic)
 	case strings.Contains(name, "web"):
 		items, err = fetchWebList(ctx, input)
 	default:
@@ -347,6 +356,10 @@ func fetchReddit(ctx context.Context, input map[string]any) ([]sources.Item, err
 		all = append(all, items...)
 	}
 	return all, nil
+}
+
+func fetchNews(ctx context.Context, topic string) ([]sources.Item, error) {
+	return sources.GoogleNews(ctx, topic, 10)
 }
 
 func fetchWebList(ctx context.Context, input map[string]any) ([]sources.Item, error) {

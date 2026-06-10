@@ -38,14 +38,33 @@ export const LaunchRunInput = z.object({
 });
 export type LaunchRunInput = z.infer<typeof LaunchRunInput>;
 
-export const CreateWorkflowInput = z.object({
-  name: z.string().min(1).max(120),
-  description: z.string().max(2000).default(""),
-  trigger: TriggerType.default("manual"),
-  schedule: z.string().nullable().default(null),
-  tags: z.array(z.string()).default([]),
-});
+export const CreateWorkflowInput = z
+  .object({
+    /** Either name or prompt must be present (validated server-side). */
+    name: z.string().max(120).default(""),
+    /** Natural-language description the server compiles into an agent graph. */
+    prompt: z.string().max(4000).default(""),
+    description: z.string().max(2000).default(""),
+    trigger: TriggerType.default("manual"),
+    schedule: z.string().nullable().default(null),
+    /** Optional recipient woven into the workflow's default run input. */
+    email: z.string().default(""),
+    tags: z.array(z.string()).default([]),
+  })
+  .refine((v) => v.name.trim() !== "" || v.prompt.trim() !== "", {
+    message: "name or prompt is required",
+    path: ["name"],
+  });
 export type CreateWorkflowInput = z.infer<typeof CreateWorkflowInput>;
+
+/** Dry-run: compile a prompt into a graph + default input without saving. */
+export const PlanWorkflowInput = z.object({
+  prompt: z.string().min(1).max(4000),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  schedule: z.string().default(""),
+});
+export type PlanWorkflowInput = z.infer<typeof PlanWorkflowInput>;
 
 export const CreateAgentInput = z.object({
   name: z.string().min(1).max(120),

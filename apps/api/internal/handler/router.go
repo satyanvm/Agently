@@ -21,7 +21,9 @@ func NewRouter(p *services.Platform) chi.Router {
 
 		r.Get("/workflows", listWorkflows(p))
 		r.Post("/workflows", createWorkflow(p))
+		r.Post("/workflows/plan", planWorkflow(p))
 		r.Get("/workflows/{slug}", getWorkflow(p))
+		r.Get("/workflows/{slug}/graph", graphWorkflow(p))
 		r.Post("/workflows/{slug}/runs", launchRun(p))
 		r.Get("/workflows/{slug}/runs", listWorkflowRuns(p))
 
@@ -30,6 +32,7 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Post("/runs/{id}/cancel", cancelRun(p))
 		r.Get("/runs/{id}/logs", listLogs(p))
 		r.Get("/runs/{id}/logs/stream", streamLogs(p))
+		r.Get("/runs/{id}/artifacts/{artifactId}/download", downloadArtifact(p))
 		r.Get("/runs/{id}/browser", getBrowserSession(p))
 
 		r.Get("/agents", listAgents(p))

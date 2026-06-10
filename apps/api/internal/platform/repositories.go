@@ -30,6 +30,7 @@ type AgentDefinitionRepo interface {
 type WorkflowPatch struct {
 	AgentCount       *int
 	CurrentVersionID *domain.WorkflowVersionId
+	DefaultInput     *map[string]any
 	UpdatedAt        *domain.Timestamp
 	ArchivedAt       *domain.Timestamp
 }

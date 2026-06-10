@@ -2,6 +2,7 @@ package validate
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/agently/api/internal/domain"
 )
@@ -136,13 +137,23 @@ type CreateWorkflowInput struct {
 	Trigger     domain.TriggerType
 	Schedule    *string
 	Tags        []string
+	// Prompt is the natural-language description the planner compiles into an agent
+	// graph. When present, Name/Description/graph are derived from it.
+	Prompt string
+	// Email is an optional recipient woven into the workflow's default run input.
+	Email string
 }
 
 func ParseCreateWorkflowInput(body map[string]any) (CreateWorkflowInput, error) {
 	v := &ValidationError{}
 	name := getString(body, "name")
-	v.stringRequired("name", name)
+	prompt := getString(body, "prompt")
+	// Either a name or a prompt must identify the workflow.
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(prompt) == "" {
+		v.add("name", "name or prompt is required")
+	}
 	v.stringMaxLen("name", name, 120)
+	v.stringMaxLen("prompt", prompt, 4000)
 
 	description := getString(body, "description")
 	v.stringMaxLen("description", description, 2000)
@@ -158,6 +169,8 @@ func ParseCreateWorkflowInput(body map[string]any) (CreateWorkflowInput, error) 
 		Description: description,
 		Trigger:     domain.TriggerType(trigger),
 		Tags:        getStringSlice(body, "tags"),
+		Prompt:      prompt,
+		Email:       getString(body, "email"),
 	}
 	if out.Tags == nil {
 		out.Tags = []string{}

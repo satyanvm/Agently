@@ -206,6 +206,9 @@ func (r *workflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (domain
 			if patch.CurrentVersionID != nil {
 				w.CurrentVersionID = patch.CurrentVersionID
 			}
+			if patch.DefaultInput != nil {
+				w.DefaultInput = *patch.DefaultInput
+			}
 			if patch.UpdatedAt != nil {
 				w.UpdatedAt = *patch.UpdatedAt
 			}

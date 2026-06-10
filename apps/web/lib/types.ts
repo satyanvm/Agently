@@ -59,6 +59,8 @@ export interface Workflow {
   schedule?: string;
   owner: { name: string; initials: string };
   tags: string[];
+  /** The plan's stored default run input (topic/email/sources), used to prefill launches. */
+  defaultInput?: Record<string, unknown>;
   createdAt: string;
   lastRunAt: string;
   stats: RunStatsLite;

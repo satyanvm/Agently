@@ -48,6 +48,46 @@ func createWorkflow(p *services.Platform) http.HandlerFunc {
 	}
 }
 
+// planWorkflow is the dry-run: compile a prompt into a graph + default input WITHOUT
+// saving, so the UI can preview the agents the prompt will create.
+func planWorkflow(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			body, _ := decodeBody(r)
+			prompt := getStringField(body, "prompt")
+			if prompt == "" {
+				return nil, 0, domain.BadRequest("prompt is required")
+			}
+			plan := p.Workflows.Plan(prompt, getStringField(body, "name"),
+				getStringField(body, "email"), getStringField(body, "schedule"))
+			return plan, http.StatusOK, nil
+		})
+	}
+}
+
+// getStringField reads a string off a decoded JSON body, defaulting to "".
+func getStringField(body map[string]any, key string) string {
+	if v, ok := body[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// graphWorkflow returns a workflow's planned agent graph (current version's nodes),
+// so the UI can render the agents before the workflow has ever run.
+func graphWorkflow(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			slug := chi.URLParam(r, "slug")
+			nodes, err := p.Workflows.GraphNodes(slug)
+			if err != nil {
+				return nil, 0, err
+			}
+			return map[string]any{"nodes": nodes}, http.StatusOK, nil
+		})
+	}
+}
+
 func listWorkflowRuns(p *services.Platform) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handle(w, func() (any, int, error) {

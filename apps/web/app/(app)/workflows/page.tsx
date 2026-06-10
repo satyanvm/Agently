@@ -8,6 +8,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { SearchInput } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WorkflowCard } from "@/components/workflow-row";
+import { CreateWorkflowDialog } from "@/components/create-workflow-dialog";
 import { fetchWorkflows } from "@/lib/api";
 import type { RunStatus, Workflow } from "@/lib/types";
 
@@ -17,6 +18,16 @@ export default function WorkflowsPage() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [q, setQ] = React.useState("");
   const [workflows, setWorkflows] = React.useState<Workflow[]>([]);
+  const [createOpen, setCreateOpen] = React.useState(false);
+
+  // Open the composer when arriving via the sidebar's "New workflow" (?new=1).
+  // Read from window (not useSearchParams) to avoid the static-prerender Suspense
+  // requirement on this client page.
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") {
+      setCreateOpen(true);
+    }
+  }, []);
 
   React.useEffect(() => {
     let active = true;
@@ -43,7 +54,7 @@ export default function WorkflowsPage() {
       <TopBar
         crumbs={[{ label: "Workflows" }]}
         actions={
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="size-4" /> New workflow
           </Button>
         }
@@ -92,6 +103,7 @@ export default function WorkflowsPage() {
           </div>
         )}
       </PageContainer>
+      <CreateWorkflowDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
 }

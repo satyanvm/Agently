@@ -66,6 +66,25 @@ func (s *RunService) Get(id domain.RunId) (domain.RunDetail, error) {
 	return s.detail(run), nil
 }
 
+// ArtifactContent returns one artifact's filename + full content for download. The
+// content lives in the artifact's preview column (the worker writes the whole digest
+// there). Returns NotFound if the run has no artifact with that id.
+func (s *RunService) ArtifactContent(runID domain.RunId, artifactID domain.ArtifactId) (name, content string, err error) {
+	if _, err := s.requireRun(runID); err != nil {
+		return "", "", err
+	}
+	for _, a := range s.deps.Repos.Artifacts.ListByRun(runID) {
+		if a.ID == artifactID {
+			body := ""
+			if a.Preview != nil {
+				body = *a.Preview
+			}
+			return a.Name, body, nil
+		}
+	}
+	return "", "", domain.NotFound("artifact")
+}
+
 // Launch creates a run, materializes its agent graph, emits events, appends
 // bootstrap logs, and records activity.
 func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.RunDetail, error) {
@@ -85,6 +104,10 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	if input.Region != nil {
 		region = *input.Region
 	}
+	// Merge the workflow's default input (the planned template: topic/email/sources/
+	// urls) UNDER the per-run input, so a one-click "Run now" inherits the plan while
+	// an explicit per-run value still wins.
+	runInput := mergeInput(wf.DefaultInput, input.Input)
 	total := wf.AgentCount * 4
 	if total < 1 {
 		total = 1
@@ -96,7 +119,7 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	run := domain.Run{
 		ID: runID, WorkspaceID: wf.WorkspaceID, WorkflowID: wf.ID, WorkflowVersionID: wf.CurrentVersionID,
 		WorkflowName: wf.Name, WorkflowSlug: wf.Slug, Number: s.deps.Repos.Runs.NextNumber(wf.ID),
-		Status: domain.RunQueued, Trigger: input.Trigger, Input: input.Input, TriggeredBy: triggeredBy, Region: region,
+		Status: domain.RunQueued, Trigger: input.Trigger, Input: runInput, TriggeredBy: triggeredBy, Region: region,
 		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: "Queued",
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
 		QueuedAt: now, StartedAt: nil, FinishedAt: nil,
@@ -172,6 +195,20 @@ func (s *RunService) Cancel(id domain.RunId) (domain.Run, error) {
 	s.logs.Append(id, AppendLogInput{Level: domain.LevelWarn, Channel: domain.ChannelSystem, Source: "runtime", Message: "Run canceled by user"})
 	s.emit(domain.RunFinishedEvent{RunID: id, Status: domain.RunCanceled, Error: nil})
 	return updated, nil
+}
+
+// mergeInput overlays per-run values on top of the workflow's default input. A key
+// present in both takes the per-run value; defaults fill in the rest. Returns a fresh
+// map (never aliases either argument), always non-nil.
+func mergeInput(defaults, perRun map[string]any) map[string]any {
+	out := make(map[string]any, len(defaults)+len(perRun))
+	for k, v := range defaults {
+		out[k] = v
+	}
+	for k, v := range perRun {
+		out[k] = v
+	}
+	return out
 }
 
 /* ---- lifecycle write-path (what a real runner/worker will call) ---- */

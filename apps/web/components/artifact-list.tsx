@@ -28,7 +28,7 @@ function fmtSize(bytes?: number) {
   return `${bytes} B`;
 }
 
-export function ArtifactList({ artifacts, columns = true }: { artifacts: RunArtifact[]; columns?: boolean }) {
+export function ArtifactList({ artifacts, columns = true, runId }: { artifacts: RunArtifact[]; columns?: boolean; runId?: string }) {
   return (
     <div className={cn(columns ? "grid gap-2.5 sm:grid-cols-2" : "space-y-2")}>
       {artifacts.map((a) => {
@@ -57,9 +57,18 @@ export function ArtifactList({ artifacts, columns = true }: { artifacts: RunArti
                 </div>
               )}
             </div>
-            <button className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-faint opacity-0 transition-opacity hover:bg-surface-3 hover:text-fg group-hover:opacity-100">
+            <a
+              href={runId ? `/api/runs/${runId}/artifacts/${a.id}/download` : undefined}
+              download={a.name}
+              aria-label={`Download ${a.name}`}
+              title={`Download ${a.name}`}
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-faint transition-opacity hover:bg-surface-3 hover:text-fg group-hover:opacity-100",
+                runId ? "opacity-0" : "pointer-events-none opacity-0",
+              )}
+            >
               <Download className="size-4" />
-            </button>
+            </a>
           </div>
         );
       })}

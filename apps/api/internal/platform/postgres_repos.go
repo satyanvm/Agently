@@ -163,10 +163,11 @@ func scanWorkflow(row pgx.Row) (domain.Workflow, error) {
 	var schedule, ownerID, currentVer *string
 	var tags []string
 	var agentCount int
+	var defaultInput []byte
 	var created, updated any
 	var archived any
 	if err := row.Scan(&id, &ws, &slug, &name, &desc, &trigger, &schedule, &tags,
-		&ownerID, &agentCount, &currentVer, &created, &updated, &archived); err != nil {
+		&ownerID, &agentCount, &currentVer, &created, &updated, &archived, &defaultInput); err != nil {
 		return w, err
 	}
 	w.ID = domain.WorkflowId(id)
@@ -186,10 +187,12 @@ func scanWorkflow(row pgx.Row) (domain.Workflow, error) {
 	}
 	w.CreatedAt, w.UpdatedAt = anyTs(created), anyTs(updated)
 	w.ArchivedAt = anyTsPtr(archived)
+	w.DefaultInput = map[string]any{}
+	jsonInto(defaultInput, &w.DefaultInput)
 	return w, nil
 }
 
-const workflowCols = `id, workspace_id, slug, name, description, trigger, schedule, tags, owner_id, agent_count, current_version_id, created_at, updated_at, archived_at`
+const workflowCols = `id, workspace_id, slug, name, description, trigger, schedule, tags, owner_id, agent_count, current_version_id, created_at, updated_at, archived_at, default_input`
 
 func (r *pgWorkflowRepo) All() []domain.Workflow {
 	rows, err := r.s.pool.Query(bg(), `select `+workflowCols+` from workflows order by created_at`)
@@ -230,10 +233,10 @@ func (r *pgWorkflowRepo) GetBySlug(slug string) (domain.Workflow, bool) {
 
 func (r *pgWorkflowRepo) Insert(w domain.Workflow) domain.Workflow {
 	_, err := r.s.pool.Exec(bg(),
-		`insert into workflows (`+workflowCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		`insert into workflows (`+workflowCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		string(w.ID), string(w.WorkspaceID), w.Slug, w.Name, w.Description, string(w.Trigger),
 		strArg(w.Schedule), w.Tags, idPtrArg(w.OwnerID), w.AgentCount, idPtrArg(w.CurrentVersionID),
-		tsArg(w.CreatedAt), tsArg(w.UpdatedAt), tsPtrArg(w.ArchivedAt))
+		tsArg(w.CreatedAt), tsArg(w.UpdatedAt), tsPtrArg(w.ArchivedAt), jsonArg(orEmptyMap(w.DefaultInput)))
 	r.s.fail("workflow.Insert", err)
 	return w
 }
@@ -245,6 +248,9 @@ func (r *pgWorkflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (doma
 	}
 	if patch.CurrentVersionID != nil {
 		b.add("current_version_id", string(*patch.CurrentVersionID))
+	}
+	if patch.DefaultInput != nil {
+		b.add("default_input", jsonArg(orEmptyMap(*patch.DefaultInput)))
 	}
 	if patch.UpdatedAt != nil {
 		b.add("updated_at", tsArg(*patch.UpdatedAt))

@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { TopBar } from "@/components/shell/topbar";
 import { PageContainer } from "@/components/shell/page";
 import { WorkflowDetail } from "@/components/workflow-detail";
-import { fetchWorkflow, fetchWorkflowRuns, fetchRun } from "@/lib/api";
+import { fetchWorkflow, fetchWorkflowRuns, fetchRun, fetchWorkflowGraph } from "@/lib/api";
 import type { Workflow, WorkflowRun, AgentNode } from "@/lib/types";
 
 export default function WorkflowPage() {
@@ -29,11 +29,15 @@ export default function WorkflowPage() {
       const wfRuns = await fetchWorkflowRuns(slug);
       if (!active) return;
       setRuns(wfRuns);
-      // Derive the agent graph from the most recent run (live statuses); empty
-      // until the workflow has been run at least once.
+      // Derive the agent graph from the most recent run (live statuses). If the
+      // workflow has never run, fall back to its PLANNED graph (the version's nodes)
+      // so a just-created workflow shows its agents immediately.
       if (wfRuns.length > 0) {
         const detail = await fetchRun(wfRuns[0]!.id);
         if (active && detail) setAgents(detail.agents);
+      } else {
+        const planned = await fetchWorkflowGraph(slug).catch(() => []);
+        if (active) setAgents(planned);
       }
       setState("ready");
     };

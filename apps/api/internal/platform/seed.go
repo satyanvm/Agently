@@ -67,7 +67,13 @@ func BuildSeed(_ Clock) Seed {
 		Trigger:     domain.TriggerManual, Schedule: nil, Tags: []string{"research", "news", "digest"},
 		OwnerID: &ownerID, AgentCount: 5,
 		CurrentVersionID: domain.Ptr(domain.WorkflowVersionId("wfv_aidigest_1")),
-		CreatedAt:        "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z", ArchivedAt: nil,
+		DefaultInput: map[string]any{
+			"topic":      "AI",
+			"arxivQuery": "cat:cs.AI OR cat:cs.LG OR cat:cs.CL",
+			"subreddits": []any{"MachineLearning", "artificial"},
+			"email":      "",
+		},
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z", ArchivedAt: nil,
 	}
 	workflows := []domain.Workflow{digest}
 
