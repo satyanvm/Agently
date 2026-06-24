@@ -34,8 +34,9 @@ func TestCompilePrompt_DetectsSourcesAndEmail(t *testing.T) {
 	if got := p.DefaultInput["email"]; got != "me@example.com" {
 		t.Errorf("email = %v, want me@example.com", got)
 	}
-	if p.Schedule == nil || *p.Schedule != "daily 08:00" {
-		t.Errorf("schedule = %v, want daily 08:00", p.Schedule)
+	// "Every morning" with no explicit time → the default morning slot, 09:00.
+	if p.Schedule == nil || *p.Schedule != "daily 09:00" {
+		t.Errorf("schedule = %v, want daily 09:00", p.Schedule)
 	}
 	subs, ok := p.DefaultInput["subreddits"].([]any)
 	if !ok || len(subs) != 1 || subs[0] != "MachineLearning" {

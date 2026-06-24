@@ -174,10 +174,18 @@ func (r *Runner) notify(ctx context.Context, c queue.Claimed, status string) {
 		if status == "succeeded" {
 			digest = r.q.LoadDigest(ctx, c.ID)
 		}
+		// If this run's workspace has connected Gmail (option 2), pass the refresh
+		// token so the notifier can send AS that account. Absent ⇒ the notifier falls
+		// back to Resend (option 3) / SMTP.
+		var gmailToken, gmailSender string
+		if gi, ok := r.q.LoadGoogleIntegration(ctx, meta.WorkspaceID); ok {
+			gmailToken, gmailSender = gi.RefreshToken, gi.AccountEmail
+		}
 		r.notifier.Notify(ctx, notifier.Event{
 			RunID: c.ID, WorkflowName: meta.WorkflowName, WorkflowSlug: meta.WorkflowSlug,
 			Number: meta.Number, Status: status, Digest: digest, To: meta.Email,
-			URL: fmt.Sprintf("%s/runs/%s", r.cfg.AppBaseURL, c.ID),
+			URL:               fmt.Sprintf("%s/runs/%s", r.cfg.AppBaseURL, c.ID),
+			GmailRefreshToken: gmailToken, GmailSender: gmailSender,
 		})
 	}
 }

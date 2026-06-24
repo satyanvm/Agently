@@ -288,16 +288,93 @@ func titleFrom(topic string) string {
 	return strings.Title(t) + " Digest" //nolint:staticcheck // Title is fine for a short label
 }
 
-func scheduleFrom(lower string) *string {
+// reTimeOfDay matches an explicit clock time anywhere in the prompt. Each branch
+// captures the FULL time (hour, optional minutes, optional meridiem) so a lead-in like
+// "at" can't truncate "at 9:30pm" to "9". A time must carry at least one signal — a
+// lead-in word, a ":MM", or an am/pm — so stray numbers ("top 5 posts") never match.
+//   branch 1: "at 9:30pm" / "by 8" / "around 17:00"  (lead-in word + time)
+//   branch 2: "9:30pm" / "17:00"                      (HH:MM, optional meridiem)
+//   branch 3: "9 am" / "9am"                          (hour + required meridiem)
+var reTimeOfDay = regexp.MustCompile(`(?i)\b(?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b`)
+
+// parseTimeOfDay pulls a "HH:MM" 24-hour clock time out of the prompt, if one is
+// stated. ok is false when no time is mentioned (caller falls back to a default).
+func parseTimeOfDay(lower string) (hh, mm int, ok bool) {
+	m := reTimeOfDay.FindStringSubmatch(lower)
+	if m == nil {
+		return 0, 0, false
+	}
+	var meridiem string
 	switch {
-	case strings.Contains(lower, "every morning") || strings.Contains(lower, "each morning") || strings.Contains(lower, "daily") || strings.Contains(lower, "every day"):
-		s := "daily 08:00"
-		return &s
+	case m[1] != "": // lead-in: at/by/around H[:MM] [am/pm]
+		hh = atoiSafe(m[1])
+		if m[2] != "" {
+			mm = atoiSafe(m[2])
+		}
+		meridiem = m[3]
+	case m[4] != "": // HH:MM (+ optional am/pm)
+		hh = atoiSafe(m[4])
+		mm = atoiSafe(m[5])
+		meridiem = m[6]
+	default: // H am/pm
+		hh = atoiSafe(m[7])
+		meridiem = m[8]
+	}
+	switch strings.ToLower(meridiem) {
+	case "pm":
+		if hh < 12 {
+			hh += 12
+		}
+	case "am":
+		if hh == 12 {
+			hh = 0
+		}
+	}
+	if hh < 0 || hh > 23 || mm < 0 || mm > 59 {
+		return 0, 0, false
+	}
+	return hh, mm, true
+}
+
+// scheduleFrom infers a schedule string from the prompt. Daily cadence carries the
+// stated time of day ("every day at 9 am" → "daily 09:00"); a bare "morning" with no
+// time defaults to 09:00. The scheduler (services/scheduler.go) parses these strings.
+func scheduleFrom(lower string) *string {
+	hh, mm, hasTime := parseTimeOfDay(lower)
+	daily := strings.Contains(lower, "every morning") || strings.Contains(lower, "each morning") ||
+		strings.Contains(lower, "morning") || strings.Contains(lower, "daily") ||
+		strings.Contains(lower, "every day") || strings.Contains(lower, "each day") ||
+		strings.Contains(lower, "every evening") || strings.Contains(lower, "every night")
+	switch {
 	case strings.Contains(lower, "every hour") || strings.Contains(lower, "hourly"):
 		s := "hourly"
 		return &s
+	case daily || hasTime:
+		if !hasTime {
+			hh, mm = 9, 0 // "morning" with no explicit time
+		}
+		s := "daily " + pad2(hh) + ":" + pad2(mm)
+		return &s
 	}
 	return nil
+}
+
+func pad2(n int) string {
+	if n < 10 {
+		return "0" + itoa(n)
+	}
+	return itoa(n)
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return -1
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 func firstEmail(s string) string { return reEmail.FindString(s) }

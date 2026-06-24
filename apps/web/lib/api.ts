@@ -409,3 +409,25 @@ export async function fetchNotifications(): Promise<AppNotification[]> {
 export async function markNotificationRead(id: string): Promise<void> {
   await fetch(`/api/notifications/${id}/read`, { method: "POST" });
 }
+
+/* ----------------------------- integrations ----------------------------- */
+
+export type IntegrationStatus = {
+  provider: string;
+  connected: boolean;
+  accountEmail?: string;
+  configured: boolean;
+};
+
+export async function fetchIntegrations(): Promise<IntegrationStatus[]> {
+  const page = await getJSON<{ items: IntegrationStatus[] }>("/api/integrations");
+  return page.items;
+}
+
+export async function disconnectGoogle(): Promise<void> {
+  await fetch("/api/integrations/google/disconnect", { method: "POST" });
+}
+
+// connectGoogleURL is a full-page navigation target (the OAuth flow is a browser
+// redirect, not a fetch). The dev server proxies /api/* to the Go API.
+export const connectGoogleURL = "/api/integrations/google/connect";

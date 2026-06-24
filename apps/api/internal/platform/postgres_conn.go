@@ -62,6 +62,7 @@ func NewPostgresRepositories(pool *pgxpool.Pool, log Logger) *Repositories {
 		Browser:       &pgBrowserRepo{s},
 		Notifications: &pgNotificationRepo{s},
 		Activity:      &pgActivityRepo{s},
+		Integrations:  &pgIntegrationRepo{s},
 	}
 }
 

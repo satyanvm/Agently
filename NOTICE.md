@@ -10,14 +10,14 @@ distributions of Agently.
 
 - **Source:** https://github.com/activepieces/activepieces (tag `0.85.2`,
   commit `0b0c1f120480ebf0a3be07ff0f27cf6dc9e4d4ac`)
-- **Location in this repo:** `third_party/activepieces/`
-- **License:** MIT Expat — full text in `third_party/activepieces/LICENSE`
+- **Location in this repo:** `external/activepieces/`
+- **License:** MIT Expat — full text in `external/activepieces/LICENSE`
 - **Copyright:** Copyright (c) 2020-2024 Activepieces Inc.
 
 Only the MIT-licensed portions of Activepieces are included. The upstream
 directories `packages/ee/` and `packages/server/api/src/app/ee/`, which are
 licensed under the Activepieces commercial license, have been removed and are
-not part of this repository. See `third_party/activepieces/VENDOR.md` for
+not part of this repository. See `external/activepieces/VENDOR.md` for
 provenance, the strip manifest, and the upgrade policy.
 
 MIT notice (reproduced as required):

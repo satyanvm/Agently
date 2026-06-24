@@ -279,6 +279,20 @@ type ActivityEvent struct {
 	At           Timestamp    `json:"at"`
 }
 
+// Integration is a workspace's connection to a third-party account via OAuth2
+// (e.g. Google, so the worker can send mail as that Gmail account). The refresh
+// token is a secret — never serialized to API clients (see the read model).
+type Integration struct {
+	ID           IntegrationId `json:"id"`
+	WorkspaceID  WorkspaceId   `json:"workspaceId"`
+	Provider     string        `json:"provider"` // "google"
+	AccountEmail string        `json:"accountEmail"`
+	RefreshToken string        `json:"-"` // secret, never marshaled
+	Scopes       string        `json:"scopes"`
+	CreatedAt    Timestamp     `json:"createdAt"`
+	UpdatedAt    Timestamp     `json:"updatedAt"`
+}
+
 /* ========================= Dashboard ========================== */
 
 type WorkspaceStats struct {

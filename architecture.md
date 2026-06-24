@@ -795,8 +795,99 @@ the timer is missing.
 
 ---
 
+## 19. Code-reading guide — architecture, flow & orchestration (current; supersedes §5)
+
+§5 was written when the worker was unbuilt and the UI ran on `mock-data.ts`. Both are now
+real. Read **this** instead. Three passes, each answering one question. Verified
+file:symbol anchors — every line below points at code that exists today.
+
+### Pass A — the nouns & the seams (what the system is)
+Read these to learn the shape before any behaviour.
+1. `apps/api/internal/domain/entities.go` — the nouns: `Run`, `Workflow`,
+   `WorkflowVersion`, `GraphNode`, `Agent`, `Principal`. Everything manipulates these.
+2. `apps/api/internal/platform/repositories.go` — storage *interfaces*. This is the seam:
+   services depend on these, not on a concrete store. `platform/memory.go` and
+   `platform/postgres_repos.go` are the two implementations; `platform.go`/`NewPlatform`
+   is the one assembly line that picks which (env `DATABASE_URL`).
+3. `packages/db/migrations/0001_init.sql` → `0003_queue.sql` → `0007_workflow_default_input.sql`
+   — the real schema, the queue function, and the per-workflow default run-input. Map the
+   SQL tables back to the Go entities from step 1.
+4. `packages/contracts/src/api.ts` — the API/UI contract. The shape the web app consumes.
+
+### Pass B — the request flow (control plane: how a run is born)
+Trace one request end to end. Each line hands off to the next.
+1. `apps/api/cmd/server/main.go` → `handler/router.go` — chi routes; `main` builds the
+   `Platform` and serves `:8080`.
+2. **Front door (the prompt→workflow compiler):**
+   `handler/workflows.go:planWorkflow` → `services/workflow_service.go:Plan` →
+   `services/planner.go:CompilePrompt`. Read `CompilePrompt` (l.66): `deterministicPlan`
+   (keyword/regex scan, l.94) runs first, then `overlayLLM` (l.165) refines it if a key is
+   present, then `buildGraph` (l.226) emits one fetcher `GraphNode` per source + an Editor
+   sink. **Offline-safe by construction** — the LLM only *overlays*.
+3. **Persist a runnable workflow:** `handler/workflows.go:createWorkflow` →
+   `services/workflow_service.go:Create` (l.113) — builds *and links* a
+   `WorkflowVersion` (sets `currentVersionId`, materializes agents, stores `default_input`).
+4. **Launch a run:** `handler/workflows.go:launchRun` → `run_service.go:Launch` — merges
+   `default_input` with per-run input and inserts the run `status=queued`. (Was the
+   single biggest past bug: workflows that compiled but couldn't run. See §18.)
+5. **Live updates:** `handler/events.go` (SSE, in-process bus) for API-side events;
+   run-detail log tailing is seq-based polling against Postgres (`apps/web/lib/api.ts`,
+   `fetchRunLogsAfter`) because the *worker* — a separate process — writes the logs, not
+   the API's bus. This split is the single most counter-intuitive thing in the codebase;
+   §11 (Chunk 6) explains why.
+
+### Pass C — orchestration (data plane: how a run actually executes)
+This is the heart. The worker is a separate Go module (`apps/worker`).
+1. `apps/worker/internal/runner/runner.go` — the claim loop. Read in order:
+   `Run` (poll loop, l.52) → `claimAndExecute` (l.72) → `execute` (l.94) →
+   `heartbeatLoop` (l.187). The mechanism that makes "close your laptop" work:
+   `runCtx` is canceled the instant the lease is lost, so a zombie worker stops writing.
+   `runner/reaper.go` requeues runs whose worker stopped heartbeating.
+2. `apps/worker/internal/queue/queue.go` — the durable primitives the loop calls:
+   `Claim` (l.51, `FOR UPDATE SKIP LOCKED`), `Heartbeat` (l.81), `Progress` (l.115),
+   `Finish` (l.97), `Reap` (l.131). The "Postgres *is* the queue" idea, in code.
+3. **`apps/worker/internal/agent/dag.go` — the multi-agent engine. Read this most
+   carefully.** `RunDAG` (l.88) loops: compute the ready frontier (`readyAgents`, l.409 —
+   deps all done), run it concurrently under a semaphore + `sync.WaitGroup` (l.142–143,
+   bound `maxConcurrentAgents`), repeat until drained. All shared state (completion,
+   outputs, log seqs) lives behind `dagState`'s mutex (l.24–66) — that is what makes
+   `go build -race` clean. `runAgent` (l.182) threads each upstream's output into the
+   downstream prompt (`buildAgentPrompt`, l.447) and records hand-offs as `agent_messages`.
+4. **The two work modes a node can take**, both in `dag.go`:
+   `fetchForAgent` (l.305, dispatches on the node *name* — `arXiv`/`HN`/`Reddit`/`News`/`Web`
+   → real source fetch in `internal/sources/`) and `runBrowser` (l.269, opens a Browserbase
+   session and visits the **prompt's** URLs — no per-site adapters; the browser is the
+   universal source). `internal/llm/llm.go` is the synthesis seam with `withFallback`
+   (degrades on quota/auth instead of failing the run).
+5. **Crash-resume for the DAG:** completion is read back from `run_agents.status`
+   (`internal/queue/graph.go:LoadAgents`/`SetAgentStatus`), so a killed worker resumes
+   exactly-once — finished agents are not re-run. Proven in §14 (Chunk 9).
+
+### The one trace that ties it together
+`POST /api/workflows/{slug}/runs` → `launchRun` → row `queued` → worker `Claim` →
+`execute` holds the lease → `RunDAG` walks the graph (fetchers in parallel → Editor sink) →
+`Finish` writes the terminal status + digest artifact → notifier fans out → UI polls the
+final timeline. If you can narrate that path from memory, you understand Agently.
+
+> **Vendored Activepieces** (`external/activepieces/`) is **reference material, not yet
+> wired in** — nothing in `apps/` imports it. It's an open-source workflow-automation
+> platform (a Zapier/n8n alternative: visual flow builder, a "pieces"/node integration
+> framework, a flow-execution engine). It was vendored on 2026-06-10 as a future source for
+> the flow-builder UI, the pieces framework, and the engine. Only the MIT portions are
+> present — the commercial `ee/` dirs were stripped, so its *full* API server does not
+> compile as-is (38 dangling `./ee/...` imports). The components we'd actually lift
+> (`packages/server/engine`, `packages/pieces`, `packages/web` flow builder, `packages/shared`)
+> are clean. Provenance, strip manifest, and upgrade policy: `external/activepieces/VENDOR.md`;
+> license obligations: `NOTICE.md`.
+
+---
+
 ## Changelog
 
+- **Doc — §19 added** — code-reading guide (architecture / flow / orchestration) reflecting
+  the *current* code: 3 passes (nouns & seams → request flow → DAG orchestration) with
+  verified file:symbol anchors. Supersedes the now-stale §5 reading path (worker-unbuilt,
+  mock-data era). Also documents the vendored Activepieces tree as not-yet-wired reference.
 - **Chunk 17 (DONE)** — the front door: prompt→workflow compiler (`services/planner.go`,
   hybrid LLM+deterministic), `Create` now builds+links a runnable graph + stores
   `default_input` (migration `0007`), `Launch` merges default/per-run input, worker gains a
