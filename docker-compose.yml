@@ -31,6 +31,7 @@ services:
       - ./packages/db/migrations/0005_worker_claim.sql:/docker-entrypoint-initdb.d/0005_worker_claim.sql:ro
       - ./packages/db/migrations/0006_run_input.sql:/docker-entrypoint-initdb.d/0006_run_input.sql:ro
       - ./packages/db/migrations/0007_workflow_default_input.sql:/docker-entrypoint-initdb.d/0007_workflow_default_input.sql:ro
+      - ./packages/db/migrations/0008_integrations.sql:/docker-entrypoint-initdb.d/0008_integrations.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agently -d agently"]
       interval: 3s

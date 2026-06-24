@@ -1120,6 +1120,52 @@ func (r *pgActivityRepo) Insert(e domain.ActivityEvent) domain.ActivityEvent {
 	return e
 }
 
+/* ----------------------------- integrations -------------------------- */
+
+type pgIntegrationRepo struct{ s *pgStore }
+
+func (r *pgIntegrationRepo) GetByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) (domain.Integration, bool) {
+	row := r.s.pool.QueryRow(bg(),
+		`select id, workspace_id, provider, account_email, refresh_token, scopes, created_at, updated_at
+		   from integrations where workspace_id=$1 and provider=$2`,
+		string(workspaceID), provider)
+	var it domain.Integration
+	var id, ws, prov, email, token, scopes string
+	var createdAt, updatedAt any
+	if err := row.Scan(&id, &ws, &prov, &email, &token, &scopes, &createdAt, &updatedAt); err != nil {
+		return domain.Integration{}, false
+	}
+	it.ID = domain.IntegrationId(id)
+	it.WorkspaceID = domain.WorkspaceId(ws)
+	it.Provider, it.AccountEmail, it.RefreshToken, it.Scopes = prov, email, token, scopes
+	it.CreatedAt, it.UpdatedAt = anyTs(createdAt), anyTs(updatedAt)
+	return it, true
+}
+
+// Upsert inserts or updates the row for (workspace, provider) — re-connecting an
+// account refreshes the stored token in place.
+func (r *pgIntegrationRepo) Upsert(in domain.Integration) domain.Integration {
+	_, err := r.s.pool.Exec(bg(),
+		`insert into integrations (id, workspace_id, provider, account_email, refresh_token, scopes, created_at, updated_at)
+		 values ($1,$2,$3,$4,$5,$6, now(), now())
+		 on conflict (workspace_id, provider) do update set
+		   account_email = excluded.account_email,
+		   refresh_token = excluded.refresh_token,
+		   scopes        = excluded.scopes,
+		   updated_at    = now()`,
+		string(in.ID), string(in.WorkspaceID), in.Provider, in.AccountEmail, in.RefreshToken, in.Scopes)
+	r.s.fail("integration.Upsert", err)
+	return in
+}
+
+func (r *pgIntegrationRepo) DeleteByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) bool {
+	tag, err := r.s.pool.Exec(bg(),
+		`delete from integrations where workspace_id=$1 and provider=$2`,
+		string(workspaceID), provider)
+	r.s.fail("integration.Delete", err)
+	return err == nil && tag.RowsAffected() > 0
+}
+
 /* ------------------------ small shared helpers ----------------------- */
 
 // setBuilder builds a dynamic `UPDATE … SET col=$n, …` from non-nil patch fields.

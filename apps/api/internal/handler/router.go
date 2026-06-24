@@ -44,6 +44,13 @@ func NewRouter(p *services.Platform) chi.Router {
 
 		r.Get("/activity", activityFeed(p))
 
+		// Third-party account connections (OAuth2). connect/callback are browser
+		// navigations (302s), not JSON endpoints.
+		r.Get("/integrations", listIntegrations(p))
+		r.Get("/integrations/google/connect", connectGoogle(p))
+		r.Get("/integrations/google/callback", googleCallback(p))
+		r.Post("/integrations/google/disconnect", disconnectGoogle(p))
+
 		r.Get("/events/stream", eventsStream(p))
 	})
 

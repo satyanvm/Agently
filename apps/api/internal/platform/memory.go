@@ -41,22 +41,23 @@ type ConsoleRow struct {
 type store struct {
 	mu sync.RWMutex
 
-	workspace domain.Workspace
-	members   []domain.Member
-	agents    []domain.AgentDefinition
-	workflows []domain.Workflow
-	versions  []domain.WorkflowVersion
-	runs      []domain.Run
-	runAgents []domain.RunAgent
-	messages  []domain.AgentMessage
-	artifacts []domain.Artifact
-	logs      []domain.LogEntry
-	sessions  []domain.BrowserSession
-	actions   []domain.BrowserAction
-	shots     []domain.BrowserShot
-	console   []ConsoleRow
-	notifs    []domain.Notification
-	activity  []domain.ActivityEvent
+	workspace    domain.Workspace
+	members      []domain.Member
+	agents       []domain.AgentDefinition
+	workflows    []domain.Workflow
+	versions     []domain.WorkflowVersion
+	runs         []domain.Run
+	runAgents    []domain.RunAgent
+	messages     []domain.AgentMessage
+	artifacts    []domain.Artifact
+	logs         []domain.LogEntry
+	sessions     []domain.BrowserSession
+	actions      []domain.BrowserAction
+	shots        []domain.BrowserShot
+	console      []ConsoleRow
+	notifs       []domain.Notification
+	activity     []domain.ActivityEvent
+	integrations []domain.Integration
 }
 
 // NewMemoryRepositories builds a complete in-memory Repositories from seed data.
@@ -93,6 +94,7 @@ func NewMemoryRepositories(data MemoryData) *Repositories {
 		Browser:       &browserRepo{s},
 		Notifications: &notificationRepo{s},
 		Activity:      &activityRepo{s},
+		Integrations:  &integrationRepo{s},
 	}
 }
 
@@ -677,4 +679,47 @@ func (r *activityRepo) Insert(e domain.ActivityEvent) domain.ActivityEvent {
 	defer r.s.mu.Unlock()
 	r.s.activity = append(r.s.activity, e)
 	return e
+}
+
+/* -------------------------- integrations ------------------------- */
+
+type integrationRepo struct{ s *store }
+
+func (r *integrationRepo) GetByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) (domain.Integration, bool) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	for _, it := range r.s.integrations {
+		if it.WorkspaceID == workspaceID && it.Provider == provider {
+			return it, true
+		}
+	}
+	return domain.Integration{}, false
+}
+
+// Upsert replaces an existing (workspace, provider) row or appends a new one.
+func (r *integrationRepo) Upsert(in domain.Integration) domain.Integration {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for i, it := range r.s.integrations {
+		if it.WorkspaceID == in.WorkspaceID && it.Provider == in.Provider {
+			in.ID = it.ID // preserve identity + creation time on refresh
+			in.CreatedAt = it.CreatedAt
+			r.s.integrations[i] = in
+			return in
+		}
+	}
+	r.s.integrations = append(r.s.integrations, in)
+	return in
+}
+
+func (r *integrationRepo) DeleteByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) bool {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for i, it := range r.s.integrations {
+		if it.WorkspaceID == workspaceID && it.Provider == provider {
+			r.s.integrations = append(r.s.integrations[:i], r.s.integrations[i+1:]...)
+			return true
+		}
+	}
+	return false
 }

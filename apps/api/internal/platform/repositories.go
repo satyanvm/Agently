@@ -144,6 +144,14 @@ type ActivityRepo interface {
 	Insert(event domain.ActivityEvent) domain.ActivityEvent
 }
 
+// IntegrationRepo stores third-party account connections (OAuth2). Upsert keys on
+// (workspace, provider) so re-connecting refreshes the stored token in place.
+type IntegrationRepo interface {
+	GetByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) (domain.Integration, bool)
+	Upsert(integration domain.Integration) domain.Integration
+	DeleteByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) bool
+}
+
 // Repositories is the full set of repositories handed to services.
 type Repositories struct {
 	Workspace     WorkspaceRepo
@@ -159,4 +167,5 @@ type Repositories struct {
 	Browser       BrowserRepo
 	Notifications NotificationRepo
 	Activity      ActivityRepo
+	Integrations  IntegrationRepo
 }

@@ -1,7 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Building2, CreditCard, Users, KeyRound, Server, Copy, Check } from "lucide-react";
+import { Building2, CreditCard, Users, KeyRound, Server, Copy, Check, Mail, Loader2 } from "lucide-react";
+import {
+  fetchIntegrations,
+  disconnectGoogle,
+  connectGoogleURL,
+  type IntegrationStatus,
+} from "@/lib/api";
 import { TopBar } from "@/components/shell/topbar";
 import { PageContainer, PageTitle } from "@/components/shell/page";
 import { Card } from "@/components/ui/card";
@@ -17,6 +23,7 @@ const SECTIONS = [
   { id: "general", label: "General", icon: Building2 },
   { id: "billing", label: "Billing & usage", icon: CreditCard },
   { id: "members", label: "Members", icon: Users },
+  { id: "integrations", label: "Integrations", icon: Mail },
   { id: "api", label: "API keys", icon: KeyRound },
   { id: "compute", label: "Compute", icon: Server },
 ] as const;
@@ -58,6 +65,7 @@ export default function SettingsPage() {
             {section === "general" && <General />}
             {section === "billing" && <Billing />}
             {section === "members" && <Members />}
+            {section === "integrations" && <Integrations />}
             {section === "api" && <ApiKeys />}
             {section === "compute" && <Compute />}
           </div>
@@ -186,6 +194,99 @@ function Members() {
           <Badge variant={p.role === "Owner" ? "accent" : "neutral"} size="sm">{p.role}</Badge>
         </div>
       ))}
+    </Card>
+  );
+}
+
+function Integrations() {
+  const [items, setItems] = React.useState<IntegrationStatus[] | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [banner, setBanner] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const load = React.useCallback(async () => {
+    try {
+      setItems(await fetchIntegrations());
+    } catch {
+      setItems([]);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+    // Reflect the OAuth callback result (?google=connected|error) as a banner.
+    const g = new URLSearchParams(window.location.search).get("google");
+    if (g === "connected") setBanner({ kind: "ok", text: "Gmail connected — runs will now email from your Google account." });
+    else if (g === "error") setBanner({ kind: "err", text: "Couldn't connect Gmail. Please try again." });
+  }, [load]);
+
+  const google = items?.find((i) => i.provider === "google");
+
+  const onDisconnect = async () => {
+    setBusy(true);
+    await disconnectGoogle();
+    await load();
+    setBusy(false);
+  };
+
+  return (
+    <Card>
+      <div className="border-b border-border px-5 py-4">
+        <h3 className="text-[14px] font-semibold text-fg">Email & integrations</h3>
+        <p className="mt-0.5 text-[12px] text-faint">
+          Connect an account so your digests are sent from a real address.
+        </p>
+      </div>
+
+      {banner && (
+        <div
+          className={cn(
+            "mx-5 mt-4 rounded-md border px-3 py-2 text-[12px]",
+            banner.kind === "ok"
+              ? "border-success/30 bg-success/10 text-success"
+              : "border-danger/30 bg-danger-bg text-danger",
+          )}
+        >
+          {banner.text}
+        </div>
+      )}
+
+      <Row
+        title="Gmail (send as you)"
+        desc={
+          google == null
+            ? "Loading…"
+            : !google.configured
+              ? "Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET to enable OAuth."
+              : google.connected
+                ? `Connected${google.accountEmail ? " · " + google.accountEmail : ""}`
+                : "Send digests from your own Gmail via OAuth2."
+        }
+      >
+        {google?.connected ? (
+          <div className="flex items-center gap-2">
+            <Badge variant="accent" size="sm">connected</Badge>
+            <Button variant="secondary" size="sm" onClick={onDisconnect} disabled={busy}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Disconnect
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={google != null && !google.configured}
+            onClick={() => {
+              window.location.href = connectGoogleURL;
+            }}
+          >
+            <Mail className="size-4" /> Connect Gmail
+          </Button>
+        )}
+      </Row>
+
+      <div className="px-5 py-4 text-[12px] text-faint">
+        No account connected? Runs fall back to a transactional provider (Resend,
+        from the app’s own domain) or SMTP — whichever is configured on the worker.
+      </div>
     </Card>
   );
 }

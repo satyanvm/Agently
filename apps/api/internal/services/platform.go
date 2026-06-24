@@ -1,6 +1,9 @@
 package services
 
 import (
+	"net/http"
+	"time"
+
 	"github.com/agently/api/internal/domain"
 	"github.com/agently/api/internal/platform"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +27,7 @@ type Platform struct {
 	Notifications *NotificationService
 	Activity      *ActivityService
 	Stats         *StatsService
+	Integrations  *IntegrationService
 }
 
 // Options configure platform construction. All fields are optional; sensible
@@ -103,5 +107,6 @@ func NewPlatform(opts Options) *Platform {
 		Notifications: NewNotificationService(deps, emit),
 		Activity:      NewActivityService(deps),
 		Stats:         NewStatsService(deps),
+		Integrations:  NewIntegrationService(deps, &http.Client{Timeout: 20 * time.Second}),
 	}
 }

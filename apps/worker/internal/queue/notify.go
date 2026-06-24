@@ -33,6 +33,29 @@ func (q *Queue) LoadRunMeta(ctx context.Context, runID string) (RunMeta, error) 
 	return m, nil
 }
 
+// GoogleIntegration is a workspace's connected Gmail account: a refresh token the
+// worker uses to send mail AS that account (option 2), plus the account address.
+type GoogleIntegration struct {
+	RefreshToken string
+	AccountEmail string
+}
+
+// LoadGoogleIntegration returns the workspace's connected Google account, if any.
+// ok=false when the workspace has not connected Gmail (the caller then falls back
+// to a transactional provider / SMTP). Never returns an error for "not connected".
+func (q *Queue) LoadGoogleIntegration(ctx context.Context, workspaceID string) (GoogleIntegration, bool) {
+	row := q.pool.QueryRow(ctx,
+		`select coalesce(refresh_token,''), coalesce(account_email,'')
+		   from integrations
+		  where workspace_id=$1 and provider='google' and refresh_token <> ''
+		  limit 1`, workspaceID)
+	var g GoogleIntegration
+	if err := row.Scan(&g.RefreshToken, &g.AccountEmail); err != nil {
+		return GoogleIntegration{}, false
+	}
+	return g, g.RefreshToken != ""
+}
+
 // LoadDigest returns the content of the run's primary result artifact (the digest
 // the Editor produced), for inclusion in the notification body. Empty if none.
 func (q *Queue) LoadDigest(ctx context.Context, runID string) string {

@@ -50,6 +50,16 @@ func main() {
 
 	plat := services.NewPlatform(opts)
 
+	// Control-plane scheduler: fires trigger='schedule' workflows when they come due
+	// (the "every day at 9am" path). Idempotent + restart-safe (see services/scheduler.go).
+	// SCHEDULER_TZ (IANA name) sets the zone "daily HH:MM" is interpreted in; default
+	// server-local. SCHEDULER=0 disables it (e.g. when running multiple API nodes).
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	defer schedCancel()
+	if os.Getenv("SCHEDULER") != "0" {
+		go plat.NewScheduler(os.Getenv("SCHEDULER_TZ")).Start(schedCtx)
+	}
+
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -66,6 +76,7 @@ func main() {
 		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 		<-stop
 		logger.Info("shutting down")
+		schedCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
