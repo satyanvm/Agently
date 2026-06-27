@@ -171,9 +171,15 @@ type Run struct {
 	Usage             Usage              `json:"usage"`
 	Error             *string            `json:"error"`
 	BrowserSessionID  *BrowserSessionId  `json:"browserSessionId"`
-	QueuedAt          Timestamp          `json:"queuedAt"`
-	StartedAt         *Timestamp         `json:"startedAt"`
-	FinishedAt        *Timestamp         `json:"finishedAt"`
+	// Engine names the execution plane that owns this run: "native" (the in-house
+	// Go worker, default) or "temporal" (the Temporal + LangGraph reasoner).
+	Engine string `json:"engine"`
+	// LangfuseTraceID deep-links the run to its trace in self-hosted Langfuse.
+	// Set by the reasoner for temporal runs; nil otherwise.
+	LangfuseTraceID *string    `json:"langfuseTraceId"`
+	QueuedAt        Timestamp  `json:"queuedAt"`
+	StartedAt       *Timestamp `json:"startedAt"`
+	FinishedAt      *Timestamp `json:"finishedAt"`
 }
 
 // RunDetail is a Run plus its expanded children, returned by the run detail

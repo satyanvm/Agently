@@ -32,11 +32,58 @@ services:
       - ./packages/db/migrations/0006_run_input.sql:/docker-entrypoint-initdb.d/0006_run_input.sql:ro
       - ./packages/db/migrations/0007_workflow_default_input.sql:/docker-entrypoint-initdb.d/0007_workflow_default_input.sql:ro
       - ./packages/db/migrations/0008_integrations.sql:/docker-entrypoint-initdb.d/0008_integrations.sql:ro
+      - ./packages/db/migrations/0009_temporal_engine.sql:/docker-entrypoint-initdb.d/0009_temporal_engine.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agently -d agently"]
       interval: 3s
       timeout: 3s
       retries: 10
 
+  # ── Temporal (durability plane for engine='temporal' runs) ──────────────────
+  # MIT-licensed. The auto-setup image creates the schema + default namespace on a
+  # dedicated Postgres so it never touches the agently app database. Reasoning runs
+  # *inside* this: each LangGraph node is a Temporal activity (see apps/reasoner).
+  temporal-postgres:
+    image: postgres:16
+    container_name: agently-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - agently-temporal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: agently-temporal
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+    ports:
+      - "7233:7233"   # gRPC frontend (TEMPORAL_HOSTPORT)
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    container_name: agently-temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8080:8080"   # Temporal Web UI
+
 volumes:
   agently-pgdata:
+  agently-temporal-pgdata:

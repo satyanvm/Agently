@@ -111,6 +111,15 @@ func launchRun(p *services.Platform) http.HandlerFunc {
 		handle(w, func() (any, int, error) {
 			slug := chi.URLParam(r, "slug")
 			body, _ := decodeBody(r)
+			// Allow ?engine=temporal as a convenience; an explicit body value wins.
+			if body == nil {
+				body = map[string]any{}
+			}
+			if _, ok := body["engine"]; !ok {
+				if e := r.URL.Query().Get("engine"); e != "" {
+					body["engine"] = e
+				}
+			}
 			input, err := validate.ParseLaunchRunInput(body)
 			if err != nil {
 				return nil, 0, err

@@ -38,6 +38,10 @@ import { cn, formatCost, formatCompact, formatClock, formatDuration, NOW } from 
 
 type Tab = "overview" | "logs" | "agents" | "browser" | "artifacts";
 
+// Base URL of self-hosted Langfuse, for deep-linking temporal runs' traces.
+const LANGFUSE_HOST =
+  process.env.NEXT_PUBLIC_LANGFUSE_HOST ?? "http://localhost:3001";
+
 const TRIGGER = {
   manual: { icon: MousePointerClick, label: "Manual" },
   schedule: { icon: Calendar, label: "Scheduled" },
@@ -103,6 +107,31 @@ export function RunDetail({
             </span>
             <span className="text-ghost">·</span>
             <span>started {formatClock(run.startedAt ?? run.queuedAt)}</span>
+            {run.engine === "temporal" && (
+              <>
+                <span className="text-ghost">·</span>
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-faint"
+                  title="Executed by the Temporal + LangGraph reasoner"
+                >
+                  <GitBranch className="size-3" /> temporal
+                </span>
+              </>
+            )}
+            {run.langfuseTraceId && (
+              <>
+                <span className="text-ghost">·</span>
+                <a
+                  href={`${LANGFUSE_HOST}/project?session=${encodeURIComponent(run.langfuseTraceId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-accent hover:underline"
+                  title={`Langfuse session ${run.langfuseTraceId}`}
+                >
+                  <Globe className="size-3.5" /> View trace in Langfuse
+                </a>
+              </>
+            )}
           </div>
         </div>
 

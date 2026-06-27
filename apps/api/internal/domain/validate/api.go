@@ -236,7 +236,12 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
+	// Engine selects the execution plane: "native" (default, the in-house Go
+	// worker) or "temporal" (the Temporal + LangGraph reasoner).
+	Engine string
 }
+
+var validEngines = map[string]bool{"native": true, "temporal": true}
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	v := &ValidationError{}
@@ -246,9 +251,16 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	}
 	v.enumValue("trigger", trigger, domain.ValidTriggerTypes)
 
+	engine := getString(body, "engine")
+	if engine == "" {
+		engine = "native"
+	}
+	v.enumValue("engine", engine, validEngines)
+
 	out := LaunchRunInput{
 		Input:   getMap(body, "input"),
 		Trigger: domain.TriggerType(trigger),
+		Engine:  engine,
 	}
 	if hasKey(body, "region") {
 		r := getString(body, "region")

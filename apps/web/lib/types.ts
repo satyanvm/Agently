@@ -128,6 +128,10 @@ export interface WorkflowRun {
   artifacts: RunArtifact[];
   /** id of the primary browser session, if any. */
   browserSessionId?: string;
+  /** execution plane: "native" (Go worker) or "temporal" (LangGraph reasoner). */
+  engine?: string;
+  /** Langfuse session/trace handle for temporal runs, for deep-linking. */
+  langfuseTraceId?: string | null;
 }
 
 export interface LogEntry {

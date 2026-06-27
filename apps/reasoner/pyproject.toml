@@ -1,0 +1,28 @@
+[project]
+name = "agently-reasoner"
+version = "0.1.0"
+description = "Agently reasoning plane: LangGraph graphs executed as Temporal activities, traced in Langfuse, writing back to the shared Agently Postgres."
+requires-python = ">=3.11"
+dependencies = [
+    # Temporal Python SDK with the (pre-GA) LangGraph plugin. 1.27+ required.
+    "temporalio[langgraph]>=1.27.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    # Langfuse self-hosted observability (OTEL-based v3 SDK + LangChain callback).
+    "langfuse>=3.0.0",
+    # Browser infrastructure: drive Browserbase over CDP.
+    "playwright>=1.45.0",
+    "httpx>=0.27.0",
+    # Write back into the shared Agently Postgres (async).
+    "psycopg[binary]>=3.2.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["reasoner*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

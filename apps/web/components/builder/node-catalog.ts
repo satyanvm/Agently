@@ -1,0 +1,194 @@
+import {
+  Bot,
+  Webhook,
+  Clock,
+  MousePointerClick,
+  Globe,
+  Mail,
+  Database,
+  GitBranch,
+  Filter,
+  Repeat,
+  Wrench,
+  FileText,
+  Code2,
+  Send,
+  MessageSquare,
+  type LucideIcon,
+} from "lucide-react";
+
+export type NodeKind = "trigger" | "agent" | "tool" | "logic" | "output";
+
+export interface NodeSpec {
+  /** Unique catalog id (used as the React Flow node type if "custom" routing was used). */
+  id: string;
+  /** Display name. */
+  label: string;
+  /** Short one-line description shown in the palette + inspector. */
+  description: string;
+  kind: NodeKind;
+  icon: LucideIcon;
+  /** Tailwind text class for the icon (mapped onto the design system status palette). */
+  tone: string;
+  /** Tailwind background class for the icon chip. */
+  toneBg: string;
+}
+
+export const NODE_CATALOG: NodeSpec[] = [
+  // ── Triggers ────────────────────────────────────────────────────────────
+  {
+    id: "trigger.manual",
+    label: "Manual trigger",
+    description: "Start the workflow on demand from the dashboard.",
+    kind: "trigger",
+    icon: MousePointerClick,
+    tone: "text-running",
+    toneBg: "bg-running-bg",
+  },
+  {
+    id: "trigger.webhook",
+    label: "Webhook",
+    description: "Receive an HTTP request and start the workflow.",
+    kind: "trigger",
+    icon: Webhook,
+    tone: "text-running",
+    toneBg: "bg-running-bg",
+  },
+  {
+    id: "trigger.schedule",
+    label: "Schedule",
+    description: "Run on a cron schedule (e.g. every weekday at 9am).",
+    kind: "trigger",
+    icon: Clock,
+    tone: "text-running",
+    toneBg: "bg-running-bg",
+  },
+
+  // ── Agents ──────────────────────────────────────────────────────────────
+  {
+    id: "agent.llm",
+    label: "AI agent",
+    description: "Reason, plan, and call tools with a large language model.",
+    kind: "agent",
+    icon: Bot,
+    tone: "text-accent",
+    toneBg: "bg-accent-bg",
+  },
+  {
+    id: "agent.chat",
+    label: "Chat completion",
+    description: "Single-turn prompt → response, no tool use.",
+    kind: "agent",
+    icon: MessageSquare,
+    tone: "text-accent",
+    toneBg: "bg-accent-bg",
+  },
+
+  // ── Tools ───────────────────────────────────────────────────────────────
+  {
+    id: "tool.browser",
+    label: "Browser",
+    description: "Navigate, click, extract — drive a real browser.",
+    kind: "tool",
+    icon: Globe,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "tool.http",
+    label: "HTTP request",
+    description: "Call any REST API.",
+    kind: "tool",
+    icon: Wrench,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "tool.code",
+    label: "Run code",
+    description: "Execute a sandboxed JavaScript or Python snippet.",
+    kind: "tool",
+    icon: Code2,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "tool.db",
+    label: "Database query",
+    description: "Read or write rows in a connected database.",
+    kind: "tool",
+    icon: Database,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+
+  // ── Logic ───────────────────────────────────────────────────────────────
+  {
+    id: "logic.branch",
+    label: "If / Else",
+    description: "Branch the flow on a boolean condition.",
+    kind: "logic",
+    icon: GitBranch,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
+    id: "logic.filter",
+    label: "Filter",
+    description: "Pass items through only if they match a rule.",
+    kind: "logic",
+    icon: Filter,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
+    id: "logic.loop",
+    label: "Loop",
+    description: "Iterate over a list and run the downstream branch for each item.",
+    kind: "logic",
+    icon: Repeat,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+
+  // ── Outputs ─────────────────────────────────────────────────────────────
+  {
+    id: "output.email",
+    label: "Send email",
+    description: "Deliver a formatted email when this step is reached.",
+    kind: "output",
+    icon: Mail,
+    tone: "text-danger",
+    toneBg: "bg-danger-bg",
+  },
+  {
+    id: "output.slack",
+    label: "Send to Slack",
+    description: "Post a message to a Slack channel or DM.",
+    kind: "output",
+    icon: Send,
+    tone: "text-danger",
+    toneBg: "bg-danger-bg",
+  },
+  {
+    id: "output.report",
+    label: "Generate report",
+    description: "Compose a structured report artifact (markdown / PDF).",
+    kind: "output",
+    icon: FileText,
+    tone: "text-danger",
+    toneBg: "bg-danger-bg",
+  },
+];
+
+export const NODE_KIND_META: Record<NodeKind, { label: string; tone: string }> = {
+  trigger: { label: "Triggers", tone: "text-running" },
+  agent: { label: "Agents", tone: "text-accent" },
+  tool: { label: "Tools", tone: "text-success" },
+  logic: { label: "Logic", tone: "text-warn" },
+  output: { label: "Outputs", tone: "text-danger" },
+};
+
+export function findNodeSpec(id: string): NodeSpec | undefined {
+  return NODE_CATALOG.find((n) => n.id === id);
+}

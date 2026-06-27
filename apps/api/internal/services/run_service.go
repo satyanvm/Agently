@@ -116,15 +116,41 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	// Created as QUEUED: the control plane (this API) only enqueues; the data
 	// plane (worker) claims it via claim_next_run() and drives execution. The old
 	// flow marked it RUNNING here because there was no worker — that's now wrong.
+	engine := input.Engine
+	if engine == "" {
+		engine = "native"
+	}
+	queuedStep := "Queued"
+	if engine == "temporal" {
+		// The Temporal reasoner is dispatched from a separate poller and reports its
+		// own progress; flag the wait state distinctly so the UI reads honestly.
+		queuedStep = "Queued (temporal)"
+	}
 	run := domain.Run{
 		ID: runID, WorkspaceID: wf.WorkspaceID, WorkflowID: wf.ID, WorkflowVersionID: wf.CurrentVersionID,
 		WorkflowName: wf.Name, WorkflowSlug: wf.Slug, Number: s.deps.Repos.Runs.NextNumber(wf.ID),
 		Status: domain.RunQueued, Trigger: input.Trigger, Input: runInput, TriggeredBy: triggeredBy, Region: region,
-		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: "Queued",
+		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: queuedStep,
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
+		Engine: engine,
 		QueuedAt: now, StartedAt: nil, FinishedAt: nil,
 	}
 	s.deps.Repos.Runs.Insert(run)
+
+	// Temporal runs are driven by the LangGraph reasoner, which materializes its own
+	// graph nodes (plan/browse/synthesize/deliver) as it executes — so the control
+	// plane does NOT pre-materialize run agents from the stored workflow graph here.
+	if engine == "temporal" {
+		s.emit(domain.RunQueuedEvent{RunID: runID, WorkflowID: wf.ID})
+		s.logs.Append(runID, AppendLogInput{Level: domain.LevelInfo, Channel: domain.ChannelSystem, Source: "scheduler", Message: "Run #" + itoa(run.Number) + " launched on the Temporal reasoner (" + string(input.Trigger) + ")"})
+		s.logs.Append(runID, AppendLogInput{Level: domain.LevelInfo, Channel: domain.ChannelSystem, Source: "runtime", Message: "Awaiting reasoner dispatch · " + region})
+		s.deps.Repos.Activity.Insert(domain.ActivityEvent{
+			ID: domain.NewActivityId(), WorkspaceID: wf.WorkspaceID, Kind: domain.ActivityRun,
+			Actor: triggeredBy.Name, Text: "started run #" + itoa(run.Number) + " of " + wf.Name + " (temporal)",
+			WorkflowSlug: domain.Ptr(wf.Slug), RunID: domain.Ptr(runID), At: now,
+		})
+		return s.detail(run), nil
+	}
 
 	// Materialize run agents from the workflow's current version graph.
 	var nodes []domain.GraphNode
