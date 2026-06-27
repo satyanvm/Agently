@@ -1,0 +1,147 @@
+# Self-hosted Langfuse — the observability plane for engine='temporal' runs.
+#
+#   docker compose -f docker-compose.langfuse.yml up -d
+#   open http://localhost:3001   → create an org/project → copy the public+secret
+#   keys into .env (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY).
+#
+# Kept in a SEPARATE compose file on purpose: the stack is heavy (ClickHouse +
+# Redis + MinIO) and entirely optional. The reasoner still runs and the Agently UI
+# still shows runs without it — Langfuse only adds the deep per-node / per-LLM
+# trace view. Web is exposed on 3001 so it never clashes with Next.js on 3000.
+#
+# Mirrors the upstream Langfuse v3 self-host topology
+# (https://langfuse.com/self-hosting/docker-compose).
+services:
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: agently-langfuse-web
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      SALT: "changeme-langfuse-salt"
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: "changeme-nextauth-secret"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      REDIS_CONNECTION_STRING: redis://redis:6379
+      # Headless bootstrap: auto-create org/project/user + API keys on first boot
+      # so the stack is usable without going through the UI signup flow.
+      LANGFUSE_INIT_ORG_ID: agently
+      LANGFUSE_INIT_ORG_NAME: Agently
+      LANGFUSE_INIT_PROJECT_ID: agently
+      LANGFUSE_INIT_PROJECT_NAME: Agently
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-agently-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-agently-local
+      LANGFUSE_INIT_USER_EMAIL: dev@agently.local
+      LANGFUSE_INIT_USER_NAME: Dev
+      LANGFUSE_INIT_USER_PASSWORD: agently-dev-pw
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: agently-langfuse-worker
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      SALT: "changeme-langfuse-salt"
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      REDIS_CONNECTION_STRING: redis://redis:6379
+
+  langfuse-postgres:
+    image: postgres:16
+    container_name: agently-langfuse-postgres
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - agently-langfuse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: agently-langfuse-clickhouse
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - agently-langfuse-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    container_name: agently-langfuse-minio
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    # Create the bucket on first boot, then start MinIO.
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
+    volumes:
+      - agently-langfuse-minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: agently-langfuse-redis
+    command: --requirepass ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  agently-langfuse-pgdata:
+  agently-langfuse-clickhouse:
+  agently-langfuse-minio:

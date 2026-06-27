@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: agently-reasoner
+Version: 0.1.0
+Summary: Agently reasoning plane: LangGraph graphs executed as Temporal activities, traced in Langfuse, writing back to the shared Agently Postgres.
+Requires-Python: >=3.11
+Requires-Dist: temporalio[langgraph]>=1.27.0
+Requires-Dist: langgraph>=0.2.0
+Requires-Dist: langchain-core>=0.3.0
+Requires-Dist: langchain-anthropic>=0.3.0
+Requires-Dist: langfuse>=3.0.0
+Requires-Dist: playwright>=1.45.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: psycopg[binary]>=3.2.0
+Requires-Dist: python-dotenv>=1.0.0

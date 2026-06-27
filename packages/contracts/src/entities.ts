@@ -219,6 +219,10 @@ export const Run = z.object({
   usage: Usage,
   error: z.string().nullable(),
   browserSessionId: Id.BrowserSessionId.nullable(),
+  /** Execution plane: "native" (in-house Go worker) or "temporal" (LangGraph reasoner). */
+  engine: z.string().default("native"),
+  /** Deep-link handle into self-hosted Langfuse; set by the reasoner for temporal runs. */
+  langfuseTraceId: z.string().nullable().default(null),
   queuedAt: Timestamp,
   startedAt: Timestamp.nullable(),
   finishedAt: Timestamp.nullable(),

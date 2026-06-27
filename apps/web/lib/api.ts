@@ -37,6 +37,8 @@ interface ApiRun {
   steps: { done: number; total: number };
   currentStep: string;
   browserSessionId: string | null;
+  engine?: string;
+  langfuseTraceId?: string | null;
 }
 
 /** Normalize an API run into the UI's WorkflowRun (flatten usage, default lists). */
@@ -63,6 +65,8 @@ function toWorkflowRun(r: ApiRun): WorkflowRun {
     messages: [],
     artifacts: [],
     browserSessionId: r.browserSessionId ?? undefined,
+    engine: r.engine ?? "native",
+    langfuseTraceId: r.langfuseTraceId ?? null,
   };
 }
 
