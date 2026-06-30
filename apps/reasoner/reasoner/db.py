@@ -62,6 +62,41 @@ async def claim_queued_temporal_runs(limit: int = 10) -> list[dict[str, Any]]:
         return [dict(zip(cols, row)) for row in rows]
 
 
+# ──────────────────────────── graph fetch ────────────────────────────
+
+async def fetch_graph_nodes(run_id: str) -> list[dict[str, Any]]:
+    """Return the GraphNode list the run should execute.
+
+    Resolves the run → its workflow → the workflow's current version → that
+    version's `nodes` jsonb. This is the user-composed graph from the visual
+    builder (or the prompt compiler): a list of dicts with key/role/type/config/
+    dependsOn. Returns [] when the workflow has no version, so the caller can fall
+    back to the static reasoning graph.
+
+    Prefer the version the run was launched against (runs.workflow_version_id) so
+    run history stays pinned to the graph it actually used; fall back to the
+    workflow's current version when the run predates version pinning.
+    """
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """
+            select coalesce(wv_run.nodes, wv_cur.nodes, '[]'::jsonb)
+              from runs r
+              join workflows w on w.id = r.workflow_id
+              left join workflow_versions wv_run on wv_run.id = r.workflow_version_id
+              left join workflow_versions wv_cur on wv_cur.id = w.current_version_id
+             where r.id = %s
+            """,
+            (run_id,),
+        )
+        row = await cur.fetchone()
+        if not row or row[0] is None:
+            return []
+        nodes = row[0]
+        # psycopg returns jsonb already decoded to Python objects.
+        return list(nodes) if isinstance(nodes, list) else []
+
+
 # ─────────────────────────────── runs ───────────────────────────────
 
 async def next_log_seq(run_id: str) -> int:

@@ -185,6 +185,86 @@ func ParseCreateWorkflowInput(body map[string]any) (CreateWorkflowInput, error) 
 	return out, nil
 }
 
+// ParseSaveGraphInput parses the visual builder's Save payload: {nodes: [...]}.
+// Each node carries a builder type + per-type config alongside the existing graph
+// fields. Validation is intentionally lenient (the builder is the source of truth
+// for shape) — we guarantee a stable key, a valid role, and non-nil collections so
+// the persisted version is always well-formed and runnable.
+func ParseSaveGraphInput(body map[string]any) ([]domain.GraphNode, error) {
+	v := &ValidationError{}
+	raw, _ := body["nodes"].([]any)
+	if len(raw) == 0 {
+		v.add("nodes", "at least one node is required")
+		return nil, v
+	}
+	if len(raw) > 200 {
+		v.add("nodes", "too many nodes (max 200)")
+		return nil, v
+	}
+
+	nodes := make([]domain.GraphNode, 0, len(raw))
+	seen := map[string]bool{}
+	for i, item := range raw {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			v.add("nodes", "node "+itoa(i)+" is not an object")
+			continue
+		}
+		key := getString(obj, "key")
+		if strings.TrimSpace(key) == "" {
+			v.add("nodes."+itoa(i)+".key", "key is required")
+			continue
+		}
+		if seen[key] {
+			v.add("nodes."+itoa(i)+".key", "duplicate key "+key)
+			continue
+		}
+		seen[key] = true
+
+		role := getString(obj, "role")
+		if !domain.ValidAgentRoles[role] {
+			role = "orchestrator" // typed builder nodes don't all map to an agent role
+		}
+		nodeType := getString(obj, "type")
+		if strings.TrimSpace(nodeType) == "" {
+			nodeType = "agent.llm"
+		}
+		config := getMap(obj, "config")
+		if config == nil {
+			config = map[string]any{}
+		}
+
+		nodes = append(nodes, domain.GraphNode{
+			Key:       key,
+			Name:      getString(obj, "name"),
+			Role:      domain.AgentRole(role),
+			Model:     getString(obj, "model"),
+			Col:       getInt(obj, "col"),
+			Row:       getInt(obj, "row"),
+			DependsOn: getStringSlice(obj, "dependsOn"),
+			Type:      nodeType,
+			Config:    config,
+		})
+	}
+	if v.HasErrors() {
+		return nil, v
+	}
+	// Reject edges to non-existent nodes — keeps the persisted DAG self-consistent.
+	for i := range nodes {
+		clean := nodes[i].DependsOn[:0]
+		for _, dep := range nodes[i].DependsOn {
+			if seen[dep] {
+				clean = append(clean, dep)
+			}
+		}
+		nodes[i].DependsOn = clean
+		if nodes[i].DependsOn == nil {
+			nodes[i].DependsOn = []string{}
+		}
+	}
+	return nodes, nil
+}
+
 // CreateAgentInput mirrors the zod CreateAgentInput.
 type CreateAgentInput struct {
 	Name        string

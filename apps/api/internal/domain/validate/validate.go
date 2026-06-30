@@ -112,6 +112,23 @@ func getMap(obj map[string]any, key string) map[string]any {
 	return nil
 }
 
+// getInt reads an integer off a decoded JSON body. JSON numbers decode as
+// float64, so accept that (and a few other numeric forms) and truncate.
+func getInt(obj map[string]any, key string) int {
+	switch n := obj[key].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	}
+	return 0
+}
+
+// itoa is the package-local int→string used in field paths.
+func itoa(i int) string { return strconv.Itoa(i) }
+
 // hasKey reports whether a key is present (and non-null) in the object.
 func hasKey(obj map[string]any, key string) bool {
 	v, ok := obj[key]
