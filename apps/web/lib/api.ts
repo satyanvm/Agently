@@ -357,6 +357,80 @@ export async function fetchWorkflowGraph(slug: string): Promise<AgentNode[]> {
   );
 }
 
+/* ----------------------------- visual builder ---------------------------- */
+
+/** A node as the builder reads/writes it — the full persisted GraphNode shape,
+ *  including the palette `type` and per-type `config`. */
+export interface BuilderNode {
+  key: string;
+  type: string;
+  name: string;
+  role: string;
+  model: string;
+  col: number;
+  row: number;
+  dependsOn: string[];
+  config: Record<string, unknown>;
+}
+
+/** Load a workflow's current graph for editing (raw nodes, not the run view). */
+export async function fetchBuilderGraph(slug: string): Promise<BuilderNode[]> {
+  const res = await getJSON<{ nodes: Partial<BuilderNode>[] }>(
+    `/api/workflows/${slug}/graph`,
+  );
+  return (res.nodes ?? []).map((n) => ({
+    key: n.key ?? "",
+    type: n.type || "agent.llm",
+    name: n.name ?? "",
+    role: n.role ?? "orchestrator",
+    model: n.model ?? "claude-sonnet-4-6",
+    col: n.col ?? 0,
+    row: n.row ?? 0,
+    dependsOn: n.dependsOn ?? [],
+    config: n.config ?? {},
+  }));
+}
+
+/** Persist the builder's graph as a new workflow version (set as current). */
+export async function saveBuilderGraph(
+  slug: string,
+  nodes: BuilderNode[],
+): Promise<void> {
+  await getJSON(`/api/workflows/${slug}/graph`, {
+    method: "PUT",
+    body: JSON.stringify({ nodes }),
+  });
+}
+
+/**
+ * React Flow ⇄ domain graph client. These are the functions the visual builder
+ * calls: they speak the canvas's native { nodes, edges } shape and delegate the
+ * format translation to lib/builder-graph.ts, so the component never has to know
+ * the domain GraphNode shape.
+ */
+import type { Edge } from "@xyflow/react";
+import type { WorkflowNodeType } from "../components/builder/workflow-builder";
+import { fromBuilderNodes, toBuilderNodes } from "./builder-graph";
+
+/** Load a workflow's current graph as React Flow { nodes, edges } for the canvas. */
+export async function getWorkflowGraph(
+  slug: string,
+): Promise<{ nodes: WorkflowNodeType[]; edges: Edge[] }> {
+  const builderNodes = await fetchBuilderGraph(slug);
+  return fromBuilderNodes(builderNodes);
+}
+
+/** Persist a React Flow { nodes, edges } canvas as a new workflow version. The
+ *  API requires every node to carry a non-nil dependsOn + config; the mapping
+ *  guarantees both. */
+export async function saveWorkflowGraph(
+  slug: string,
+  graph: { nodes: WorkflowNodeType[]; edges: Edge[] },
+): Promise<void> {
+  const builderNodes = toBuilderNodes(graph.nodes, graph.edges);
+  await saveBuilderGraph(slug, builderNodes);
+}
+
 /** Runs for one workflow (newest first), normalized. */
 export async function fetchWorkflowRuns(slug: string): Promise<WorkflowRun[]> {
   const page = await getJSON<Page<ApiRun>>(`/api/workflows/${slug}/runs`);

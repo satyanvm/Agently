@@ -24,6 +24,7 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Post("/workflows/plan", planWorkflow(p))
 		r.Get("/workflows/{slug}", getWorkflow(p))
 		r.Get("/workflows/{slug}/graph", graphWorkflow(p))
+		r.Put("/workflows/{slug}/graph", saveWorkflowGraph(p))
 		r.Post("/workflows/{slug}/runs", launchRun(p))
 		r.Get("/workflows/{slug}/runs", listWorkflowRuns(p))
 

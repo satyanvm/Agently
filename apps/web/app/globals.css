@@ -361,3 +361,41 @@
 .dark .text-rose-600 { color: #ff8aa3; }
 .dark .text-teal-600 { color: #56d6c2; }
 .dark .text-violet-600 { color: #a89dff; }
+
+/* ------------------------------------------------------------------ *
+   React Flow customization
+ * ------------------------------------------------------------------ */
+.react-flow__node {
+  cursor: pointer;
+}
+
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.react-flow__edge-path {
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--color-accent);
+}
+
+.react-flow__controls {
+  border-radius: var(--radius-md);
+}
+
+.react-flow__controls-button {
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+  color: var(--color-muted);
+  transition: all 150ms;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-surface-3);
+  color: var(--color-fg);
+}

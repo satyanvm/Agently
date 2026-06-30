@@ -192,3 +192,88 @@ export const NODE_KIND_META: Record<NodeKind, { label: string; tone: string }> =
 export function findNodeSpec(id: string): NodeSpec | undefined {
   return NODE_CATALOG.find((n) => n.id === id);
 }
+
+/** A single editable field in a node's inspector form. */
+export interface NodeField {
+  key: string;
+  label: string;
+  control: "text" | "textarea" | "number" | "select";
+  placeholder?: string;
+  options?: string[];
+  help?: string;
+}
+
+/**
+ * The config form for each node type, keyed by catalog id. The inspector renders
+ * these generically; the reasoner's executor for each type reads the same keys.
+ * Keep the two in sync (apps/reasoner/reasoner/nodes.py).
+ */
+export const NODE_FIELDS: Record<string, NodeField[]> = {
+  "trigger.manual": [],
+  "trigger.webhook": [
+    { key: "path", label: "Path", control: "text", placeholder: "/hooks/my-workflow" },
+  ],
+  "trigger.schedule": [
+    { key: "cron", label: "Cron", control: "text", placeholder: "0 9 * * 1-5" },
+  ],
+  "agent.llm": [
+    { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },
+    { key: "prompt", label: "Prompt", control: "textarea", placeholder: "Use {{input.topic}} and upstream outputs…" },
+    { key: "model", label: "Model", control: "select", options: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] },
+  ],
+  "agent.chat": [
+    { key: "system", label: "System prompt", control: "textarea" },
+    { key: "prompt", label: "Prompt", control: "textarea" },
+    { key: "model", label: "Model", control: "select", options: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] },
+  ],
+  "tool.browser": [
+    { key: "urls", label: "URLs (one per line)", control: "textarea", placeholder: "https://example.com" },
+  ],
+  "tool.http": [
+    { key: "method", label: "Method", control: "select", options: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+    { key: "url", label: "URL", control: "text", placeholder: "https://api.example.com/v1/resource" },
+    { key: "headers", label: "Headers (JSON)", control: "textarea", placeholder: '{ "Authorization": "Bearer …" }' },
+    { key: "body", label: "Body", control: "textarea" },
+  ],
+  "tool.code": [
+    { key: "language", label: "Language", control: "select", options: ["python", "javascript"] },
+    { key: "source", label: "Source", control: "textarea", help: "Recorded, not executed on the shared runtime." },
+  ],
+  "tool.db": [
+    { key: "query", label: "SQL", control: "textarea", help: "Recorded, not executed on the shared database." },
+  ],
+  "logic.branch": [
+    { key: "condition", label: "Condition", control: "text", placeholder: "outputs.fetch.status == 200" },
+  ],
+  "logic.filter": [
+    { key: "condition", label: "Keep when", control: "text", placeholder: "item.score > 0.5" },
+  ],
+  "logic.loop": [
+    { key: "items", label: "Items expression", control: "text", placeholder: "outputs.fetch.items" },
+  ],
+  "output.email": [
+    { key: "to", label: "To", control: "text", placeholder: "you@example.com" },
+    { key: "subject", label: "Subject", control: "text" },
+  ],
+  "output.slack": [
+    { key: "webhookUrl", label: "Webhook URL", control: "text", placeholder: "https://hooks.slack.com/…" },
+    { key: "message", label: "Message", control: "textarea" },
+  ],
+  "output.report": [
+    { key: "title", label: "Title", control: "text", placeholder: "Digest" },
+    { key: "format", label: "Format", control: "select", options: ["markdown", "pdf"] },
+  ],
+};
+
+export function nodeFields(typeId: string): NodeField[] {
+  return NODE_FIELDS[typeId] ?? [];
+}
+
+/** Seed config (empty strings) so a freshly-dropped node has all its keys. */
+export function defaultConfig(typeId: string): Record<string, unknown> {
+  const cfg: Record<string, unknown> = {};
+  for (const f of nodeFields(typeId)) {
+    cfg[f.key] = f.control === "select" ? f.options?.[0] ?? "" : "";
+  }
+  return cfg;
+}

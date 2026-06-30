@@ -101,6 +101,20 @@ export const GraphNode = z.object({
   col: z.number().int().nonnegative(),
   row: z.number().int().nonnegative(),
   dependsOn: z.array(z.string()),
+  /**
+   * Catalog id from the visual builder's node palette (e.g. "agent.llm",
+   * "tool.http", "logic.branch"). Defaults to "agent.llm" so graphs compiled
+   * from a prompt — which predate the builder and carry only agent nodes —
+   * keep behaving exactly as before.
+   */
+  type: z.string().default("agent.llm"),
+  /**
+   * Per-node configuration, shape determined by `type` (e.g. {url, method} for
+   * tool.http, {condition} for logic.branch). Open by design so new node types
+   * don't require a schema change; the reasoner's executor for each type reads
+   * the keys it needs.
+   */
+  config: z.record(z.unknown()).default({}),
 });
 export type GraphNode = z.infer<typeof GraphNode>;
 

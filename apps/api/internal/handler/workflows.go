@@ -88,6 +88,29 @@ func graphWorkflow(p *services.Platform) http.HandlerFunc {
 	}
 }
 
+// saveWorkflowGraph persists a new version of the workflow's graph from the visual
+// builder (PUT /workflows/{slug}/graph) and returns the updated workflow summary.
+func saveWorkflowGraph(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			slug := chi.URLParam(r, "slug")
+			body, _ := decodeBody(r)
+			if body == nil {
+				body = map[string]any{}
+			}
+			nodes, err := validate.ParseSaveGraphInput(body)
+			if err != nil {
+				return nil, 0, err
+			}
+			summary, err := p.Workflows.SaveGraph(slug, nodes)
+			if err != nil {
+				return nil, 0, err
+			}
+			return summary, http.StatusOK, nil
+		})
+	}
+}
+
 func listWorkflowRuns(p *services.Platform) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handle(w, func() (any, int, error) {

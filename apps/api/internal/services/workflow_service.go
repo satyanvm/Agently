@@ -206,6 +206,49 @@ func (s *WorkflowService) GraphNodes(slug string) ([]domain.GraphNode, error) {
 	return version.Nodes, nil
 }
 
+// SaveGraph persists a new version of a workflow's graph from the visual builder
+// and links it as the current version, so the next run executes exactly what the
+// user assembled. Versioning is append-only: every save mints version N+1 and never
+// mutates an existing version (run history keeps pointing at the version it used).
+func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (domain.WorkflowSummary, error) {
+	wf, ok := s.deps.Repos.Workflows.GetBySlug(slug)
+	if !ok {
+		return domain.WorkflowSummary{}, domain.NotFound("workflow")
+	}
+
+	// Next version = max existing + 1 (versions are 1-based and contiguous-ish).
+	next := 1
+	for _, ver := range s.deps.Repos.Versions.ListByWorkflow(wf.ID) {
+		if ver.Version >= next {
+			next = ver.Version + 1
+		}
+	}
+
+	now := domain.Timestamp(s.deps.Clock.ISO())
+	var createdBy *domain.MemberId
+	if members := s.deps.Repos.Members.All(); len(members) > 0 {
+		createdBy = &members[0].ID
+	}
+
+	versionID := domain.NewWorkflowVersionId()
+	s.deps.Repos.Versions.Insert(domain.WorkflowVersion{
+		ID: versionID, WorkflowID: wf.ID, Version: next, Note: "Saved from builder",
+		CreatedBy: createdBy, CreatedAt: now, Nodes: nodes,
+	})
+
+	agentCount := len(nodes)
+	if _, err := s.deps.Repos.Workflows.Update(wf.ID, platform.WorkflowPatch{
+		CurrentVersionID: &versionID, AgentCount: &agentCount, UpdatedAt: &now,
+	}); err != nil {
+		return domain.WorkflowSummary{}, err
+	}
+
+	wf.CurrentVersionID = &versionID
+	wf.AgentCount = agentCount
+	wf.UpdatedAt = now
+	return s.ToSummary(wf), nil
+}
+
 // countFetchersAndEditor is just len(nodes), named for intent at the call site.
 func countFetchersAndEditor(nodes []domain.GraphNode) int { return len(nodes) }
 

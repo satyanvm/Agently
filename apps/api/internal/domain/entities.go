@@ -62,6 +62,11 @@ type GraphNode struct {
 	Col               int                `json:"col"`
 	Row               int                `json:"row"`
 	DependsOn         []string           `json:"dependsOn"`
+	// Type is the builder palette's catalog id (e.g. "agent.llm", "tool.http").
+	// Empty on graphs compiled from a prompt; treated as "agent.llm" downstream.
+	Type string `json:"type"`
+	// Config is per-node configuration whose shape depends on Type. Open by design.
+	Config map[string]any `json:"config"`
 }
 
 type WorkflowVersion struct {
