@@ -57,16 +57,31 @@ func New() Provider {
 		if model == "" {
 			model = "claude-sonnet-4-6"
 		}
-		return &withFallback{primary: &anthropic{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}}
+		base := resolveBaseURL("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+		return &withFallback{primary: &anthropic{key: key, model: model, base: base, http: &http.Client{Timeout: 120 * time.Second}}}
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		model := os.Getenv("OPENAI_MODEL")
 		if model == "" {
 			model = "gpt-4o"
 		}
-		return &withFallback{primary: &openai{key: key, model: model, http: &http.Client{Timeout: 120 * time.Second}}}
+		base := resolveBaseURL("OPENAI_BASE_URL", "https://api.openai.com")
+		return &withFallback{primary: &openai{key: key, model: model, base: base, http: &http.Client{Timeout: 120 * time.Second}}}
 	}
 	return &mock{}
+}
+
+// resolveBaseURL lets a gateway/proxy override the provider host (e.g. an
+// Anthropic-compatible gateway). Mirrors the Python reasoner, which already honors
+// ANTHROPIC_BASE_URL — so the native worker and the reasoner reach the same backend
+// with the same key instead of one silently degrading to the mock. The value is the
+// host root; the caller appends the standard "/v1/..." path.
+func resolveBaseURL(env, def string) string {
+	base := os.Getenv(env)
+	if base == "" {
+		base = def
+	}
+	return strings.TrimRight(base, "/")
 }
 
 // withFallback runs a real provider but degrades to the mock when the provider
@@ -107,6 +122,7 @@ func isDegradable(err error) bool {
 type anthropic struct {
 	key   string
 	model string
+	base  string
 	http  *http.Client
 }
 
@@ -134,7 +150,7 @@ func (a *anthropic) Complete(ctx context.Context, system string, msgs []Message)
 	raw, _ := json.Marshal(body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.anthropic.com/v1/messages", bytes.NewReader(raw))
+		a.base+"/v1/messages", bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err
 	}
@@ -181,6 +197,7 @@ func (a *anthropic) Complete(ctx context.Context, system string, msgs []Message)
 type openai struct {
 	key   string
 	model string
+	base  string
 	http  *http.Client
 }
 
@@ -209,7 +226,7 @@ func (o *openai) Complete(ctx context.Context, system string, msgs []Message) (R
 	raw, _ := json.Marshal(body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.openai.com/v1/chat/completions", bytes.NewReader(raw))
+		o.base+"/v1/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err
 	}
