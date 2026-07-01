@@ -37,6 +37,13 @@ class Config:
     # Browserbase (optional — falls back to a simulated browse if unset).
     browserbase_api_key: str
     browserbase_project_id: str
+    # SMTP (optional — output.email falls back to record-intent if unset). Env var
+    # names mirror the Go worker's notifier (apps/worker/internal/notifier).
+    smtp_host: str
+    smtp_port: str
+    smtp_user: str
+    smtp_pass: str
+    smtp_from: str
     # How often the dispatcher polls Postgres for queued temporal runs (seconds).
     dispatch_interval_s: float
 
@@ -47,6 +54,10 @@ class Config:
     @property
     def browserbase_enabled(self) -> bool:
         return bool(self.browserbase_api_key and self.browserbase_project_id)
+
+    @property
+    def smtp_enabled(self) -> bool:
+        return bool(self.smtp_host)
 
 
 def load() -> Config:
@@ -69,6 +80,12 @@ def load() -> Config:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         browserbase_api_key=os.getenv("BROWSERBASE_API_KEY", ""),
         browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID", ""),
+        smtp_host=os.getenv("SMTP_HOST", ""),
+        smtp_port=os.getenv("SMTP_PORT", "587"),
+        smtp_user=os.getenv("SMTP_USER", ""),
+        smtp_pass=os.getenv("SMTP_PASS", ""),
+        # from = SMTP_FROM, then SMTP_USER (mirrors the Go notifier's fallback).
+        smtp_from=os.getenv("SMTP_FROM", "") or os.getenv("SMTP_USER", ""),
         dispatch_interval_s=float(os.getenv("REASONER_DISPATCH_INTERVAL_S", "1.5")),
     )
 

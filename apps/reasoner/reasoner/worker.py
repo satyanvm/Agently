@@ -17,10 +17,11 @@ from temporalio.client import Client
 from temporalio.contrib.langgraph import LangGraphPlugin
 from temporalio.worker import Worker
 
+from .activities import ALL_ACTIVITIES
 from .config import CONFIG
 from .dispatcher import run_dispatcher
 from .graph import GRAPH_NAME, build_graph
-from .workflow import ReasoningWorkflow
+from .workflow import DynamicWorkflow, ReasoningWorkflow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("reasoner")
@@ -42,7 +43,10 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=CONFIG.temporal_task_queue,
-        workflows=[ReasoningWorkflow],
+        workflows=[ReasoningWorkflow, DynamicWorkflow],
+        # The per-node dynamic orchestrator's activities run alongside the LangGraph
+        # plugin's static-node activities on the same queue.
+        activities=ALL_ACTIVITIES,
         plugins=[plugin],
     )
 

@@ -25,6 +25,7 @@ with durability, not with the UI.
 | Contracts | `packages/contracts` | Built | Shared TS types the frontend consumes. |
 | Migrations | `packages/db/migrations` | **Wired (0001,0003,0005,0006)** | Local Postgres via Docker. `0002_rls`/`0004_realtime` are Supabase-only, skipped locally. |
 | Worker | `apps/worker` | **Full real engine (chunks 2–15 ✓)** | Separate Go module. Claims runs (lease+heartbeat, crash-safe), runs multi-agent **DAGs** in parallel, **fetches real content** (arXiv/HN/Reddit/web), drives **browser** sessions (sim + Browserbase CDP), and **emails the result** (SMTP). Three+ swappable seams: LLM, browser, notify, sources. |
+| Reasoner | `apps/reasoner` | **Second execution plane (v1-6 ✓)** | Separate Python service. LangGraph graphs run as **Temporal activities** (durability via Temporal event history instead of the Go lease/heartbeat), traced in **Langfuse**, browsing via **Browserbase**, writing the SAME Postgres rows the UI renders. Dispatches `engine='temporal'` runs. Now executes **user-composed graphs dynamically** (§20), not just the static plan→browse→synthesize→deliver flow. |
 
 **Where it stands now:** the AI Digest workflow runs for real end-to-end — fetches live
 arXiv papers + HN news, synthesizes a digest, emails it (SMTP), all durably resumable. With
@@ -882,8 +883,182 @@ final timeline. If you can narrate that path from memory, you understand Agently
 
 ---
 
+## 20. v1-6 — the second execution plane + the visual builder (DONE)
+
+Two big moves land on the `v1-6` branch. First (integration commit `60beff53`) a
+**second execution plane** — `apps/reasoner`, a Python service that runs agent
+graphs on **Temporal + LangGraph**, traced in **Langfuse**, browsing via
+**Browserbase**. Second (this session) the **n8n-style visual builder**: draw a
+graph on a canvas, save it, and the reasoner executes that arbitrary DAG.
+
+### 20.1 The reasoner: durability via Temporal, not lease/heartbeat
+
+The Go worker (§8–17) earns durability with the hand-rolled lease + heartbeat +
+reaper loop over Postgres. The reasoner earns the *same* promise a different way:
+**Temporal's event history is the checkpoint.** Each LangGraph node is declared
+`execute_in="activity"`, so it runs as a Temporal activity — durable, retried, and
+not re-run on workflow replay. Kill the worker mid-browse and Temporal resumes at
+the in-flight activity, not from the top. Same "close your laptop" guarantee, a
+different engine underneath.
+
+Crucially the two planes **share one source of truth**: the reasoner writes the
+identical `runs / run_logs / run_agents / artifacts / browser_*` rows the Go worker
+writes (`apps/reasoner/reasoner/db.py` deliberately mirrors
+`apps/worker/internal/queue/*`), so the existing Go API + Next.js UI render a
+Temporal-backed run **unchanged**. The control plane routes work between planes by
+one column: the Go API creates a run with `engine='temporal'`; the reasoner's
+**dispatcher** (`dispatcher.py`) polls those rows and starts a Temporal workflow
+(idempotent — the run id *is* the workflow id), while the Go worker's
+`claim_next_run` is scoped to `engine='native'`. Neither plane sees the other's runs.
+
+Files to read (in order): `apps/reasoner/reasoner/worker.py` (entrypoint: a Temporal
+Worker + the dispatcher loop, one connection) → `workflow.py` (the tiny deterministic
+workflow that compiles + invokes the graph) → `graph.py` (the LangGraph itself) →
+`db.py` (the Postgres write-back) → `llm.py` / `browser.py` / `obs.py` (the same
+provider-seam discipline as the Go worker: real Anthropic/Browserbase/Langfuse when
+keys are set, deterministic/simulated fallback otherwise, so it runs keyless).
+
+### 20.2 The visual builder — draw a graph, run it
+
+Chunk 17 (§18) compiled a *sentence* into a graph. This adds the other front door:
+compose the graph **directly** on a React Flow canvas. The full seam, five parts:
+
+```
+apps/web builder canvas  (components/builder/workflow-builder.tsx, React Flow / @xyflow/react)
+   drag nodes from the palette (node-catalog.ts: 15 node types across trigger/agent/tool/logic/output)
+   configure each in the inspector (node-inspector.tsx, fields from NODE_FIELDS)
+   │  Save →  lib/api.ts saveWorkflowGraph(slug, {nodes, edges})
+   ▼
+lib/builder-graph.ts   ← the mapping seam (React Flow ⇄ domain GraphNode)
+   toBuilderNodes(): React Flow {nodes,edges} → GraphNode[]  (key from node id, role from kind,
+      dependsOn computed from incoming edges, canvas x/y preserved under config._position)
+   │  PUT /api/workflows/{slug}/graph
+   ▼
+apps/api  handler/workflows.go:saveWorkflowGraph → validate/api.go:ParseSaveGraphInput
+   → services/workflow_service.go:SaveGraph  (versions the graph: new workflow_version, bumps
+     current_version_id + agent_count — same versioning the prompt-compiler Create uses)
+   ▼
+run launched with engine='temporal'  → reasoner dispatcher → ReasoningWorkflow
+   ▼
+apps/reasoner  dispatcher routes: composed graph → DynamicWorkflow (per-node activities);
+   else → ReasoningWorkflow (static). DynamicWorkflow: load_graph activity (fetch + seed)
+   → deterministic topo loop → one run_node activity per node → finish_run activity.
+   (Fallback: a composed run reaching ReasoningWorkflow still executes via
+   graph.py:route_node → dynamic_node → engine.execute_graph in a single activity.)
+```
+
+**The dynamic engine (the heart of this chunk).** `apps/reasoner/reasoner/engine.py`
++ `nodes.py` execute an arbitrary user DAG:
+- `engine.topo_order` — Kahn topological sort over `dependsOn`, with **cycle and
+  missing-dependency detection** (raises `GraphError`) and a stable original-order
+  tie-break. `_grid` assigns each node a `(col,row)` by longest-path depth so the
+  live Agents-tab graph lays out sensibly.
+- `engine.execute_graph` — creates every `run_agent` up front (so the whole graph
+  renders immediately), then runs nodes in dependency order, threading each node's
+  output into its dependents (`{{outputs.<key>.<field>}}` templating), writing
+  progress / logs / usage / hand-off messages / artifacts. Per-node failure fails the
+  run cleanly (records the failed node, marks the run `failed`).
+- `nodes.py` — the **type→handler registry** keyed by the catalog id, kept in sync
+  with `NODE_FIELDS` in the web `node-catalog.ts`. All 15 types are handled:
+  `agent.llm`/`agent.chat` (real LLM), `tool.browser` (real Browserbase),
+  `tool.http` (httpx), `output.report` (writes an artifact) are **executed for
+  real**; `tool.code`/`tool.db`, `output.email`/`slack`, and `logic.*` are
+  **recorded honestly, not executed** (matching the catalog's own "recorded, not
+  executed" help text) — a later phase wires them to real runtimes.
+
+**How this plugs into the existing graph without a rewrite:** one registered graph,
+two paths, chosen at runtime. `graph.py` adds a `route` activity that loads the
+composed graph and a **conditional edge** (`_route`, a pure workflow-side function)
+that sends composed workflows to the new `dynamic` activity and everything else down
+the original static `plan→browse→synthesize→deliver` chain. `build_graph().compile()`
+validates the wiring.
+
+**Files to read (in order):**
+- `apps/web/components/builder/workflow-builder.tsx` — the canvas (drag/drop, save/load).
+- `apps/web/components/builder/node-catalog.ts` — the 15 node types + their inspector
+  fields (`NODE_FIELDS`) + `defaultConfig`. The **contract** the reasoner mirrors.
+- `apps/web/lib/builder-graph.ts` — the React Flow ⇄ GraphNode mapping (the seam).
+- `apps/api/internal/services/workflow_service.go:SaveGraph` — graph versioning.
+- `apps/reasoner/reasoner/plan.py` — pure, IO-free graph logic (topo/plan/skip/gate),
+  importable inside the Temporal workflow sandbox.
+- `apps/reasoner/reasoner/engine.py` + `nodes.py` — the dynamic DAG executor (IO steps +
+  single-activity fallback) + handler registry; re-exports the `plan.py` helpers.
+- `apps/reasoner/reasoner/workflow.py` — `ReasoningWorkflow` (static) + `DynamicWorkflow`
+  (per-node orchestrator); `activities.py` — the per-node Temporal activities.
+- `apps/reasoner/reasoner/graph.py` — `route_node` / `_route` / `dynamic_node` (fallback).
+- `apps/reasoner/tests/test_engine.py` — 25 tests (toposort/cycle/diamond, templating,
+  condition eval, end-to-end run, node-failure→run-failed, plan-module purity/re-exports,
+  resume-skip of succeeded nodes, per-node orchestration ordering/skip); run with
+  `DATABASE_URL=… .venv/bin/python -m unittest discover -s tests`.
+
+**Concepts to internalize:**
+- **Two engines, one truth.** The durability mechanism can differ per plane
+  (Go lease/heartbeat vs Temporal event history) as long as both write the same
+  Postgres rows. The UI/API don't know or care which plane ran a job — `engine` is
+  just a routing column. This is the control/data-plane split taken one level further.
+- **The catalog is the contract between UI and engine.** `node-catalog.ts`'s
+  `NODE_FIELDS` (keys the inspector writes) and `nodes.py`'s registry (keys the
+  handler reads) must stay in lockstep — they're the same interface expressed in two
+  languages. Change a node's config keys in one place, change both.
+- **Map at the seam, keep the ends pure.** React Flow wants `{nodes,edges}` with
+  canvas positions; the domain wants `GraphNode[]` with `dependsOn`. `builder-graph.ts`
+  is the *only* place that knows both shapes — the component speaks React Flow, the API
+  speaks domain, neither leaks into the other. `dependsOn` (control-flow) is derived
+  from edges; positions ride along in `config._position` (presentation), so a
+  save→load round-trip is identity.
+
+**Honest limitations (recorded to revisit):**
+- **The composed DAG now has *per-node* durability** (v1-6 follow-up — DONE). Composed
+  runs are dispatched to a dedicated `DynamicWorkflow` (`reasoner/workflow.py`) that
+  drives the topological loop in deterministic *workflow* code and invokes **one
+  Temporal activity per user node** (`activities.run_node`). Each node lands its own
+  event-history checkpoint, so a crash resumes at the in-flight node — already-succeeded
+  nodes are served from Temporal's history and never re-run, matching the per-node
+  durability the static graph has. This sidesteps the LangGraph+Temporal plugin's
+  fixed-shape-at-startup constraint (the plugin registers graph *shapes* at worker
+  startup, so a per-run arbitrary shape can't be one-activity-per-node *through the
+  plugin*) by orchestrating the arbitrary DAG in plain workflow code instead. The
+  ordering/skip/handler logic is shared with the old single-activity path via
+  `reasoner/plan.py` (pure, IO-free) + `reasoner/engine.py` helpers; the single-activity
+  `dynamic_node` remains as a coarser-grained fallback. Real per-item `logic.loop`
+  fan-out is still a follow-up.
+- **`tool.code` / `tool.db` are recorded, not executed** (their source is preserved for
+  a later sandboxed executor). `logic.branch` / `logic.filter` now **do** prune their
+  downstream subgraph on a false condition (skip-propagation in `plan.py`/`engine.py`);
+  `logic.loop` still resolves an item list without per-item fan-out.
+- **The builder's "Test run" button is inert** (no `onClick`), and the builder is not
+  yet linked from the workflow-detail page — you reach it at
+  `/workflows/{slug}/builder` directly.
+
+### 20.3 What's verified vs not
+Verified: web `tsc --noEmit` clean; Go API save-graph tests pass; the 25 reasoner
+engine tests pass (incl. plan-module purity/re-exports, resume-skip of succeeded nodes,
+and a deterministic re-enactment of the `DynamicWorkflow` per-node loop over the FakeDB);
+`build_graph().compile()` validates the static route/dynamic wiring; `DynamicWorkflow`'s
+Temporal definition loads under the sandbox pass-through; all reasoner modules
+byte-compile. **Not** verified end-to-end against a live Temporal + Postgres (no local
+Temporal in this session) — so the *actual* Temporal replay/resume behaviour (a real
+worker crash resuming at the in-flight `run_node` activity) is designed and unit-covered
+by re-enacting the loop, but not observed against a live server. The DB write-back and
+dispatch are exercised only through the fakes in `test_engine.py`. The next demo should
+run a built graph through a real Temporal worker, kill it mid-node, and confirm the run
+resumes at the in-flight node without re-running completed ones.
+
+---
+
 ## Changelog
 
+- **v1-6 (DONE) — §20 added** — second execution plane + visual builder. (1) `apps/reasoner`:
+  LangGraph graphs as Temporal activities (durability via Temporal event history), Langfuse
+  tracing, Browserbase browsing, writing the same Postgres rows the UI renders; dispatched via
+  `engine='temporal'`. (2) The n8n-style **visual builder**: React Flow canvas
+  (`components/builder/*`) → `lib/builder-graph.ts` mapping seam → `PUT /workflows/{slug}/graph`
+  (`SaveGraph` versions the graph) → reasoner `route`/`dynamic` nodes → `engine.execute_graph`
+  runs the arbitrary DAG (`engine.py` toposort + `nodes.py` 15-type handler registry). GraphNode
+  schema gained `type`+`config`. Verified: web tsc clean, Go save-graph tests pass, 9 reasoner
+  engine tests pass, graph compiles. Not yet run against live Temporal. Known limits: dynamic DAG
+  runs in one activity (per-node durability is v2); logic/code/db/email/slack recorded-not-executed;
+  "Test run" button inert; builder not yet linked from workflow-detail.
 - **Doc — §19 added** — code-reading guide (architecture / flow / orchestration) reflecting
   the *current* code: 3 passes (nouns & seams → request flow → DAG orchestration) with
   verified file:symbol anchors. Supersedes the now-stale §5 reading path (worker-unbuilt,
