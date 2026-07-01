@@ -14,9 +14,12 @@ rows the UI already renders.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import smtplib
 from dataclasses import dataclass, field
+from email.message import EmailMessage
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -210,32 +213,121 @@ async def _condition(ctx: NodeContext) -> NodeResult:
 
 @handles("logic.loop")
 async def _loop(ctx: NodeContext) -> NodeResult:
+    """Resolve an items list and expose it to descendants.
+
+    Scope (honest): this does NOT fan out the downstream subgraph once per item —
+    that would require the engine to clone descendant nodes per iteration, which is
+    the clean v2. Instead it resolves the item list and publishes it as
+    `outputs.<key>.items` / `.count`, so a downstream node can reference the whole
+    collection (e.g. an agent that iterates the list in one prompt, or an http node
+    templating over it). Real per-item fan-out is a documented follow-up.
+    """
     expr = _cfg(ctx, "items")
     items = _resolve_ref(expr, ctx)
-    count = len(items) if isinstance(items, list) else 0
+    items = items if isinstance(items, list) else []
+    count = len(items)
+    await db.append_log(
+        ctx.run_id, "info", "system", ctx.node["key"],
+        f"Loop resolved {count} item(s) — exposed to descendants (no per-item fan-out)",
+    )
     return NodeResult(
-        output={"items": items if isinstance(items, list) else [], "count": count},
+        output={"items": items, "count": count},
         summary=f"{count} item(s)",
     )
 
 
-@handles("output.email", "output.slack")
-async def _notify(ctx: NodeContext) -> NodeResult:
-    node_type = ctx.node["type"]
-    if node_type == "output.email":
-        target = render(_cfg(ctx, "to"), ctx)
-        subject = render(_cfg(ctx, "subject"), ctx) or "Agently workflow result"
-        channel = f"email to {target}" if target else "email (no recipient)"
+@handles("output.email")
+async def _email(ctx: NodeContext) -> NodeResult:
+    """Deliver a run digest by email over SMTP; fall back to record-intent.
+
+    Mirrors the Go worker's SMTP seam (apps/worker/internal/notifier): SMTP_HOST /
+    SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM. When SMTP is unconfigured (or the
+    send fails, or there is no recipient) we degrade to recording the intent — a log
+    line plus an artifact — so the run never fails and the UI still shows something.
+    """
+    to = render(_cfg(ctx, "to"), ctx)
+    subject = render(_cfg(ctx, "subject"), ctx) or "Agently workflow result"
+    body = _notify_body(ctx)
+    key = ctx.node["key"]
+
+    delivered = False
+    detail = subject
+    if CONFIG.smtp_enabled and to:
+        try:
+            await asyncio.to_thread(_send_smtp, to, subject, body)
+            delivered = True
+            await db.append_log(ctx.run_id, "success", "system", key, f"Emailed {to}", detail=subject)
+        except Exception as exc:  # noqa: BLE001 — never fail the run on a delivery error
+            detail = f"{subject} — send failed, recorded instead: {exc}"
+            await db.append_log(ctx.run_id, "warn", "system", key, f"Email send failed: {exc}", detail=subject)
     else:
-        target = render(_cfg(ctx, "webhookUrl"), ctx)
-        subject = render(_cfg(ctx, "message"), ctx)
-        channel = "Slack" if target else "Slack (no webhook)"
-    # Delivery is wired to the Go notifier in a later phase; record the intent.
-    await db.append_log(
-        ctx.run_id, "info", "system", ctx.node["key"],
-        f"Would deliver via {channel}", detail=subject or None,
-    )
-    return NodeResult(output={"delivered": bool(target), "channel": channel}, summary=channel)
+        reason = "SMTP not configured" if not CONFIG.smtp_enabled else "no recipient"
+        await db.append_log(ctx.run_id, "info", "system", key, f"Email recorded ({reason})", detail=subject)
+
+    # Always leave an artifact so the digest is visible in the UI regardless.
+    await db.add_artifact(ctx.run_id, f"{_slug(subject)}.eml", "file", ctx.label or "Email", f"To: {to}\nSubject: {subject}\n\n{body}")
+    channel = f"email to {to}" if to else "email (no recipient)"
+    return NodeResult(output={"delivered": delivered, "channel": channel, "to": to}, summary=("Emailed " if delivered else "Recorded ") + channel)
+
+
+@handles("output.slack")
+async def _slack(ctx: NodeContext) -> NodeResult:
+    """POST a message to a Slack incoming webhook; fall back to record-intent.
+
+    Follows the same provider-seam discipline as the rest of the reasoner: with a
+    webhook URL we POST via httpx; without one (or on any error) we record the
+    intent and still write an artifact. Never fails the run.
+    """
+    webhook = render(_cfg(ctx, "webhookUrl"), ctx)
+    message = render(_cfg(ctx, "message"), ctx) or _notify_body(ctx)
+    key = ctx.node["key"]
+
+    delivered = False
+    if webhook:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(webhook, json={"text": message})
+            resp.raise_for_status()
+            delivered = True
+            await db.append_log(ctx.run_id, "success", "system", key, f"Posted to Slack → {resp.status_code}", detail=_clip(message))
+        except Exception as exc:  # noqa: BLE001 — never fail the run on a delivery error
+            await db.append_log(ctx.run_id, "warn", "system", key, f"Slack post failed: {exc}", detail=_clip(message))
+    else:
+        await db.append_log(ctx.run_id, "info", "system", key, "Slack recorded (no webhook configured)", detail=_clip(message))
+
+    await db.add_artifact(ctx.run_id, "slack-message.txt", "file", ctx.label or "Slack", message)
+    channel = "Slack" if webhook else "Slack (no webhook)"
+    return NodeResult(output={"delivered": delivered, "channel": channel}, summary=("Posted to " if delivered else "Recorded ") + channel)
+
+
+def _notify_body(ctx: NodeContext) -> str:
+    """Build the notification body: explicit `body`/`message` config, else the most
+    recent upstream text output (the digest a report/agent produced)."""
+    explicit = render(_cfg(ctx, "body") or _cfg(ctx, "message"), ctx)
+    if explicit.strip():
+        return explicit
+    for v in reversed(list(ctx.upstream.values())):
+        if isinstance(v, dict) and v.get("text"):
+            return str(v["text"])
+    return "Your Agently workflow finished."
+
+
+def _send_smtp(to: str, subject: str, body: str) -> None:
+    """Blocking SMTP send (run via asyncio.to_thread). STARTTLS + PLAIN auth,
+    matching the Go notifier's net/smtp.SendMail path and message shape."""
+    msg = EmailMessage()
+    msg["From"] = CONFIG.smtp_from or CONFIG.smtp_user
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    with smtplib.SMTP(CONFIG.smtp_host, int(CONFIG.smtp_port or "587"), timeout=30) as server:
+        try:
+            server.starttls()
+        except smtplib.SMTPException:
+            pass  # server may not support STARTTLS (e.g. local relay) — send anyway
+        if CONFIG.smtp_user and CONFIG.smtp_pass:
+            server.login(CONFIG.smtp_user, CONFIG.smtp_pass)
+        server.send_message(msg)
 
 
 @handles("output.report")

@@ -15,9 +15,10 @@ import {
   ArrowRight,
   Wrench,
   Hash,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 import type { Workflow, AgentNode, WorkflowRun } from "@/lib/types";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge, StatusDot, statusMeta } from "@/components/ui/status";
@@ -86,6 +87,12 @@ export function WorkflowDetail({
         </div>
 
         <div className="flex items-center gap-2">
+          <Link
+            href={`/workflows/${wf.slug}/builder`}
+            className={buttonVariants({ variant: "secondary", size: "sm" })}
+          >
+            <WorkflowIcon className="size-4" /> Edit graph
+          </Link>
           <Button variant="secondary" size="sm">
             <Settings2 className="size-4" /> Configure
           </Button>

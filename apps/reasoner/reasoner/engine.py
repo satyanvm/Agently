@@ -10,11 +10,27 @@ config / dependsOn), this:
   4. writes run progress / logs / usage / artifacts into the shared Postgres,
      exactly like the static graph does.
 
-It runs inside a single Temporal activity (see graph.py `dynamic_node`). That
-keeps the whole composed DAG durable as one replayable unit; per-node retries of
-the static graph are traded for simpler, deterministic ordering of an
-arbitrarily-shaped user graph. LLM/browser calls still degrade to mocks when keys
-are absent, so a dynamic run works end-to-end with no external services.
+Two orchestrators share the pieces in this module:
+
+  • `execute_graph` — the single-activity fallback (graph.py `dynamic_node`): runs
+    the whole DAG in one Temporal activity. Durable/replayable as one unit.
+  • `reasoner.workflow.DynamicWorkflow` — the per-node orchestrator: it drives the
+    deterministic topo loop in *workflow* code and invokes `execute_node` (below)
+    as ONE Temporal activity per node, so each user node is independently
+    checkpointed in Temporal's event history. A crash resumes at the in-flight
+    node — already-succeeded nodes are served from history and never re-run.
+
+To avoid duplicating logic, both paths call the same helpers:
+  - `topo_order` — Kahn sort + cycle/missing-dep detection.
+  - `build_plan` — pure, deterministic: ordered node list, dependents adjacency,
+    and (col,row) grid. Safe to compute in workflow context (no IO).
+  - `should_skip` / `descendants` / `is_gate_open` — pure skip-propagation logic
+    shared by the loop in both orchestrators.
+  - `seed_agents` / `execute_one_node` / `mark_skipped` — the IO steps (DB writes,
+    handler dispatch), run inside an activity in both paths.
+
+LLM/browser calls still degrade to mocks when keys are absent, so a dynamic run
+works end-to-end with no external services.
 """
 from __future__ import annotations
 
@@ -22,139 +38,144 @@ from typing import Any
 
 from . import db, nodes, obs
 from .nodes import NodeContext
+# Pure, IO-free graph logic lives in reasoner.plan so the Temporal workflow sandbox
+# can import it without pulling in db/nodes/httpx. Re-exported here so existing
+# callers (and tests) keep using engine.topo_order / engine.build_plan / etc.
+from .plan import (  # noqa: F401 — re-exported for the engine's public surface
+    _GATE_TYPES,
+    _KIND_ROLE,
+    _SKIPPED_STATUS,
+    _grid,
+    _role_for,
+    _title,
+    GraphError,
+    GraphPlan,
+    agent_model,
+    agent_name,
+    build_plan,
+    dependents_of,
+    descendants,
+    is_gate_open,
+    should_skip,
+    topo_order,
+)
 
 
-class GraphError(ValueError):
-    """Raised when the composed graph is structurally invalid (cycle, bad dep)."""
+# ─────────────────────── the IO steps (activity bodies) ───────────────────────
 
+async def seed_agents(run_id: str, plan: GraphPlan) -> dict[str, str]:
+    """Create every run_agent up front (idempotent) so the whole graph renders.
 
-# Map a builder node kind (prefix of the type) to the run_agent role the UI uses
-# to colour/lay out the node. Mirrors KIND_ROLE in apps/web/lib/builder-graph.ts.
-_KIND_ROLE = {
-    "trigger": "orchestrator",
-    "agent": "orchestrator",
-    "tool": "browser",
-    "logic": "analyst",
-    "output": "writer",
-}
-
-
-def _role_for(node: dict[str, Any]) -> str:
-    role = node.get("role")
-    if isinstance(role, str) and role:
-        return role
-    kind = str(node.get("type", "")).split(".", 1)[0]
-    return _KIND_ROLE.get(kind, "orchestrator")
-
-
-def topo_order(graph: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return nodes in dependency order (Kahn's algorithm).
-
-    Raises GraphError on a missing dependency or a cycle. Ties are broken by the
-    nodes' original order so layout stays stable across runs.
+    Returns key → stable agent id. Safe to call again on resume: `upsert_agent`
+    is `on conflict do nothing`, so it never clobbers a node that already ran.
     """
-    by_key: dict[str, dict[str, Any]] = {}
-    for n in graph:
-        key = n.get("key")
-        if not key:
-            raise GraphError("node without a key")
-        if key in by_key:
-            raise GraphError(f"duplicate node key: {key}")
-        by_key[key] = n
-
-    # indegree + adjacency over dependsOn (dep → node).
-    indeg: dict[str, int] = {k: 0 for k in by_key}
-    dependents: dict[str, list[str]] = {k: [] for k in by_key}
-    for key, n in by_key.items():
-        for dep in n.get("dependsOn") or []:
-            if dep not in by_key:
-                raise GraphError(f"node '{key}' depends on unknown node '{dep}'")
-            indeg[key] += 1
-            dependents[dep].append(key)
-
-    order_index = {n["key"]: i for i, n in enumerate(graph)}
-    ready = sorted((k for k, d in indeg.items() if d == 0), key=lambda k: order_index[k])
-    ordered: list[dict[str, Any]] = []
-    while ready:
-        key = ready.pop(0)
-        ordered.append(by_key[key])
-        for child in dependents[key]:
-            indeg[child] -= 1
-            if indeg[child] == 0:
-                # insert keeping original-order tie-break
-                ready.append(child)
-                ready.sort(key=lambda k: order_index[k])
-
-    if len(ordered) != len(by_key):
-        stuck = [k for k, d in indeg.items() if d > 0]
-        raise GraphError(f"cycle detected among nodes: {', '.join(sorted(stuck))}")
-    return ordered
-
-
-def _grid(graph: list[dict[str, Any]]) -> dict[str, tuple[int, int]]:
-    """Assign (col, row) per node for UI layout: col = longest-path depth."""
-    by_key = {n["key"]: n for n in graph}
-    depth: dict[str, int] = {}
-
-    def col_of(key: str, seen: frozenset[str]) -> int:
-        if key in depth:
-            return depth[key]
-        deps = [d for d in (by_key[key].get("dependsOn") or []) if d in by_key and d not in seen]
-        d = 0 if not deps else 1 + max(col_of(dp, seen | {key}) for dp in deps)
-        depth[key] = d
-        return d
-
-    cols: dict[str, tuple[int, int]] = {}
-    row_per_col: dict[int, int] = {}
-    for n in graph:
-        c = col_of(n["key"], frozenset())
-        r = row_per_col.get(c, 0)
-        row_per_col[c] = r + 1
-        cols[n["key"]] = (c, r)
-    return cols
-
-
-async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dict[str, Any]) -> dict[str, Any]:
-    """Execute a composed GraphNode DAG. Returns {"done": bool, "outputs": {...}}."""
-    ordered = topo_order(graph)
-    total = len(ordered)
-    grid = _grid(ordered)
-
     await db.set_run_running(run_id, "Starting")
     if obs.enabled():
         await db.set_langfuse_trace(run_id, obs.session_handle(run_id))
-
-    # Create every run_agent up front so the whole graph renders immediately.
     agent_ids: dict[str, str] = {}
-    for n in ordered:
+    for n in plan.ordered:
         key = n["key"]
-        col, row = grid[key]
-        name = n.get("config", {}).get("label") or _title(key, n)
-        model = n.get("config", {}).get("model") or n.get("model") or "claude-sonnet-4-6"
+        col, row = plan.grid[key]
         agent_ids[key] = await db.upsert_agent(
-            run_id, key, name, _role_for(n), model, list(n.get("dependsOn") or []), col, row
+            run_id, key, agent_name(n, key), _role_for(n), agent_model(n),
+            list(n.get("dependsOn") or []), col, row,
         )
+    return agent_ids
+
+
+async def mark_skipped(run_id: str, agent_id: str, key: str) -> None:
+    """Record a control-flow skip on a node's agent row + log."""
+    await db.set_agent_status(agent_id, _SKIPPED_STATUS, summary="Skipped (upstream condition)")
+    await db.append_log(run_id, "info", "system", key, "Skipped — upstream condition was false")
+
+
+async def execute_one_node(
+    run_id: str,
+    node: dict[str, Any],
+    agent_id: str,
+    upstream: dict[str, dict[str, Any]],
+    run_input: dict[str, Any],
+) -> nodes.NodeResult:
+    """Run ONE node's handler and write its status/usage. Raises on handler error.
+
+    This is the unit the per-node orchestrator wraps in a single Temporal activity,
+    and the unit `execute_graph` calls inline. It does NOT decide skips or draw
+    hand-off edges — the orchestrator owns ordering/skip so that logic stays pure
+    and identical across both paths.
+    """
+    key = node["key"]
+    await db.set_agent_status(agent_id, "running")
+    await db.append_log(run_id, "info", "agent", key, f"Running {node.get('type')}")
+    ctx = NodeContext(
+        run_id=run_id,
+        agent_id=agent_id,
+        node=node,
+        upstream=upstream,
+        run_input=run_input,
+        label=agent_name(node, key),
+    )
+    handler = nodes.handler_for(str(node.get("type", "")))
+    result = await handler(ctx)
+    if result.tokens_in or result.tokens_out or result.cost_usd:
+        await db.add_usage(run_id, result.tokens_in, result.tokens_out, result.cost_usd)
+    await db.set_agent_status(agent_id, "succeeded", summary=result.summary)
+    return result
+
+
+async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dict[str, Any]) -> dict[str, Any]:
+    """Execute a composed GraphNode DAG in ONE activity (single-activity fallback).
+
+    Returns {"done": bool, "outputs": {...}}. This is the fallback path used when
+    per-node orchestration is not driving the run (graph.py `dynamic_node`). It
+    shares its ordering, skip-propagation and per-node execution with the per-node
+    orchestrator via the helpers above, so behaviour is identical.
+
+    Real control-flow: a `logic.branch`/`logic.filter` whose condition is false
+    prunes its entire downstream subgraph. Pruning propagates naturally — a node
+    all of whose dependencies were skipped is itself skipped — so a skipped node
+    never blocks the run from completing. Skipped nodes are marked with the
+    `_SKIPPED_STATUS` agent status and their handlers are never invoked.
+
+    Resume-safe: a node whose run_agent row is already `succeeded` (an activity
+    retry re-ran this fallback from the top) is not re-executed; its recorded
+    status is trusted and it is treated as done. Skipped/failed rows are re-run.
+    """
+    plan = build_plan(graph)
+    total = plan.total
+    agent_ids = await seed_agents(run_id, plan)
+
+    # On an activity retry, trust rows already marked succeeded so we don't redo
+    # side-effecting work (LLM calls, artifacts) for nodes that finished.
+    prior = await db.fetch_agent_statuses(run_id)
 
     outputs: dict[str, dict[str, Any]] = {}
+    skipped: set[str] = set()
     done = 0
-    for n in ordered:
+    for n in plan.ordered:
         key = n["key"]
         agent_id = agent_ids[key]
-        await db.set_agent_status(agent_id, "running")
-        await db.append_log(run_id, "info", "agent", key, f"Running {n.get('type')}")
+        deps = list(n.get("dependsOn") or [])
 
-        upstream = {dep: outputs.get(dep, {}) for dep in (n.get("dependsOn") or [])}
-        ctx = NodeContext(
-            run_id=run_id,
-            agent_id=agent_id,
-            node=n,
-            upstream=upstream,
-            run_input=run_input,
-            label=n.get("config", {}).get("label") or _title(key, n),
-        )
-        handler = nodes.handler_for(str(n.get("type", "")))
+        if should_skip(n, skipped):
+            skipped.add(key)
+            skipped.update(descendants(key, plan.dependents))
+            await mark_skipped(run_id, agent_id, key)
+            outputs[key] = {"skipped": True}
+            done += 1
+            await db.set_run_progress(run_id, done, total, f"Skipped {key}")
+            continue
+
+        if prior.get(agent_id) == "succeeded":
+            # Already ran in a prior attempt — don't redo its side effects.
+            outputs[key] = {}
+            await db.append_log(run_id, "info", "system", key, "Resuming — node already completed, skipping re-run")
+            done += 1
+            await db.set_run_progress(run_id, done, total, f"Resumed {key}")
+            continue
+
+        upstream = {dep: outputs.get(dep, {}) for dep in deps}
         try:
-            result = await handler(ctx)
+            result = await execute_one_node(run_id, n, agent_id, upstream, run_input)
         except Exception as exc:  # noqa: BLE001 — one node's failure fails the run cleanly
             await db.set_agent_status(agent_id, "failed", summary=str(exc)[:280])
             await db.append_log(run_id, "error", "system", key, f"Node failed: {exc}")
@@ -163,23 +184,24 @@ async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dic
             return {"done": False, "error": str(exc), "failed_node": key}
 
         outputs[key] = result.output or {}
-        if result.tokens_in or result.tokens_out or result.cost_usd:
-            await db.add_usage(run_id, result.tokens_in, result.tokens_out, result.cost_usd)
-        await db.set_agent_status(agent_id, "succeeded", summary=result.summary)
+
+        # Gate node whose condition was false: prune its whole downstream subgraph.
+        if not is_gate_open(n, outputs[key]):
+            pruned = descendants(key, plan.dependents)
+            skipped.update(pruned)
+            if pruned:
+                await db.append_log(
+                    run_id, "info", "system", key,
+                    f"Condition false — skipping {len(pruned)} downstream node(s)",
+                )
+
         # Draw the edges into downstream agents for the live graph view.
-        for child in ordered:
-            if key in (child.get("dependsOn") or []):
-                await db.add_message(run_id, agent_id, agent_ids[child["key"]], f"{key} → {child['key']}")
+        for child_key in plan.dependents[key]:
+            await db.add_message(run_id, agent_id, agent_ids[child_key], f"{key} → {child_key}")
 
         done += 1
         await db.set_run_progress(run_id, done, total, f"Ran {key}")
 
     await db.finish_run(run_id, "succeeded", "Completed")
     obs.flush()
-    return {"done": True, "outputs": outputs}
-
-
-def _title(key: str, node: dict[str, Any]) -> str:
-    """A human label for a node when the builder didn't store one."""
-    t = str(node.get("type", key))
-    return t.split(".", 1)[-1].replace("_", " ").title() or key
+    return {"done": True, "outputs": outputs, "skipped": sorted(skipped)}

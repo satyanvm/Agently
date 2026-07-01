@@ -67,7 +67,15 @@ def _route(state: ReasonState) -> str:
 
 
 async def dynamic_node(state: ReasonState) -> dict[str, Any]:
-    """Execute an arbitrary user-composed DAG as one durable activity."""
+    """Execute an arbitrary user-composed DAG as one durable activity (fallback).
+
+    This is the single-activity fallback. Composed runs are normally dispatched to
+    `reasoner.workflow.DynamicWorkflow`, which runs each node as its OWN Temporal
+    activity for per-node durability. This node still exists so that a composed run
+    reaching the static `ReasoningWorkflow` (e.g. re-dispatched by an older client)
+    executes correctly — it shares all ordering/skip/handler logic with the per-node
+    path via `engine.execute_graph`, so behaviour is identical, just coarser-grained.
+    """
     run_id = state["run_id"]
     result = await engine.execute_graph(run_id, state.get("graph", []), state.get("input", {}))
     return {"done": bool(result.get("done"))}

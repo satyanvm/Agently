@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
   ReactFlow,
   Node,
@@ -23,7 +24,7 @@ import { NodeCatalog } from "./node-catalog-panel";
 import { NodeInspector } from "./node-inspector";
 import { WorkflowNode } from "./workflow-node";
 import { NODE_CATALOG, defaultConfig, findNodeSpec } from "./node-catalog";
-import { getWorkflowGraph, saveWorkflowGraph } from "@/lib/api";
+import { getWorkflowGraph, saveWorkflowGraph, launchRun } from "@/lib/api";
 import { maxNumericNodeId } from "@/lib/builder-graph";
 import { cn } from "@/lib/utils";
 
@@ -46,10 +47,12 @@ export type WorkflowNodeType = Node<NodeData>;
 let nodeIdCounter = 0;
 
 export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
+  const router = useRouter();
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isRunning, setIsRunning] = React.useState(false);
   const reactFlowWrapper = React.useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = React.useState<any>(null);
 
@@ -71,14 +74,30 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
     }
   };
 
-  const saveWorkflow = async () => {
+  const saveWorkflow = async (): Promise<boolean> => {
     setIsSaving(true);
     try {
       await saveWorkflowGraph(workflowSlug, { nodes, edges });
+      return true;
     } catch (err) {
       console.error("Failed to save workflow:", err);
+      return false;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestRun = async () => {
+    setIsRunning(true);
+    try {
+      // Persist the current graph before launching so the run executes what's on canvas.
+      const saved = await saveWorkflow();
+      if (!saved) return;
+      const runId = await launchRun(workflowSlug);
+      router.push(`/runs/${runId}`);
+    } catch (err) {
+      console.error("Failed to launch test run:", err);
+      setIsRunning(false);
     }
   };
 
@@ -195,13 +214,23 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
 
           {/* Top toolbar */}
           <Panel position="top-right" className="flex items-center gap-2 m-4">
-            <Button variant="secondary" size="sm" onClick={saveWorkflow} disabled={isSaving}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={saveWorkflow}
+              disabled={isSaving || isRunning}
+            >
               <Save className="size-4" />
               {isSaving ? "Saving..." : "Save"}
             </Button>
-            <Button variant="primary" size="sm">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleTestRun}
+              disabled={isSaving || isRunning}
+            >
               <Play className="size-4" />
-              Test run
+              {isRunning ? "Running..." : "Test run"}
             </Button>
           </Panel>
         </ReactFlow>

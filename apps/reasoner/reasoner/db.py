@@ -224,6 +224,20 @@ async def upsert_agent(
     return agent_id
 
 
+async def fetch_agent_statuses(run_id: str) -> dict[str, str]:
+    """Return {agent_id: status} for a run's agents.
+
+    Used on resume so an orchestrator can trust nodes already marked `succeeded`
+    and avoid redoing their side effects (LLM/browser/http/artifact writes).
+    """
+    async with _conn() as conn:
+        cur = await conn.execute(
+            "select id, status from run_agents where run_id = %s", (run_id,)
+        )
+        rows = await cur.fetchall()
+        return {row[0]: row[1] for row in rows}
+
+
 def _stable_agent_id(run_id: str, key: str) -> str:
     """Deterministic per-(run,node) agent id so replays don't duplicate rows."""
     # run ids look like run_<20>; derive a stable, schema-shaped agent id.

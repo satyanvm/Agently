@@ -17,7 +17,7 @@ from temporalio.service import RPCError
 
 from . import db
 from .config import CONFIG
-from .workflow import ReasoningWorkflow
+from .workflow import DynamicWorkflow, ReasoningWorkflow
 
 log = logging.getLogger("reasoner.dispatcher")
 
@@ -45,14 +45,23 @@ async def _dispatch_once(client: Client) -> None:
             "slug": run.get("slug", ""),
             "input": run.get("input") or {},
         }
+        # Route composed (user-built) runs to the per-node DynamicWorkflow so each
+        # node is its own durable Temporal unit; everything else runs the static
+        # ReasoningWorkflow (plan→browse→synthesize→deliver). The graph fetch is a
+        # DB read — fine here in the dispatcher (only the workflow itself is
+        # sandboxed). The workflow re-fetches + re-validates, so this is just a route
+        # hint, not a source of truth the workflow trusts blindly.
+        graph_nodes = await db.fetch_graph_nodes(run_id)
+        wf = DynamicWorkflow.run if graph_nodes else ReasoningWorkflow.run
         try:
             await client.start_workflow(
-                ReasoningWorkflow.run,
+                wf,
                 params,
                 id=workflow_id,
                 task_queue=CONFIG.temporal_task_queue,
             )
-            log.info("dispatched run %s → workflow %s", run_id, workflow_id)
+            log.info("dispatched run %s → workflow %s (%s)", run_id, workflow_id,
+                     "dynamic" if graph_nodes else "static")
         except RPCError as exc:
             # ALREADY_EXISTS means it's already dispatched — idempotent, ignore.
             if "ALREADY_EXISTS" in str(exc) or "already started" in str(exc).lower():
