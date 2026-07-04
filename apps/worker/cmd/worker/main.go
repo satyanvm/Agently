@@ -74,6 +74,10 @@ func main() {
 	// (drives the real browser_* tables, zero cost, fully demoable).
 	browserProvider := browser.New()
 	log.Info("browser provider selected", "provider", browserProvider.Name())
+	if browser.BrowserbaseMisconfigured() {
+		log.Warn("BROWSERBASE_API_KEY is set but BROWSERBASE_PROJECT_ID is missing — " +
+			"using the simulated browser. Set BROWSERBASE_PROJECT_ID to enable real Browserbase sessions.")
+	}
 
 	// Notifier: external "ping me when done" channels (webhook/email), selected by
 	// env. The in-app notification row is always written regardless.
