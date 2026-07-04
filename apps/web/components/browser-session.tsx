@@ -37,9 +37,13 @@ const ACTION_META: Record<BrowserActionType, { icon: typeof Navigation; tone: st
 };
 
 export function BrowserSessionView({ session }: { session: BrowserSession }) {
-  const [shotIdx, setShotIdx] = React.useState(session.shots.length - 1);
+  const hasShots = session.shots.length > 0;
+  const [shotIdx, setShotIdx] = React.useState(Math.max(0, session.shots.length - 1));
   const [tab, setTab] = React.useState<"actions" | "console">("actions");
-  const shot = session.shots[shotIdx]!;
+  // A session can exist with no screenshots (e.g. a real browse that navigated but
+  // captured no frames). Guard the viewport so the tab still renders its actions/
+  // console instead of crashing on an undefined shot.
+  const shot = session.shots[shotIdx];
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
@@ -55,7 +59,9 @@ export function BrowserSessionView({ session }: { session: BrowserSession }) {
             </div>
             <div className="flex h-7 flex-1 items-center gap-2 rounded-md border border-border bg-inset px-2.5">
               <Lock className="size-3 text-success" />
-              <span className="truncate font-mono text-[11px] text-muted">{shot.url}</span>
+              <span className="truncate font-mono text-[11px] text-muted">
+                {shot?.url ?? session.currentUrl ?? "—"}
+              </span>
             </div>
             <Badge variant="neutral" size="sm">
               {session.viewport.w}×{session.viewport.h}
@@ -63,7 +69,7 @@ export function BrowserSessionView({ session }: { session: BrowserSession }) {
           </div>
 
           {/* fake page */}
-          <div className={cn("relative aspect-[16/10] w-full bg-gradient-to-br", shot.tone)}>
+          <div className={cn("relative aspect-[16/10] w-full bg-gradient-to-br", shot?.tone ?? "from-surface-2 to-surface")}>
             <div className="absolute inset-0 bg-grid opacity-30" />
             {/* faux page skeleton */}
             <div className="absolute inset-0 flex flex-col gap-3 p-6">
@@ -86,7 +92,7 @@ export function BrowserSessionView({ session }: { session: BrowserSession }) {
             {/* overlay meta */}
             <div className="absolute bottom-3 left-3 flex items-center gap-2">
               <span className="rounded-md bg-black/50 px-2 py-1 text-[11px] text-white/80 backdrop-blur">
-                {shot.label}
+                {shot?.label ?? "No screenshot captured"}
               </span>
             </div>
             <div className="absolute right-3 top-3 flex items-center gap-2">
@@ -106,9 +112,14 @@ export function BrowserSessionView({ session }: { session: BrowserSession }) {
             <span className="text-[11px] font-medium uppercase tracking-wider text-ghost">
               Browser timeline
             </span>
-            <span className="font-mono text-[11px] text-faint">{formatClock(shot.ts)}</span>
+            <span className="font-mono text-[11px] text-faint">{shot ? formatClock(shot.ts) : "—"}</span>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
+            {!hasShots && (
+              <div className="flex h-16 w-full items-center justify-center rounded-md border border-dashed border-border text-[11px] text-faint">
+                No screenshots captured for this session
+              </div>
+            )}
             {session.shots.map((s, i) => (
               <button
                 key={s.id}

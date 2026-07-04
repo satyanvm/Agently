@@ -63,14 +63,25 @@ type Persister interface {
 	FinishBrowserSession(ctx context.Context, sessionID, status string) error
 }
 
-// New selects a provider from the environment. Browserbase when a key is present,
-// otherwise the simulated provider (zero-cost, no account, fully demoable).
+// New selects a provider from the environment. Browserbase requires BOTH
+// BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID — a session create fails with
+// `400 Invalid uuid at "projectId"` without the project id, so a half-configured
+// setup must fall back to the simulated provider rather than 400 on every browse.
+// (This mirrors the Python reasoner, whose browserbase_enabled gates on both.)
+// Otherwise the simulated provider (zero-cost, no account, fully demoable).
 func New() Provider {
 	if key := os.Getenv("BROWSERBASE_API_KEY"); key != "" {
-		return &browserbaseProvider{
-			apiKey:    key,
-			projectID: os.Getenv("BROWSERBASE_PROJECT_ID"),
+		if projectID := os.Getenv("BROWSERBASE_PROJECT_ID"); projectID != "" {
+			return &browserbaseProvider{apiKey: key, projectID: projectID}
 		}
+		// Key present but project id missing → not usable; degrade to simulated.
 	}
 	return &simProvider{}
+}
+
+// BrowserbaseMisconfigured reports the "key set but project id missing" case, so
+// the entrypoint can warn that it degraded to the simulated browser (a silent
+// fallback here is exactly what made a missing project id hard to diagnose).
+func BrowserbaseMisconfigured() bool {
+	return os.Getenv("BROWSERBASE_API_KEY") != "" && os.Getenv("BROWSERBASE_PROJECT_ID") == ""
 }
