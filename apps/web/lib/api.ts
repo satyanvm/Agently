@@ -242,11 +242,25 @@ export async function fetchRunLogsAfter(runId: string, sinceSeq: number): Promis
   return page.items;
 }
 
-/** Launch a run for a workflow slug with optional task input; returns the run id. */
-export async function launchRun(slug: string, input?: Record<string, unknown>): Promise<string> {
+/**
+ * Launch a run for a workflow slug; returns the run id.
+ *
+ * `engine` selects the execution plane: "native" (default, the Go worker — dispatches
+ * nodes by name) or "temporal" (the reasoner — executes the composed graph literally,
+ * so a builder node like `tool.browser` actually visits its URL). The visual builder's
+ * Test-run passes "temporal" so the drawn graph runs exactly as wired.
+ */
+export async function launchRun(
+  slug: string,
+  input?: Record<string, unknown>,
+  engine?: "native" | "temporal",
+): Promise<string> {
+  const body: Record<string, unknown> = {};
+  if (input) body.input = input;
+  if (engine) body.engine = engine;
   const run = await getJSON<{ id: string }>(`/api/workflows/${slug}/runs`, {
     method: "POST",
-    body: JSON.stringify(input ? { input } : {}),
+    body: JSON.stringify(body),
   });
   return run.id;
 }
