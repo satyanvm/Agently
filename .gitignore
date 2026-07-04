@@ -23,6 +23,9 @@ pnpm-debug.log*
 # turbo
 .turbo/
 
+# agently orchestrator runtime (pids + logs)
+.agently/
+
 # typescript
 *.tsbuildinfo
 notion.md
