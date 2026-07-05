@@ -289,12 +289,24 @@ func (rt *Runtime) runBrowser(ctx context.Context, runID string, ag queue.GraphA
 			ok = false
 			break
 		}
-		if r, err := sess.Do(ctx, browser.Action{Type: "navigate", Target: url}); err == nil {
+		r, err := sess.Do(ctx, browser.Action{Type: "navigate", Target: url})
+		if err == nil {
 			rt.emitSeq(ctx, runID, st, start, "info", "browser", ag.Name, "navigated → "+url, false, nil)
-			ex, _ := sess.Do(ctx, browser.Action{Type: "extract", Target: r.Title})
-			fmt.Fprintf(&notes, "- %s: %s\n", url, ex.Output)
+			// Extract with an EMPTY target = whole-page body text. Passing r.Title
+			// here treated the page title ("Hacker News") as a CSS selector, which
+			// chromedp.ByQuery rejected instantly (0ms) — the extract must receive a
+			// selector, not the title.
+			ex, exErr := sess.Do(ctx, browser.Action{Type: "extract", Target: ""})
+			if exErr != nil && ctx.Err() == nil {
+				detail := exErr.Error()
+				rt.emitSeq(ctx, runID, st, start, "warn", "browser", ag.Name, "extract failed: "+url, false, &detail)
+			}
+			fmt.Fprintf(&notes, "- %s (%s): %s\n", url, r.Title, ex.Output)
 		} else if ctx.Err() == nil {
-			rt.emitSeq(ctx, runID, st, start, "warn", "browser", ag.Name, "navigation failed: "+url, false, nil)
+			// Surface the underlying error (chromedp/CDP) as the log detail — a bare
+			// "navigation failed" is undebuggable. Visible in the run's Logs tab.
+			detail := err.Error()
+			rt.emitSeq(ctx, runID, st, start, "warn", "browser", ag.Name, "navigation failed: "+url, false, &detail)
 		}
 	}
 	_ = sess.Close(ctx, ok)

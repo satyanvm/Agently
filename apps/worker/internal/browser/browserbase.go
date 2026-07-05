@@ -60,10 +60,26 @@ func (p *browserbaseProvider) Open(ctx context.Context, runID, agentName string,
 		provider: p,
 	}
 	if bbSession.ConnectURL != "" {
-		allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), bbSession.ConnectURL)
+		// NoModifyURL: use Browserbase's WebSocket URL as-is. Without it, chromedp
+		// tries to resolve the debugger endpoint via http://<host>/json/version and
+		// runs SplitHostPort on the host — which fails for Browserbase's portless
+		// wss URL ("missing port in address"), so navigation never starts.
+		allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(
+			context.Background(), bbSession.ConnectURL, chromedp.NoModifyURL)
 		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-		sess.cdp = browserCtx
-		sess.cancel = func() { cancelBrowser(); cancelAlloc() }
+		// Warm up the browser NOW, bound to the long-lived browserCtx, so the CDP
+		// target's message loop is tied to a context that lives for the whole
+		// session (actions then run on s.cdp — see Do). It also lets us verify the
+		// connection up front and degrade cleanly (sess.cdp stays nil → simulated)
+		// instead of failing on the first action.
+		if err := chromedp.Run(browserCtx); err != nil {
+			_ = persist.RecordConsole(ctx, dbID, "warn", "chromedp connect failed: "+err.Error())
+			cancelBrowser()
+			cancelAlloc()
+		} else {
+			sess.cdp = browserCtx
+			sess.cancel = func() { cancelBrowser(); cancelAlloc() }
+		}
 	}
 	return sess, nil
 }
@@ -144,9 +160,12 @@ func (s *browserbaseSession) Do(ctx context.Context, a Action) (Result, error) {
 			return Result{OK: true, URL: a.Target, Title: title}, nil
 		}
 		var title string
-		actCtx, cancel := context.WithTimeout(s.cdp, 30*time.Second)
-		defer cancel()
-		err := chromedp.Run(actCtx,
+		// Run on the long-lived session context (s.cdp), NOT a per-action
+		// WithTimeout child. chromedp binds the CDP target's message loop to the
+		// context that first drives it; cancelling a per-action child (defer cancel)
+		// tore that loop down, so the NEXT action failed with "context canceled".
+		// Browserbase enforces its own server-side session timeout.
+		err := chromedp.Run(s.cdp,
 			chromedp.Navigate(a.Target),
 			chromedp.Title(&title),
 		)
@@ -164,14 +183,18 @@ func (s *browserbaseSession) Do(ctx context.Context, a Action) (Result, error) {
 			_ = s.persist.RecordAction(ctx, s.dbID, "extract", a.Target, "", "ok", 0)
 			return Result{OK: true}, nil
 		}
-		sel := a.Target
-		if strings.TrimSpace(sel) == "" {
-			sel = "body"
-		}
+		sel := strings.TrimSpace(a.Target)
 		var text string
-		actCtx, cancel := context.WithTimeout(s.cdp, 20*time.Second)
-		defer cancel()
-		err := chromedp.Run(actCtx, chromedp.Text(sel, &text, chromedp.NodeVisible, chromedp.ByQuery))
+		var err error
+		if sel == "" || sel == "body" {
+			// Whole-page text: read innerText directly. More robust than
+			// Text(NodeVisible, ByQuery), which can fail immediately on some pages
+			// (frames, visibility timing) — the cause of the 0ms extract errors.
+			err = chromedp.Run(s.cdp,
+				chromedp.Evaluate(`document.body ? document.body.innerText : ""`, &text))
+		} else {
+			err = chromedp.Run(s.cdp, chromedp.Text(sel, &text, chromedp.NodeVisible, chromedp.ByQuery))
+		}
 		dur := int(time.Since(start).Milliseconds())
 		if err != nil {
 			_ = s.persist.RecordAction(ctx, s.dbID, "extract", sel, "", "error", dur)
