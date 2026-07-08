@@ -44,6 +44,12 @@ class Config:
     smtp_user: str
     smtp_pass: str
     smtp_from: str
+    # tool.code sandbox gate (opt-in — model-authored code runs ONLY where the
+    # operator consciously enabled it; otherwise record-intent).
+    tool_code_enabled: bool
+    # tool.db target (opt-in — SQL runs ONLY against this dedicated URL, never the
+    # platform Postgres; unset means record-intent).
+    tool_db_url: str
     # How often the dispatcher polls Postgres for queued temporal runs (seconds).
     dispatch_interval_s: float
 
@@ -86,6 +92,8 @@ def load() -> Config:
         smtp_pass=os.getenv("SMTP_PASS", ""),
         # from = SMTP_FROM, then SMTP_USER (mirrors the Go notifier's fallback).
         smtp_from=os.getenv("SMTP_FROM", "") or os.getenv("SMTP_USER", ""),
+        tool_code_enabled=os.getenv("TOOL_CODE_ENABLED", "") in ("1", "true", "yes"),
+        tool_db_url=os.getenv("TOOL_DB_URL", ""),
         dispatch_interval_s=float(os.getenv("REASONER_DISPATCH_INTERVAL_S", "1.5")),
     )
 

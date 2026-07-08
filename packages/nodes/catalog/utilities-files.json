@@ -1,0 +1,317 @@
+{
+  "cluster": "utilities-files",
+  "label": "Utilities & Files",
+  "description": "Local data transforms (csv, json, xml, text, crypto, datetime) running as sandboxed Python stdlib programs, plus a few keyless HTTP utilities.",
+  "nodes": [
+    {
+      "id": "csv.parse",
+      "label": "CSV: Parse",
+      "description": "Parse CSV text into structured rows using Python's csv module. With a header row, each row becomes an object keyed by column name.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "csv parse read rows columns delimiter header spreadsheet table import",
+      "config": [
+        { "key": "text", "label": "CSV text", "control": "textarea", "required": true, "help": "Raw CSV content. Config values are passed to the sandbox program via the stdin payload's \"config\" key." },
+        { "key": "delimiter", "label": "Delimiter", "control": "text", "required": false, "placeholder": ",", "help": "Single-character field separator (default ,)" },
+        { "key": "hasHeader", "label": "First row is header", "control": "select", "required": false, "options": ["true", "false"], "help": "true: rows become objects keyed by header; false: rows stay arrays" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, csv, io\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    text = str(cfg.get(\"text\") or \"\")\n    delim = (str(cfg.get(\"delimiter\") or \",\") or \",\")[0]\n    has_header = str(cfg.get(\"hasHeader\", \"true\")).lower() != \"false\"\n    rows = [r for r in csv.reader(io.StringIO(text), delimiter=delim) if r]\n    if has_header and rows:\n        header = rows[0]\n        out = [dict(zip(header, r)) for r in rows[1:]]\n    else:\n        out = rows\n    print(json.dumps({\"result\": {\"rows\": out, \"count\": len(out)}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "csv.compose",
+      "label": "CSV: Compose",
+      "description": "Serialize a JSON array of rows (objects or arrays) into CSV text using Python's csv module.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "csv compose write serialize export rows spreadsheet table generate",
+      "config": [
+        { "key": "rows", "label": "Rows (JSON array)", "control": "textarea", "required": true, "placeholder": "[{\"name\": \"Ada\", \"age\": 36}]", "help": "JSON array of objects (header from first object's keys) or arrays. Passed to the program via stdin config." },
+        { "key": "delimiter", "label": "Delimiter", "control": "text", "required": false, "placeholder": "," }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, csv, io\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    raw = cfg.get(\"rows\")\n    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])\n    delim = (str(cfg.get(\"delimiter\") or \",\") or \",\")[0]\n    buf = io.StringIO()\n    if rows and isinstance(rows[0], dict):\n        keys = list(rows[0].keys())\n        w = csv.DictWriter(buf, fieldnames=keys, delimiter=delim, extrasaction=\"ignore\")\n        w.writeheader()\n        w.writerows(rows)\n    else:\n        csv.writer(buf, delimiter=delim).writerows(rows)\n    print(json.dumps({\"result\": {\"csv\": buf.getvalue(), \"count\": len(rows)}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "json.query",
+      "label": "JSON: Query Path",
+      "description": "Extract a value from a JSON document by dotted path (e.g. items.0.name). Falls back to the upstream input when no data is supplied.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "json query path extract get field lookup dotted select value",
+      "config": [
+        { "key": "data", "label": "JSON data", "control": "textarea", "required": false, "help": "JSON text to query. Leave empty to query the node's upstream input. Config reaches the program via the stdin payload's \"config\" key." },
+        { "key": "path", "label": "Dotted path", "control": "text", "required": true, "placeholder": "items.0.name", "help": "Dot-separated keys; numeric segments index into arrays" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    raw = cfg.get(\"data\")\n    if isinstance(raw, str) and raw.strip():\n        data = json.loads(raw)\n    elif raw is not None:\n        data = raw\n    else:\n        data = p.get(\"input\")\n    cur = data\n    for part in [s for s in str(cfg.get(\"path\") or \"\").split(\".\") if s]:\n        if isinstance(cur, list) and part.lstrip(\"-\").isdigit():\n            i = int(part)\n            cur = cur[i] if -len(cur) <= i < len(cur) else None\n        elif isinstance(cur, dict):\n            cur = cur.get(part)\n        else:\n            cur = None\n        if cur is None:\n            break\n    print(json.dumps({\"result\": {\"value\": cur, \"found\": cur is not None}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "json.transform",
+      "label": "JSON: Transform Rows",
+      "description": "Filter a JSON array of objects by a simple field comparison, or pick a subset of fields from every row.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "json transform filter map pick rows where field compare select subset",
+      "config": [
+        { "key": "rows", "label": "Rows (JSON array)", "control": "textarea", "required": true, "help": "JSON array of objects to transform. Config values arrive in the program via stdin under \"config\"." },
+        { "key": "mode", "label": "Mode", "control": "select", "required": true, "options": ["filter", "pick"], "help": "filter: keep rows matching field/op/value; pick: keep only the listed fields" },
+        { "key": "field", "label": "Field (filter)", "control": "text", "required": false },
+        { "key": "op", "label": "Operator (filter)", "control": "select", "required": false, "options": ["eq", "ne", "contains", "gt", "lt"] },
+        { "key": "value", "label": "Value (filter)", "control": "text", "required": false },
+        { "key": "fields", "label": "Fields (pick)", "control": "text", "required": false, "placeholder": "name, email", "help": "Comma-separated field names to keep in pick mode" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    raw = cfg.get(\"rows\")\n    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])\n    mode = str(cfg.get(\"mode\") or \"filter\")\n    if mode == \"pick\":\n        keep = [s.strip() for s in str(cfg.get(\"fields\") or \"\").split(\",\") if s.strip()]\n        out = [{k: r.get(k) for k in keep} for r in rows if isinstance(r, dict)]\n    else:\n        f, op, val = cfg.get(\"field\"), str(cfg.get(\"op\") or \"eq\"), cfg.get(\"value\")\n        def match(r):\n            v = r.get(f) if isinstance(r, dict) else None\n            if op == \"eq\": return str(v) == str(val)\n            if op == \"ne\": return str(v) != str(val)\n            if op == \"contains\": return str(val) in str(v)\n            try:\n                if op == \"gt\": return float(v) > float(val)\n                if op == \"lt\": return float(v) < float(val)\n            except (TypeError, ValueError):\n                return False\n            return False\n        out = [r for r in rows if match(r)]\n    print(json.dumps({\"result\": {\"rows\": out, \"count\": len(out)}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "xml.parse",
+      "label": "XML: Parse",
+      "description": "Parse XML text into a nested dict (tag, attrs, text, children) using xml.etree.ElementTree.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "xml parse tree element attributes rss feed convert dict read",
+      "config": [
+        { "key": "xml", "label": "XML text", "control": "textarea", "required": true, "help": "XML document to parse. Delivered to the sandbox program via stdin config." }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\nimport xml.etree.ElementTree as ET\ndef conv(el):\n    node = {\"tag\": el.tag, \"attrs\": dict(el.attrib)}\n    text = (el.text or \"\").strip()\n    if text:\n        node[\"text\"] = text\n    kids = [conv(c) for c in el]\n    if kids:\n        node[\"children\"] = kids\n    return node\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    root = ET.fromstring(str(cfg.get(\"xml\") or \"\"))\n    print(json.dumps({\"result\": conv(root)}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "regex.extract",
+      "label": "Regex: Extract Matches",
+      "description": "Run re.findall with a configured pattern over text and return all matches (groups become arrays).",
+      "kind": "action",
+      "runtime": "code",
+      "search": "regex regexp extract findall pattern match groups scrape text parse",
+      "config": [
+        { "key": "pattern", "label": "Pattern", "control": "text", "required": true, "placeholder": "\\b[\\w.]+@[\\w.]+\\b", "help": "Python regular expression. Config values reach the program via stdin under \"config\"." },
+        { "key": "text", "label": "Text", "control": "textarea", "required": true },
+        { "key": "ignoreCase", "label": "Ignore case", "control": "select", "required": false, "options": ["false", "true"] }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, re\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    pattern = str(cfg.get(\"pattern\") or \"\")\n    text = str(cfg.get(\"text\") or \"\")\n    flags = re.IGNORECASE if str(cfg.get(\"ignoreCase\", \"false\")).lower() == \"true\" else 0\n    found = re.findall(pattern, text, flags)\n    found = [list(m) if isinstance(m, tuple) else m for m in found]\n    print(json.dumps({\"result\": {\"matches\": found, \"count\": len(found)}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "text.diff",
+      "label": "Text: Unified Diff",
+      "description": "Compare two texts line-by-line and produce a unified diff via difflib.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "diff compare text changes unified difflib delta versions before after",
+      "config": [
+        { "key": "textA", "label": "Original text", "control": "textarea", "required": true, "help": "Both texts are handed to the sandbox program via the stdin payload's \"config\" key." },
+        { "key": "textB", "label": "New text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, difflib\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    a = str(cfg.get(\"textA\") or \"\").splitlines()\n    b = str(cfg.get(\"textB\") or \"\").splitlines()\n    lines = list(difflib.unified_diff(a, b, fromfile=\"a\", tofile=\"b\", lineterm=\"\"))\n    changed = sum(1 for l in lines if l[:1] in \"+-\" and l[:3] not in (\"+++\", \"---\"))\n    print(json.dumps({\"result\": {\"diff\": \"\\n\".join(lines), \"changedLines\": changed, \"identical\": not lines}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "datetime.now",
+      "label": "Date/Time: Now (Formatted)",
+      "description": "Get the current date/time formatted with a strftime pattern, plus ISO-8601 and epoch forms. Optional fixed UTC offset.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "datetime now date time current timestamp format strftime clock epoch iso",
+      "config": [
+        { "key": "format", "label": "Format", "control": "text", "required": false, "placeholder": "%Y-%m-%d %H:%M:%S", "help": "Python strftime pattern (default ISO-like). Config is passed to the program via stdin under \"config\"." },
+        { "key": "utcOffsetHours", "label": "UTC offset (hours)", "control": "text", "required": false, "placeholder": "0", "help": "e.g. 5.5 for IST, -8 for PST; default 0 (UTC)" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\nfrom datetime import datetime, timezone, timedelta\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    fmt = str(cfg.get(\"format\") or \"%Y-%m-%dT%H:%M:%S%z\")\n    try:\n        offset = float(cfg.get(\"utcOffsetHours\") or 0)\n    except (TypeError, ValueError):\n        offset = 0.0\n    now = datetime.now(timezone(timedelta(hours=offset)))\n    print(json.dumps({\"result\": {\"formatted\": now.strftime(fmt), \"iso\": now.isoformat(), \"epoch\": int(now.timestamp())}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "hash.digest",
+      "label": "Hash: Digest Text",
+      "description": "Compute an md5, sha1, sha256 or sha512 hex digest of UTF-8 text via hashlib.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "hash digest md5 sha256 sha512 checksum fingerprint hashlib crypto",
+      "config": [
+        { "key": "text", "label": "Text", "control": "textarea", "required": true, "help": "Text to hash (UTF-8). Config reaches the program via the stdin payload's \"config\" key." },
+        { "key": "algorithm", "label": "Algorithm", "control": "select", "required": true, "options": ["sha256", "md5", "sha1", "sha512"] }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, hashlib\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    algo = str(cfg.get(\"algorithm\") or \"sha256\").lower()\n    if algo not in (\"md5\", \"sha1\", \"sha256\", \"sha512\"):\n        raise ValueError(\"unsupported algorithm: \" + algo)\n    text = str(cfg.get(\"text\") or \"\")\n    digest = hashlib.new(algo, text.encode(\"utf-8\")).hexdigest()\n    print(json.dumps({\"result\": {\"algorithm\": algo, \"hex\": digest}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "base64.encodeDecode",
+      "label": "Base64: Encode / Decode",
+      "description": "Base64-encode UTF-8 text or decode a base64 string back to text.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "base64 encode decode binary text convert b64 data",
+      "config": [
+        { "key": "mode", "label": "Mode", "control": "select", "required": true, "options": ["encode", "decode"], "help": "Config values are passed to the sandbox program via stdin under \"config\"." },
+        { "key": "text", "label": "Text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, base64\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    mode = str(cfg.get(\"mode\") or \"encode\").lower()\n    text = str(cfg.get(\"text\") or \"\")\n    if mode == \"decode\":\n        pad = text.strip() + \"=\" * (-len(text.strip()) % 4)\n        out = base64.b64decode(pad.encode(\"ascii\")).decode(\"utf-8\", \"replace\")\n    else:\n        out = base64.b64encode(text.encode(\"utf-8\")).decode(\"ascii\")\n    print(json.dumps({\"result\": {\"mode\": mode, \"output\": out}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "url.parse",
+      "label": "URL: Parse Components",
+      "description": "Split a URL into scheme, host, port, path, query params and fragment via urllib.parse.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "url parse components scheme host path query params fragment urllib link",
+      "config": [
+        { "key": "url", "label": "URL", "control": "text", "required": true, "placeholder": "https://example.com/a?x=1", "help": "URL to decompose. Delivered to the program via the stdin payload's \"config\" key." }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\nfrom urllib.parse import urlparse, parse_qs\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    u = urlparse(str(cfg.get(\"url\") or \"\"))\n    out = {\n        \"scheme\": u.scheme,\n        \"host\": u.hostname,\n        \"port\": u.port,\n        \"path\": u.path,\n        \"query\": parse_qs(u.query),\n        \"fragment\": u.fragment,\n        \"username\": u.username,\n    }\n    print(json.dumps({\"result\": out}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "uuid.generate",
+      "label": "UUID: Generate",
+      "description": "Generate one or more random UUIDv4 identifiers.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "uuid guid generate random identifier unique id v4",
+      "config": [
+        { "key": "count", "label": "Count", "control": "text", "required": false, "placeholder": "1", "help": "How many UUIDs to generate (1-100). Passed to the program via stdin under \"config\"." }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, uuid\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    try:\n        count = int(str(cfg.get(\"count\") or \"1\"))\n    except ValueError:\n        count = 1\n    count = max(1, min(count, 100))\n    ids = [str(uuid.uuid4()) for _ in range(count)]\n    print(json.dumps({\"result\": {\"uuid\": ids[0], \"uuids\": ids, \"count\": count}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "template.render",
+      "label": "Template: Render Text",
+      "description": "Render a text template with Python str.format-style {field} placeholders, filled from a JSON values object merged over the upstream input. Unknown placeholders are left as-is.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "template render format string placeholder interpolate fill merge text compose",
+      "config": [
+        { "key": "template", "label": "Template", "control": "textarea", "required": true, "placeholder": "Hello {name}, your order {orderId} shipped.", "help": "Simple {field} placeholders only (no dotted paths). Config reaches the program via stdin under \"config\"." },
+        { "key": "values", "label": "Values (JSON object)", "control": "textarea", "required": false, "placeholder": "{\"name\": \"Ada\"}", "help": "Optional JSON object; merged over the node's upstream input fields" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    template = str(cfg.get(\"template\") or \"\")\n    raw = cfg.get(\"values\")\n    values = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or {})\n    ctx = {}\n    if isinstance(p.get(\"input\"), dict):\n        ctx.update(p[\"input\"])\n    if isinstance(values, dict):\n        ctx.update(values)\n    class Safe(dict):\n        def __missing__(self, key):\n            return \"{\" + str(key) + \"}\"\n    rendered = template.format_map(Safe(ctx))\n    print(json.dumps({\"result\": {\"rendered\": rendered}}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "text.wordcount",
+      "label": "Text: Word Count & Top Terms",
+      "description": "Count words, unique terms, characters and lines in a text, and list the most frequent terms.",
+      "kind": "action",
+      "runtime": "code",
+      "search": "wordcount count words characters lines frequency top terms text stats analyze",
+      "config": [
+        { "key": "text", "label": "Text", "control": "textarea", "required": true, "help": "Text to analyze. Config values are passed to the sandbox program via stdin under \"config\"." },
+        { "key": "topN", "label": "Top terms", "control": "text", "required": false, "placeholder": "10", "help": "How many most-frequent terms to return (1-50)" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": [],
+      "code": {
+        "language": "python",
+        "source": "import sys, json, re, collections\ntry:\n    p = json.load(sys.stdin)\n    cfg = p.get(\"config\") or {}\n    text = str(cfg.get(\"text\") or \"\")\n    try:\n        top_n = int(str(cfg.get(\"topN\") or \"10\"))\n    except ValueError:\n        top_n = 10\n    top_n = max(1, min(top_n, 50))\n    words = re.findall(r\"[A-Za-z0-9']+\", text.lower())\n    counts = collections.Counter(words)\n    top = [{\"term\": w, \"count\": c} for w, c in counts.most_common(top_n)]\n    out = {\n        \"words\": len(words),\n        \"unique\": len(counts),\n        \"chars\": len(text),\n        \"lines\": len(text.splitlines()),\n        \"topTerms\": top,\n    }\n    print(json.dumps({\"result\": out}))\nexcept Exception as e:\n    print(json.dumps({\"result\": None, \"error\": str(e)}))"
+      }
+    },
+    {
+      "id": "httpbin.get",
+      "label": "HTTPBin: Echo Request",
+      "description": "Send a GET to httpbin.org/get and receive your request echoed back (args, headers, origin IP). Useful for testing pipelines without credentials.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "httpbin echo test debug request get args headers origin keyless",
+      "config": [
+        { "key": "value", "label": "Echo value", "control": "text", "required": false, "help": "Optional value sent as the ?value= query parameter and echoed back" }
+      ],
+      "outputs": ["args", "origin", "url", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://httpbin.org/get?value={{urlencode config.value}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "args": "args", "origin": "origin", "url": "url" }
+      }
+    },
+    {
+      "id": "qrserver.generateQr",
+      "label": "QR Server: Generate QR Code",
+      "description": "Generate a QR code for any text via the keyless api.qrserver.com create-qr-code endpoint. Requested as SVG so the body is usable markup; the same URL with format=png serves an image.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "qr code generate barcode image svg link qrserver keyless",
+      "config": [
+        { "key": "data", "label": "Data", "control": "textarea", "required": true, "placeholder": "https://example.com", "help": "Text or URL to encode in the QR code" },
+        { "key": "size", "label": "Size", "control": "text", "required": false, "placeholder": "200x200", "help": "WIDTHxHEIGHT in pixels (default 200x200)" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.qrserver.com/v1/create-qr-code/?data={{urlencode config.data}}&size={{urlencode config.size}}&format=svg",
+        "headers": { "Accept": "image/svg+xml" }
+      }
+    },
+    {
+      "id": "ipify.getIp",
+      "label": "ipify: Get Public IP",
+      "description": "Fetch the caller's public IP address from the keyless ipify API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "ip address public lookup ipify network whoami keyless",
+      "config": [],
+      "outputs": ["ip", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.ipify.org?format=json",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "ip": "ip" }
+      }
+    }
+  ]
+}

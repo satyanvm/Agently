@@ -1,0 +1,347 @@
+{
+  "cluster": "ai-ml",
+  "label": "AI & ML",
+  "description": "Model inference APIs: chat completion, embeddings, image generation, speech and translation.",
+  "nodes": [
+    {
+      "id": "openai.chatCompletion",
+      "label": "OpenAI: Chat Completion",
+      "description": "Generate a chat completion via the OpenAI Chat Completions API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openai gpt chat completion llm generate text prompt ai",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["gpt-4o-mini", "gpt-4o", "gpt-4.1", "gpt-4.1-mini"] },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true }
+      ],
+      "outputs": ["text", "model", "status", "body"],
+      "credentials": [{ "key": "OPENAI_API_KEY", "help": "OpenAI API key (sk-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "headers": { "Authorization": "Bearer {{credentials.OPENAI_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"messages\": [{\"role\": \"user\", \"content\": {{json config.prompt}}}]}",
+        "outputMap": { "text": "choices.0.message.content", "model": "model" }
+      }
+    },
+    {
+      "id": "openai.createEmbedding",
+      "label": "OpenAI: Create Embedding",
+      "description": "Create a vector embedding for a text via the OpenAI Embeddings API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openai embedding vector semantic similarity text encode",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"] },
+        { "key": "input", "label": "Input text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["embedding", "status", "body"],
+      "credentials": [{ "key": "OPENAI_API_KEY", "help": "OpenAI API key (sk-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "headers": { "Authorization": "Bearer {{credentials.OPENAI_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"input\": {{json config.input}}}",
+        "outputMap": { "embedding": "data.0.embedding" }
+      }
+    },
+    {
+      "id": "openai.generateImage",
+      "label": "OpenAI: Generate Image",
+      "description": "Generate an image from a text prompt via the OpenAI Images API (DALL·E).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openai dalle image generation picture art create prompt",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["dall-e-3", "dall-e-2"] },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true },
+        { "key": "size", "label": "Size", "control": "select", "required": true, "options": ["1024x1024", "1792x1024", "1024x1792"], "help": "1792-px sizes are dall-e-3 only; dall-e-2 supports 1024x1024" }
+      ],
+      "outputs": ["imageUrl", "status", "body"],
+      "credentials": [{ "key": "OPENAI_API_KEY", "help": "OpenAI API key (sk-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "headers": { "Authorization": "Bearer {{credentials.OPENAI_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"prompt\": {{json config.prompt}}, \"n\": 1, \"size\": {{json config.size}}}",
+        "outputMap": { "imageUrl": "data.0.url" }
+      }
+    },
+    {
+      "id": "anthropic.createMessage",
+      "label": "Anthropic: Create Message",
+      "description": "Generate a response from a Claude model via the Anthropic Messages API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "anthropic claude message llm chat generate text prompt ai",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"], "help": "claude-sonnet-4-6 is the balanced default" },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true },
+        { "key": "maxTokens", "label": "Max tokens", "control": "text", "required": true, "placeholder": "1024", "help": "Integer output-token cap, e.g. 1024" }
+      ],
+      "outputs": ["text", "stopReason", "model", "status", "body"],
+      "credentials": [{ "key": "ANTHROPIC_API_KEY", "help": "Anthropic API key (sk-ant-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": { "x-api-key": "{{credentials.ANTHROPIC_API_KEY}}", "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"max_tokens\": {{config.maxTokens}}, \"messages\": [{\"role\": \"user\", \"content\": {{json config.prompt}}}]}",
+        "outputMap": { "text": "content.0.text", "stopReason": "stop_reason", "model": "model" }
+      }
+    },
+    {
+      "id": "huggingface.generateText",
+      "label": "Hugging Face: Generate Text",
+      "description": "Run a text-generation model on the Hugging Face Inference API (hf-inference provider).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "huggingface inference text generation llm model open source transformers",
+      "config": [
+        { "key": "model", "label": "Model ID", "control": "text", "required": true, "placeholder": "openai-community/gpt2", "help": "A Hub model that supports the text-generation task" },
+        { "key": "inputs", "label": "Input text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["generatedText", "status", "body"],
+      "credentials": [{ "key": "HF_TOKEN", "help": "Hugging Face access token (hf_…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/hf-inference/models/{{config.model}}",
+        "headers": { "Authorization": "Bearer {{credentials.HF_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"inputs\": {{json config.inputs}}}",
+        "outputMap": { "generatedText": "0.generated_text" }
+      }
+    },
+    {
+      "id": "huggingface.classifyText",
+      "label": "Hugging Face: Classify Text",
+      "description": "Run a text-classification model on the Hugging Face Inference API; returns label/score pairs.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "huggingface classify sentiment label classification nlp model score",
+      "config": [
+        { "key": "model", "label": "Model ID", "control": "text", "required": true, "placeholder": "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "help": "A Hub model that supports the text-classification task" },
+        { "key": "inputs", "label": "Input text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "HF_TOKEN", "help": "Hugging Face access token (hf_…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/hf-inference/models/{{config.model}}",
+        "headers": { "Authorization": "Bearer {{credentials.HF_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"inputs\": {{json config.inputs}}}"
+      }
+    },
+    {
+      "id": "replicate.createPrediction",
+      "label": "Replicate: Create Prediction",
+      "description": "Start a model run on Replicate. Sends Prefer: wait so short runs return their output synchronously.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "replicate prediction model run inference image video audio ml",
+      "config": [
+        { "key": "version", "label": "Model version", "control": "text", "required": true, "help": "64-character model version ID from the model's API page" },
+        { "key": "input", "label": "Input (JSON)", "control": "textarea", "required": true, "placeholder": "{\"prompt\": \"an astronaut riding a horse\"}", "help": "JSON object of the model's named inputs" }
+      ],
+      "outputs": ["id", "predictionStatus", "output", "status", "body"],
+      "credentials": [{ "key": "REPLICATE_API_TOKEN", "help": "Replicate API token (r8_…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/predictions",
+        "headers": { "Authorization": "Bearer {{credentials.REPLICATE_API_TOKEN}}", "Content-Type": "application/json", "Prefer": "wait" },
+        "body": "{\"version\": {{json config.version}}, \"input\": {{config.input}}}",
+        "outputMap": { "id": "id", "predictionStatus": "status", "output": "output" }
+      }
+    },
+    {
+      "id": "replicate.getPrediction",
+      "label": "Replicate: Get Prediction",
+      "description": "Fetch the current state and output of a Replicate prediction by ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "replicate prediction poll result output fetch check ml",
+      "config": [
+        { "key": "predictionId", "label": "Prediction ID", "control": "text", "required": true, "help": "The id returned by Create Prediction" }
+      ],
+      "outputs": ["id", "predictionStatus", "output", "status", "body"],
+      "credentials": [{ "key": "REPLICATE_API_TOKEN", "help": "Replicate API token (r8_…)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.replicate.com/v1/predictions/{{config.predictionId}}",
+        "headers": { "Authorization": "Bearer {{credentials.REPLICATE_API_TOKEN}}" },
+        "outputMap": { "id": "id", "predictionStatus": "status", "output": "output" }
+      }
+    },
+    {
+      "id": "elevenlabs.textToSpeech",
+      "label": "ElevenLabs: Text to Speech",
+      "description": "Convert text to spoken audio via the ElevenLabs TTS API. Response body is binary audio (MPEG).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "elevenlabs text speech tts voice audio speak narrate generate",
+      "config": [
+        { "key": "voiceId", "label": "Voice ID", "control": "text", "required": true, "placeholder": "21m00Tcm4TlvDq8ikWAM", "help": "Voice ID from your ElevenLabs voice library" },
+        { "key": "text", "label": "Text", "control": "textarea", "required": true },
+        { "key": "modelId", "label": "Model", "control": "select", "required": true, "options": ["eleven_multilingual_v2", "eleven_turbo_v2_5", "eleven_flash_v2_5"] }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "ELEVENLABS_API_KEY", "help": "ElevenLabs API key" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{config.voiceId}}",
+        "headers": { "xi-api-key": "{{credentials.ELEVENLABS_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"text\": {{json config.text}}, \"model_id\": {{json config.modelId}}}"
+      }
+    },
+    {
+      "id": "deepl.translate",
+      "label": "DeepL: Translate Text",
+      "description": "Translate text via the DeepL API v2 (form-encoded).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "deepl translate translation language localize text convert",
+      "config": [
+        { "key": "apiBase", "label": "API host", "control": "select", "required": true, "options": ["https://api-free.deepl.com", "https://api.deepl.com"], "help": "Free-plan keys (ending :fx) use api-free.deepl.com" },
+        { "key": "text", "label": "Text", "control": "textarea", "required": true },
+        { "key": "targetLang", "label": "Target language", "control": "text", "required": true, "placeholder": "EN-US", "help": "Target language code, e.g. DE, FR, EN-US, JA" }
+      ],
+      "outputs": ["translatedText", "detectedSourceLanguage", "status", "body"],
+      "credentials": [{ "key": "DEEPL_API_KEY", "help": "DeepL auth key" }],
+      "http": {
+        "method": "POST",
+        "url": "{{config.apiBase}}/v2/translate",
+        "headers": { "Authorization": "DeepL-Auth-Key {{credentials.DEEPL_API_KEY}}", "Content-Type": "application/x-www-form-urlencoded" },
+        "body": "text={{urlencode config.text}}&target_lang={{urlencode config.targetLang}}",
+        "outputMap": { "translatedText": "translations.0.text", "detectedSourceLanguage": "translations.0.detected_source_language" }
+      }
+    },
+    {
+      "id": "libretranslate.translate",
+      "label": "LibreTranslate: Translate Text",
+      "description": "Translate text via a LibreTranslate instance (open source; self-hosted instances are keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "libretranslate translate translation open source free language keyless",
+      "config": [
+        { "key": "baseUrl", "label": "Instance URL", "control": "text", "required": true, "placeholder": "http://localhost:5000", "help": "LibreTranslate instance base URL; the official libretranslate.com requires an API key, self-hosted and community mirrors are typically keyless" },
+        { "key": "text", "label": "Text", "control": "textarea", "required": true },
+        { "key": "source", "label": "Source language", "control": "text", "required": true, "placeholder": "auto", "help": "ISO 639 code or auto" },
+        { "key": "target", "label": "Target language", "control": "text", "required": true, "placeholder": "es" }
+      ],
+      "outputs": ["translatedText", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.baseUrl}}/translate",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"q\": {{json config.text}}, \"source\": {{json config.source}}, \"target\": {{json config.target}}, \"format\": \"text\"}",
+        "outputMap": { "translatedText": "translatedText" }
+      }
+    },
+    {
+      "id": "ollama.chat",
+      "label": "Ollama: Chat",
+      "description": "Chat with a locally hosted model via the Ollama chat API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "ollama local llm chat llama mistral self hosted private keyless",
+      "config": [
+        { "key": "baseUrl", "label": "Ollama URL", "control": "text", "required": true, "placeholder": "http://localhost:11434" },
+        { "key": "model", "label": "Model", "control": "text", "required": true, "placeholder": "llama3.2", "help": "A model pulled locally (ollama pull <model>)" },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true }
+      ],
+      "outputs": ["text", "model", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.baseUrl}}/api/chat",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"messages\": [{\"role\": \"user\", \"content\": {{json config.prompt}}}], \"stream\": false}",
+        "outputMap": { "text": "message.content", "model": "model" }
+      }
+    },
+    {
+      "id": "ollama.generate",
+      "label": "Ollama: Generate",
+      "description": "Single-shot text completion from a locally hosted model via the Ollama generate API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "ollama local generate completion llm text self hosted keyless",
+      "config": [
+        { "key": "baseUrl", "label": "Ollama URL", "control": "text", "required": true, "placeholder": "http://localhost:11434" },
+        { "key": "model", "label": "Model", "control": "text", "required": true, "placeholder": "llama3.2" },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true }
+      ],
+      "outputs": ["text", "model", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.baseUrl}}/api/generate",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"prompt\": {{json config.prompt}}, \"stream\": false}",
+        "outputMap": { "text": "response", "model": "model" }
+      }
+    },
+    {
+      "id": "voyage.createEmbedding",
+      "label": "Voyage AI: Create Embedding",
+      "description": "Create a vector embedding for a text via the Voyage AI Embeddings API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "voyage embedding vector semantic retrieval rag encode text",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["voyage-3.5", "voyage-3.5-lite", "voyage-3-large", "voyage-code-3"] },
+        { "key": "text", "label": "Input text", "control": "textarea", "required": true }
+      ],
+      "outputs": ["embedding", "status", "body"],
+      "credentials": [{ "key": "VOYAGE_API_KEY", "help": "Voyage AI API key (pa-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.voyageai.com/v1/embeddings",
+        "headers": { "Authorization": "Bearer {{credentials.VOYAGE_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"input\": [{{json config.text}}], \"model\": {{json config.model}}}",
+        "outputMap": { "embedding": "data.0.embedding" }
+      }
+    },
+    {
+      "id": "groq.chatCompletion",
+      "label": "Groq: Chat Completion",
+      "description": "Fast chat completion via Groq's OpenAI-compatible Chat Completions API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "groq fast llm chat completion llama inference low latency",
+      "config": [
+        { "key": "model", "label": "Model", "control": "select", "required": true, "options": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true }
+      ],
+      "outputs": ["text", "model", "status", "body"],
+      "credentials": [{ "key": "GROQ_API_KEY", "help": "Groq API key (gsk_…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "headers": { "Authorization": "Bearer {{credentials.GROQ_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"messages\": [{\"role\": \"user\", \"content\": {{json config.prompt}}}]}",
+        "outputMap": { "text": "choices.0.message.content", "model": "model" }
+      }
+    },
+    {
+      "id": "openrouter.chatCompletion",
+      "label": "OpenRouter: Chat Completion",
+      "description": "Chat completion through OpenRouter's unified, OpenAI-compatible API over hundreds of models.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openrouter llm router chat completion multi model gateway unified",
+      "config": [
+        { "key": "model", "label": "Model", "control": "text", "required": true, "placeholder": "openrouter/auto", "help": "Any OpenRouter model slug, e.g. openai/gpt-4o or openrouter/auto for automatic routing" },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true }
+      ],
+      "outputs": ["text", "model", "status", "body"],
+      "credentials": [{ "key": "OPENROUTER_API_KEY", "help": "OpenRouter API key (sk-or-…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "headers": { "Authorization": "Bearer {{credentials.OPENROUTER_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"model\": {{json config.model}}, \"messages\": [{\"role\": \"user\", \"content\": {{json config.prompt}}}]}",
+        "outputMap": { "text": "choices.0.message.content", "model": "model" }
+      }
+    }
+  ]
+}

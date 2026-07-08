@@ -14,8 +14,19 @@ import {
   Code2,
   Send,
   MessageSquare,
+  MessageCircle,
+  Newspaper,
+  Share2,
+  ShoppingCart,
+  Cloud,
+  Cpu,
+  Megaphone,
+  CalendarCheck,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
+
+import integrationCatalog from "./integration-catalog.generated.json";
 
 export type NodeKind = "trigger" | "agent" | "tool" | "logic" | "output";
 
@@ -32,6 +43,10 @@ export interface NodeSpec {
   tone: string;
   /** Tailwind background class for the icon chip. */
   toneBg: string;
+  /** Integration cluster ("communication", "devtools", …); unset for built-ins. */
+  cluster?: string;
+  /** Human label of the cluster, for palette group headers. */
+  clusterLabel?: string;
 }
 
 export const NODE_CATALOG: NodeSpec[] = [
@@ -181,6 +196,70 @@ export const NODE_CATALOG: NodeSpec[] = [
   },
 ];
 
+/* ── Integration nodes (generated from packages/nodes/catalog) ─────────────────
+ * Hundreds of service nodes join the palette as data. Regenerate with:
+ *   node packages/nodes/build-web.mjs
+ * The reasoner executes these via its generic integration runtime; the ids are
+ * shared across the Go planner, the Python executor, and this palette. */
+
+interface GeneratedNode {
+  id: string;
+  label: string;
+  description: string;
+  kind: string;
+  runtime: string;
+  cluster: string;
+  clusterLabel: string;
+  config: NodeField[];
+  credentials: string[];
+}
+
+const CLUSTER_ICON: Record<string, LucideIcon> = {
+  communication: MessageCircle,
+  productivity: CalendarCheck,
+  devtools: Code2,
+  "data-web": Globe,
+  "research-news": Newspaper,
+  social: Share2,
+  "commerce-finance": ShoppingCart,
+  "cloud-storage": Cloud,
+  "ai-ml": Cpu,
+  "crm-marketing": Megaphone,
+  databases: Database,
+  "utilities-files": FlaskConical,
+};
+
+/** Integration kinds map onto the palette's tone system: actions read as tools. */
+function paletteKind(kind: string): NodeKind {
+  if (kind === "trigger" || kind === "logic" || kind === "output") return kind;
+  return "tool";
+}
+
+const INTEGRATION_TONE: Record<NodeKind, { tone: string; toneBg: string }> = {
+  trigger: { tone: "text-running", toneBg: "bg-running-bg" },
+  agent: { tone: "text-accent", toneBg: "bg-accent-bg" },
+  tool: { tone: "text-success", toneBg: "bg-success-bg" },
+  logic: { tone: "text-warn", toneBg: "bg-warn-bg" },
+  output: { tone: "text-danger", toneBg: "bg-danger-bg" },
+};
+
+const INTEGRATION_NODES: NodeSpec[] = (integrationCatalog as GeneratedNode[]).map((n) => {
+  const kind = paletteKind(n.kind);
+  return {
+    id: n.id,
+    label: n.label,
+    description: n.description,
+    kind,
+    icon: CLUSTER_ICON[n.cluster] ?? Wrench,
+    tone: INTEGRATION_TONE[kind].tone,
+    toneBg: INTEGRATION_TONE[kind].toneBg,
+    cluster: n.cluster,
+    clusterLabel: n.clusterLabel,
+  };
+});
+
+NODE_CATALOG.push(...INTEGRATION_NODES);
+
 export const NODE_KIND_META: Record<NodeKind, { label: string; tone: string }> = {
   trigger: { label: "Triggers", tone: "text-running" },
   agent: { label: "Agents", tone: "text-accent" },
@@ -237,10 +316,10 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   ],
   "tool.code": [
     { key: "language", label: "Language", control: "select", options: ["python", "javascript"] },
-    { key: "source", label: "Source", control: "textarea", help: "Recorded, not executed on the shared runtime." },
+    { key: "source", label: "Source", control: "textarea", help: "Runs in a sandboxed subprocess when TOOL_CODE_ENABLED=1; recorded otherwise. stdin = {input, outputs, config} JSON; print a JSON object to emit fields." },
   ],
   "tool.db": [
-    { key: "query", label: "SQL", control: "textarea", help: "Recorded, not executed on the shared database." },
+    { key: "query", label: "SQL", control: "textarea", help: "Runs against the operator-configured TOOL_DB_URL database (never the platform DB); recorded when unset." },
   ],
   "logic.branch": [
     { key: "condition", label: "Condition", control: "text", placeholder: "outputs.fetch.status == 200" },
@@ -264,6 +343,11 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "format", label: "Format", control: "select", options: ["markdown", "pdf"] },
   ],
 };
+
+// Integration nodes' inspector forms come straight from the generated catalog.
+for (const n of integrationCatalog as GeneratedNode[]) {
+  NODE_FIELDS[n.id] = n.config;
+}
 
 export function nodeFields(typeId: string): NodeField[] {
   return NODE_FIELDS[typeId] ?? [];

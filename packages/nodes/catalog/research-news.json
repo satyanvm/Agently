@@ -1,0 +1,341 @@
+{
+  "cluster": "research-news",
+  "label": "Research & News",
+  "description": "Academic search, community aggregators, encyclopedias and news feeds — almost all keyless.",
+  "nodes": [
+    {
+      "id": "arxiv.search",
+      "label": "arXiv: Search Papers",
+      "description": "Search arXiv preprints via the export Atom API (keyless). Response body is Atom XML.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "arxiv papers preprint research physics math cs ml academic search science",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true, "placeholder": "all:transformer attention", "help": "arXiv query syntax, e.g. all:electron, ti:\"large language models\", cat:cs.CL" },
+        { "key": "maxResults", "label": "Max results", "control": "text", "required": true, "placeholder": "10" },
+        { "key": "sortBy", "label": "Sort by", "control": "select", "required": false, "options": ["relevance", "lastUpdatedDate", "submittedDate"] }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://export.arxiv.org/api/query?search_query={{urlencode config.query}}&start=0&max_results={{urlencode config.maxResults}}&sortBy={{urlencode config.sortBy}}",
+        "headers": {}
+      }
+    },
+    {
+      "id": "hackernews.search",
+      "label": "Hacker News: Search",
+      "description": "Full-text search over Hacker News stories and comments via the Algolia API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hacker news hn search stories comments tech algolia startup discussion",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "rust async" },
+        { "key": "tags", "label": "Filter tags", "control": "select", "required": false, "options": ["story", "comment", "ask_hn", "show_hn", "front_page"], "help": "Restrict results to one item type" }
+      ],
+      "outputs": ["hits", "nbHits", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://hn.algolia.com/api/v1/search?query={{urlencode config.query}}&tags={{urlencode config.tags}}",
+        "headers": {},
+        "outputMap": { "hits": "hits", "nbHits": "nbHits" }
+      }
+    },
+    {
+      "id": "hackernews.topStories",
+      "label": "Hacker News: Top Stories",
+      "description": "Fetch the current top story IDs from the official HN Firebase API (keyless). Body is a JSON array of item IDs; fetch details per item at /v0/item/{id}.json.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hacker news hn top stories front page trending firebase ids poll",
+      "config": [],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "headers": {}
+      }
+    },
+    {
+      "id": "reddit.hotPosts",
+      "label": "Reddit: Hot Posts",
+      "description": "Fetch the hot posts of a subreddit via the public JSON listing (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "reddit subreddit hot posts trending listing community feed poll",
+      "config": [
+        { "key": "subreddit", "label": "Subreddit", "control": "text", "required": true, "placeholder": "MachineLearning", "help": "Subreddit name without r/" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": false, "placeholder": "25", "help": "Max 100" }
+      ],
+      "outputs": ["posts", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://old.reddit.com/r/{{urlencode config.subreddit}}/hot.json?limit={{urlencode config.limit}}",
+        "headers": { "User-Agent": "agently-node/1.0 (research catalog)" },
+        "outputMap": { "posts": "data.children" }
+      }
+    },
+    {
+      "id": "reddit.topPosts",
+      "label": "Reddit: Top Posts",
+      "description": "Fetch the top posts of a subreddit for a timeframe via the public JSON listing (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "reddit subreddit top posts best day week month listing community",
+      "config": [
+        { "key": "subreddit", "label": "Subreddit", "control": "text", "required": true, "placeholder": "programming" },
+        { "key": "timeframe", "label": "Timeframe", "control": "select", "required": true, "options": ["hour", "day", "week", "month", "year", "all"] },
+        { "key": "limit", "label": "Limit", "control": "text", "required": false, "placeholder": "25" }
+      ],
+      "outputs": ["posts", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://old.reddit.com/r/{{urlencode config.subreddit}}/top.json?t={{urlencode config.timeframe}}&limit={{urlencode config.limit}}",
+        "headers": { "User-Agent": "agently-node/1.0 (research catalog)" },
+        "outputMap": { "posts": "data.children" }
+      }
+    },
+    {
+      "id": "reddit.search",
+      "label": "Reddit: Search",
+      "description": "Search Reddit posts sitewide via the public JSON search endpoint (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "reddit search posts query community discussion opinions find",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true },
+        { "key": "sort", "label": "Sort", "control": "select", "required": false, "options": ["relevance", "hot", "top", "new", "comments"] },
+        { "key": "limit", "label": "Limit", "control": "text", "required": false, "placeholder": "25" }
+      ],
+      "outputs": ["posts", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://old.reddit.com/search.json?q={{urlencode config.query}}&sort={{urlencode config.sort}}&limit={{urlencode config.limit}}",
+        "headers": { "User-Agent": "agently-node/1.0 (research catalog)" },
+        "outputMap": { "posts": "data.children" }
+      }
+    },
+    {
+      "id": "wikipedia.getSummary",
+      "label": "Wikipedia: Page Summary",
+      "description": "Fetch the lead summary of an English Wikipedia page via the REST API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wikipedia summary article page encyclopedia definition extract lookup",
+      "config": [
+        { "key": "title", "label": "Page title", "control": "text", "required": true, "placeholder": "Alan_Turing", "help": "Exact page title; use underscores instead of spaces" }
+      ],
+      "outputs": ["title", "description", "extract", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://en.wikipedia.org/api/rest_v1/page/summary/{{urlencode config.title}}",
+        "headers": {},
+        "outputMap": { "title": "title", "description": "description", "extract": "extract" }
+      }
+    },
+    {
+      "id": "wikipedia.search",
+      "label": "Wikipedia: Search Pages",
+      "description": "Search English Wikipedia page titles and content via the MediaWiki REST search API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wikipedia search pages articles encyclopedia find topic lookup",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true },
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "10", "help": "1–100" }
+      ],
+      "outputs": ["pages", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://en.wikipedia.org/w/rest.php/v1/search/page?q={{urlencode config.query}}&limit={{urlencode config.limit}}",
+        "headers": {},
+        "outputMap": { "pages": "pages" }
+      }
+    },
+    {
+      "id": "pubmed.search",
+      "label": "PubMed: Search (ESearch)",
+      "description": "Search PubMed for article IDs via the NCBI E-utilities esearch endpoint (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "pubmed medical papers biomedical ncbi esearch clinical research health articles",
+      "config": [
+        { "key": "term", "label": "Search term", "control": "text", "required": true, "placeholder": "crispr gene editing", "help": "PubMed query syntax, e.g. asthma[mesh] AND 2024[pdat]" },
+        { "key": "retmax", "label": "Max IDs", "control": "text", "required": false, "placeholder": "20" }
+      ],
+      "outputs": ["ids", "count", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={{urlencode config.term}}&retmax={{urlencode config.retmax}}&retmode=json",
+        "headers": {},
+        "outputMap": { "ids": "esearchresult.idlist", "count": "esearchresult.count" }
+      }
+    },
+    {
+      "id": "pubmed.getSummaries",
+      "label": "PubMed: Get Summaries (ESummary)",
+      "description": "Fetch article metadata for PubMed IDs via the NCBI E-utilities esummary endpoint (keyless). Pair with PubMed Search.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "pubmed summaries metadata esummary articles details authors journal ncbi",
+      "config": [
+        { "key": "ids", "label": "PubMed IDs", "control": "text", "required": true, "placeholder": "36038631,35235726", "help": "Comma-separated PMIDs (e.g. from pubmed.search ids output)" }
+      ],
+      "outputs": ["result", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={{urlencode config.ids}}&retmode=json",
+        "headers": {},
+        "outputMap": { "result": "result" }
+      }
+    },
+    {
+      "id": "semanticscholar.searchPapers",
+      "label": "Semantic Scholar: Search Papers",
+      "description": "Search academic papers via the Semantic Scholar Graph API (keyless, rate-limited).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "semantic scholar papers academic citations research literature search science",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "graph neural networks" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "10", "help": "Max 100" }
+      ],
+      "outputs": ["papers", "total", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.semanticscholar.org/graph/v1/paper/search?query={{urlencode config.query}}&limit={{urlencode config.limit}}&fields=title,abstract,year,authors,url,citationCount",
+        "headers": {},
+        "outputMap": { "papers": "data", "total": "total" }
+      }
+    },
+    {
+      "id": "crossref.searchWorks",
+      "label": "Crossref: Search Works",
+      "description": "Search scholarly works (DOIs, journals, books) via the Crossref REST API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "crossref doi papers journals scholarly works citations metadata search academic",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true },
+        { "key": "rows", "label": "Rows", "control": "text", "required": true, "placeholder": "10", "help": "Number of results (max 1000)" },
+        { "key": "mailto", "label": "Contact email", "control": "text", "required": false, "help": "Optional; joins the Crossref polite pool for better service" }
+      ],
+      "outputs": ["items", "total", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.crossref.org/works?query={{urlencode config.query}}&rows={{urlencode config.rows}}&mailto={{urlencode config.mailto}}",
+        "headers": {},
+        "outputMap": { "items": "message.items", "total": "message.total-results" }
+      }
+    },
+    {
+      "id": "stackexchange.search",
+      "label": "Stack Exchange: Search Questions",
+      "description": "Search questions on a Stack Exchange site (e.g. Stack Overflow) via the public API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stackoverflow stack exchange questions answers programming error debug search",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "python asyncio timeout" },
+        { "key": "site", "label": "Site", "control": "text", "required": true, "placeholder": "stackoverflow", "help": "API site parameter, e.g. stackoverflow, serverfault, superuser" }
+      ],
+      "outputs": ["items", "hasMore", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stackexchange.com/2.3/search/advanced?q={{urlencode config.query}}&site={{urlencode config.site}}&order=desc&sort=relevance",
+        "headers": {},
+        "outputMap": { "items": "items", "hasMore": "has_more" }
+      }
+    },
+    {
+      "id": "openalex.searchWorks",
+      "label": "OpenAlex: Search Works",
+      "description": "Search the open catalog of scholarly works via the OpenAlex API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openalex scholarly works papers open access citations research search academic",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true },
+        { "key": "perPage", "label": "Results per page", "control": "text", "required": true, "placeholder": "10", "help": "1–200" }
+      ],
+      "outputs": ["results", "count", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.openalex.org/works?search={{urlencode config.query}}&per-page={{urlencode config.perPage}}",
+        "headers": {},
+        "outputMap": { "results": "results", "count": "meta.count" }
+      }
+    },
+    {
+      "id": "newsapi.topHeadlines",
+      "label": "NewsAPI: Top Headlines",
+      "description": "Fetch breaking news headlines by country, category or keyword via NewsAPI.org (API key required).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "news headlines breaking articles media press country category newsapi current",
+      "config": [
+        { "key": "country", "label": "Country", "control": "text", "required": false, "placeholder": "us", "help": "2-letter ISO code; leave empty when using only q" },
+        { "key": "category", "label": "Category", "control": "select", "required": false, "options": ["business", "entertainment", "general", "health", "science", "sports", "technology"] },
+        { "key": "q", "label": "Keyword", "control": "text", "required": false, "help": "At least one of country, category or keyword must be set" }
+      ],
+      "outputs": ["articles", "totalResults", "status", "body"],
+      "credentials": [{ "key": "NEWSAPI_API_KEY", "help": "API key from newsapi.org" }],
+      "http": {
+        "method": "GET",
+        "url": "https://newsapi.org/v2/top-headlines?country={{urlencode config.country}}&category={{urlencode config.category}}&q={{urlencode config.q}}",
+        "headers": { "X-Api-Key": "{{credentials.NEWSAPI_API_KEY}}" },
+        "outputMap": { "articles": "articles", "totalResults": "totalResults" }
+      }
+    },
+    {
+      "id": "gdelt.searchDocs",
+      "label": "GDELT: Search News Documents",
+      "description": "Search worldwide news coverage via the GDELT DOC 2.0 API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gdelt news global coverage monitoring articles world events media search",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "\"climate change\" sourcelang:english", "help": "GDELT query syntax; supports sourcelang:, domain:, sourcecountry: operators" },
+        { "key": "timespan", "label": "Timespan", "control": "text", "required": false, "placeholder": "24h", "help": "How far back to search, e.g. 1h, 24h, 7d, 3m" }
+      ],
+      "outputs": ["articles", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.gdeltproject.org/api/v2/doc/doc?query={{urlencode config.query}}&mode=artlist&format=json&timespan={{urlencode config.timespan}}",
+        "headers": {},
+        "outputMap": { "articles": "articles" }
+      }
+    },
+    {
+      "id": "lobsters.getHottest",
+      "label": "Lobsters: Hottest Stories",
+      "description": "Fetch the current hottest stories from Lobste.rs via its public JSON feed (keyless). Body is a JSON array of stories.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "lobsters hottest stories tech aggregator programming links trending feed",
+      "config": [],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://lobste.rs/hottest.json",
+        "headers": {}
+      }
+    }
+  ]
+}

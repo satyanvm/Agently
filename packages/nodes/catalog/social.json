@@ -1,0 +1,309 @@
+{
+  "cluster": "social",
+  "label": "Social Media",
+  "description": "Social platforms: video, microblogging, streaming and profile intelligence.",
+  "nodes": [
+    {
+      "id": "youtube.searchVideos",
+      "label": "YouTube: Search Videos",
+      "description": "Search YouTube videos by keyword via the Data API v3 search endpoint.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "youtube video search find query keyword content data api",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true, "placeholder": "ai agents tutorial" },
+        { "key": "maxResults", "label": "Max results", "control": "text", "required": false, "placeholder": "10", "help": "1-50, defaults to 5 if empty" }
+      ],
+      "outputs": ["items", "pageInfo", "status", "body"],
+      "credentials": [{ "key": "YOUTUBE_API_KEY", "help": "Google Cloud API key with YouTube Data API v3 enabled" }],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q={{urlencode config.query}}&maxResults={{urlencode config.maxResults}}&key={{credentials.YOUTUBE_API_KEY}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "items": "items", "pageInfo": "pageInfo" }
+      }
+    },
+    {
+      "id": "youtube.getChannel",
+      "label": "YouTube: Get Channel",
+      "description": "Fetch a YouTube channel's snippet and statistics (subscribers, views, video count) by channel ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "youtube channel subscribers statistics views creator info lookup",
+      "config": [
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true, "placeholder": "UC_x5XG1OV2P6uZZ5FSM9Ttw", "help": "The channel ID (starts with UC…)" }
+      ],
+      "outputs": ["items", "status", "body"],
+      "credentials": [{ "key": "YOUTUBE_API_KEY", "help": "Google Cloud API key with YouTube Data API v3 enabled" }],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/channels?part=snippet%2Cstatistics&id={{urlencode config.channelId}}&key={{credentials.YOUTUBE_API_KEY}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "items": "items" }
+      }
+    },
+    {
+      "id": "youtube.listComments",
+      "label": "YouTube: List Video Comments",
+      "description": "List top-level comment threads on a YouTube video via the Data API v3.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "youtube comments video thread replies audience feedback read",
+      "config": [
+        { "key": "videoId", "label": "Video ID", "control": "text", "required": true, "placeholder": "dQw4w9WgXcQ" },
+        { "key": "maxResults", "label": "Max results", "control": "text", "required": false, "placeholder": "20", "help": "1-100, defaults to 20 if empty" }
+      ],
+      "outputs": ["items", "status", "body"],
+      "credentials": [{ "key": "YOUTUBE_API_KEY", "help": "Google Cloud API key with YouTube Data API v3 enabled" }],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={{urlencode config.videoId}}&maxResults={{urlencode config.maxResults}}&key={{credentials.YOUTUBE_API_KEY}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "items": "items" }
+      }
+    },
+    {
+      "id": "mastodon.postStatus",
+      "label": "Mastodon: Post Status",
+      "description": "Publish a status (toot) to a Mastodon instance via its REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "mastodon toot post status publish fediverse microblog write",
+      "config": [
+        { "key": "instanceUrl", "label": "Instance URL", "control": "text", "required": true, "placeholder": "https://mastodon.social", "help": "Base URL of your Mastodon instance, no trailing slash" },
+        { "key": "status", "label": "Status text", "control": "textarea", "required": true },
+        { "key": "visibility", "label": "Visibility", "control": "text", "required": false, "placeholder": "public", "help": "public, unlisted, private or direct" }
+      ],
+      "outputs": ["id", "url", "status", "body"],
+      "credentials": [{ "key": "MASTODON_ACCESS_TOKEN", "help": "Access token with write:statuses scope (Settings → Development)" }],
+      "http": {
+        "method": "POST",
+        "url": "{{config.instanceUrl}}/api/v1/statuses",
+        "headers": { "Authorization": "Bearer {{credentials.MASTODON_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"status\": {{json config.status}}, \"visibility\": {{json config.visibility}}}",
+        "outputMap": { "id": "id", "url": "url" }
+      }
+    },
+    {
+      "id": "mastodon.search",
+      "label": "Mastodon: Search",
+      "description": "Search accounts, statuses and hashtags on a Mastodon instance via the v2 search API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "mastodon search find accounts statuses hashtags fediverse query",
+      "config": [
+        { "key": "instanceUrl", "label": "Instance URL", "control": "text", "required": true, "placeholder": "https://mastodon.social", "help": "Base URL of your Mastodon instance, no trailing slash" },
+        { "key": "query", "label": "Search query", "control": "text", "required": true },
+        { "key": "type", "label": "Result type", "control": "text", "required": false, "placeholder": "statuses", "help": "accounts, hashtags or statuses; empty searches all" }
+      ],
+      "outputs": ["accounts", "statuses", "hashtags", "status", "body"],
+      "credentials": [{ "key": "MASTODON_ACCESS_TOKEN", "help": "Access token with read:search scope (required for full-text status search)" }],
+      "http": {
+        "method": "GET",
+        "url": "{{config.instanceUrl}}/api/v2/search?q={{urlencode config.query}}&type={{urlencode config.type}}",
+        "headers": { "Authorization": "Bearer {{credentials.MASTODON_ACCESS_TOKEN}}", "Accept": "application/json" },
+        "outputMap": { "accounts": "accounts", "statuses": "statuses", "hashtags": "hashtags" }
+      }
+    },
+    {
+      "id": "bluesky.createSession",
+      "label": "Bluesky: Create Session",
+      "description": "Authenticate against Bluesky via com.atproto.server.createSession, returning an access JWT and DID for subsequent XRPC calls.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bluesky atproto login session authenticate token jwt did",
+      "config": [],
+      "outputs": ["accessJwt", "did", "handle", "status", "body"],
+      "credentials": [
+        { "key": "BLUESKY_HANDLE", "help": "Your handle, e.g. alice.bsky.social" },
+        { "key": "BLUESKY_APP_PASSWORD", "help": "App password from Settings → App Passwords (not your main password)" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://bsky.social/xrpc/com.atproto.server.createSession",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"identifier\": {{json credentials.BLUESKY_HANDLE}}, \"password\": {{json credentials.BLUESKY_APP_PASSWORD}}}",
+        "outputMap": { "accessJwt": "accessJwt", "did": "did", "handle": "handle" }
+      }
+    },
+    {
+      "id": "bluesky.createPost",
+      "label": "Bluesky: Create Post",
+      "description": "Create a post record via com.atproto.repo.createRecord. Requires the access JWT and DID from a bluesky.createSession node upstream.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bluesky post skeet publish write atproto feed create",
+      "config": [
+        { "key": "accessJwt", "label": "Access JWT", "control": "text", "required": true, "help": "Reference the session node, e.g. {{outputs.<sessionNodeId>.accessJwt}}" },
+        { "key": "repoDid", "label": "Repo DID", "control": "text", "required": true, "help": "Reference the session node, e.g. {{outputs.<sessionNodeId>.did}}" },
+        { "key": "text", "label": "Post text", "control": "textarea", "required": true, "help": "Max 300 characters" },
+        { "key": "createdAt", "label": "Created at", "control": "text", "required": true, "placeholder": "2026-07-08T12:00:00Z", "help": "ISO 8601 UTC timestamp for the record" }
+      ],
+      "outputs": ["uri", "cid", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "https://bsky.social/xrpc/com.atproto.repo.createRecord",
+        "headers": { "Authorization": "Bearer {{config.accessJwt}}", "Content-Type": "application/json" },
+        "body": "{\"repo\": {{json config.repoDid}}, \"collection\": \"app.bsky.feed.post\", \"record\": {\"$type\": \"app.bsky.feed.post\", \"text\": {{json config.text}}, \"createdAt\": {{json config.createdAt}}}}",
+        "outputMap": { "uri": "uri", "cid": "cid" }
+      }
+    },
+    {
+      "id": "bluesky.searchPosts",
+      "label": "Bluesky: Search Posts",
+      "description": "Search public Bluesky posts via the keyless public AppView API (app.bsky.feed.searchPosts).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bluesky search posts find public keyless atproto feed query",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true },
+        { "key": "limit", "label": "Limit", "control": "text", "required": false, "placeholder": "25", "help": "1-100, defaults to 25 if empty" }
+      ],
+      "outputs": ["posts", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={{urlencode config.query}}&limit={{urlencode config.limit}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": { "posts": "posts" }
+      }
+    },
+    {
+      "id": "twitch.getStreams",
+      "label": "Twitch: Get Streams",
+      "description": "Fetch live streams from the Twitch Helix API, filtered by broadcaster login or game ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "twitch stream live broadcast helix viewers gaming status",
+      "config": [
+        { "key": "userLogin", "label": "Broadcaster login", "control": "text", "required": false, "placeholder": "shroud", "help": "Twitch login name; leave empty with Game ID set to browse by game" },
+        { "key": "gameId", "label": "Game ID", "control": "text", "required": false, "help": "Numeric game/category ID" }
+      ],
+      "outputs": ["data", "status", "body"],
+      "credentials": [
+        { "key": "TWITCH_CLIENT_ID", "help": "Application client ID from the Twitch developer console" },
+        { "key": "TWITCH_APP_ACCESS_TOKEN", "help": "App access token from the OAuth client-credentials flow" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.twitch.tv/helix/streams?user_login={{urlencode config.userLogin}}&game_id={{urlencode config.gameId}}",
+        "headers": { "Client-Id": "{{credentials.TWITCH_CLIENT_ID}}", "Authorization": "Bearer {{credentials.TWITCH_APP_ACCESS_TOKEN}}" },
+        "outputMap": { "data": "data" }
+      }
+    },
+    {
+      "id": "twitch.searchChannels",
+      "label": "Twitch: Search Channels",
+      "description": "Search Twitch channels by name via the Helix search/channels endpoint.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "twitch search channels find streamer broadcaster helix query",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true },
+        { "key": "liveOnly", "label": "Live only", "control": "text", "required": false, "placeholder": "false", "help": "true to return only channels currently live" }
+      ],
+      "outputs": ["data", "status", "body"],
+      "credentials": [
+        { "key": "TWITCH_CLIENT_ID", "help": "Application client ID from the Twitch developer console" },
+        { "key": "TWITCH_APP_ACCESS_TOKEN", "help": "App access token from the OAuth client-credentials flow" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.twitch.tv/helix/search/channels?query={{urlencode config.query}}&live_only={{urlencode config.liveOnly}}",
+        "headers": { "Client-Id": "{{credentials.TWITCH_CLIENT_ID}}", "Authorization": "Bearer {{credentials.TWITCH_APP_ACCESS_TOKEN}}" },
+        "outputMap": { "data": "data" }
+      }
+    },
+    {
+      "id": "x.searchPosts",
+      "label": "X (Twitter): Search Posts",
+      "description": "Search recent posts on X via the browser runtime (X's API is gated behind paid tiers, so this reads the public search page).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "x twitter search tweets posts find query keyword trending",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true },
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://x.com/search?q={{urlencode config.query}}&f=live", "help": "One URL per line; templated with config values" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "x.getProfile",
+      "label": "X (Twitter): Get Profile",
+      "description": "Read a public X profile page (bio, follower counts, recent posts) via the browser runtime.",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "x twitter profile user account bio followers timeline read",
+      "config": [
+        { "key": "username", "label": "Username", "control": "text", "required": true, "placeholder": "nasa", "help": "Handle without the @" },
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://x.com/{{config.username}}", "help": "One URL per line; templated with config values" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "instagram.getProfile",
+      "label": "Instagram: Get Profile",
+      "description": "Read a public Instagram profile page (bio, post grid, counts) via the browser runtime (the Graph API requires app review, so this reads the public page).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "instagram profile user account bio followers posts photos read",
+      "config": [
+        { "key": "username", "label": "Username", "control": "text", "required": true, "placeholder": "natgeo" },
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://www.instagram.com/{{config.username}}/", "help": "One URL per line; templated with config values" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "linkedin.getCompanyPage",
+      "label": "LinkedIn: Get Company Page",
+      "description": "Read a public LinkedIn company page (about, headcount, recent posts) via the browser runtime (LinkedIn's API is partner-gated).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "linkedin company page organization employees about business read",
+      "config": [
+        { "key": "companySlug", "label": "Company slug", "control": "text", "required": true, "placeholder": "anthropic", "help": "The slug from linkedin.com/company/<slug>" },
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://www.linkedin.com/company/{{config.companySlug}}/", "help": "One URL per line; templated with config values" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "tiktok.getProfile",
+      "label": "TikTok: Get Profile",
+      "description": "Read a public TikTok profile page (bio, follower counts, recent videos) via the browser runtime (TikTok's API requires app approval).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "tiktok profile user creator account bio followers videos read",
+      "config": [
+        { "key": "username", "label": "Username", "control": "text", "required": true, "placeholder": "khaby.lame", "help": "Handle without the @" },
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://www.tiktok.com/@{{config.username}}", "help": "One URL per line; templated with config values" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "reddit.getUserPosts",
+      "label": "Reddit: Get User Posts",
+      "description": "Fetch a Reddit user's submitted posts via the keyless public JSON listing.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "reddit user posts submissions history profile keyless json read",
+      "config": [
+        { "key": "username", "label": "Username", "control": "text", "required": true, "placeholder": "spez", "help": "Reddit username without the u/ prefix" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": false, "placeholder": "25", "help": "1-100, defaults to 25 if empty" }
+      ],
+      "outputs": ["data", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://www.reddit.com/user/{{urlencode config.username}}/submitted.json?limit={{urlencode config.limit}}&raw_json=1",
+        "headers": { "User-Agent": "agently-node-catalog/1.0", "Accept": "application/json" },
+        "outputMap": { "data": "data" }
+      }
+    }
+  ]
+}

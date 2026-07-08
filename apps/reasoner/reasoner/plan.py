@@ -177,6 +177,32 @@ def dependents_of(graph: list[dict[str, Any]]) -> dict[str, list[str]]:
     return dependents
 
 
+def loop_body(loop_key: str, ordered: list[dict[str, Any]], dependents: dict[str, list[str]]) -> list[str]:
+    """Keys of the nodes a logic.loop fans out per item — its DOMINATED subgraph.
+
+    A node belongs to the loop body iff every one of its dependency paths enters
+    through the loop node. Walking in topological order makes that a one-pass
+    check: a node joins the body when it has at least one dependency and ALL of
+    its dependencies are the loop node or earlier body members. A join node that
+    also depends on something outside the loop is NOT in the body — it runs once,
+    after the loop, seeing the loop's collected `results`.
+
+    Pure (no IO); safe inside Temporal workflow code, which is exactly where the
+    per-node orchestrator computes it. `dependents` is accepted for symmetry with
+    the other helpers but the computation only needs dependsOn edges.
+    """
+    _ = dependents  # kept for call-site symmetry
+    body: set[str] = set()
+    for n in ordered:
+        key = n["key"]
+        if key == loop_key:
+            continue
+        deps = list(n.get("dependsOn") or [])
+        if deps and all(d == loop_key or d in body for d in deps):
+            body.add(key)
+    return [n["key"] for n in ordered if n["key"] in body]
+
+
 def should_skip(node: dict[str, Any], skipped: set[str]) -> bool:
     """Pure: has this node been pruned (directly, or all deps skipped)?
 

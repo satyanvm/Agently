@@ -1,0 +1,5249 @@
+[
+ {
+  "id": "openai.chatCompletion",
+  "label": "OpenAI: Chat Completion",
+  "description": "Generate a chat completion via the OpenAI Chat Completions API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "gpt-4o-mini",
+     "gpt-4o",
+     "gpt-4.1",
+     "gpt-4.1-mini"
+    ]
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "OPENAI_API_KEY"
+  ]
+ },
+ {
+  "id": "openai.createEmbedding",
+  "label": "OpenAI: Create Embedding",
+  "description": "Create a vector embedding for a text via the OpenAI Embeddings API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "text-embedding-3-small",
+     "text-embedding-3-large",
+     "text-embedding-ada-002"
+    ]
+   },
+   {
+    "key": "input",
+    "label": "Input text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "OPENAI_API_KEY"
+  ]
+ },
+ {
+  "id": "openai.generateImage",
+  "label": "OpenAI: Generate Image",
+  "description": "Generate an image from a text prompt via the OpenAI Images API (DALL·E).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "dall-e-3",
+     "dall-e-2"
+    ]
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   },
+   {
+    "key": "size",
+    "label": "Size",
+    "control": "select",
+    "options": [
+     "1024x1024",
+     "1792x1024",
+     "1024x1792"
+    ],
+    "help": "1792-px sizes are dall-e-3 only; dall-e-2 supports 1024x1024"
+   }
+  ],
+  "credentials": [
+   "OPENAI_API_KEY"
+  ]
+ },
+ {
+  "id": "anthropic.createMessage",
+  "label": "Anthropic: Create Message",
+  "description": "Generate a response from a Claude model via the Anthropic Messages API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "claude-sonnet-4-6",
+     "claude-opus-4-8",
+     "claude-haiku-4-5"
+    ],
+    "help": "claude-sonnet-4-6 is the balanced default"
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   },
+   {
+    "key": "maxTokens",
+    "label": "Max tokens",
+    "control": "text",
+    "placeholder": "1024",
+    "help": "Integer output-token cap, e.g. 1024"
+   }
+  ],
+  "credentials": [
+   "ANTHROPIC_API_KEY"
+  ]
+ },
+ {
+  "id": "huggingface.generateText",
+  "label": "Hugging Face: Generate Text",
+  "description": "Run a text-generation model on the Hugging Face Inference API (hf-inference provider).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model ID",
+    "control": "text",
+    "placeholder": "openai-community/gpt2",
+    "help": "A Hub model that supports the text-generation task"
+   },
+   {
+    "key": "inputs",
+    "label": "Input text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "HF_TOKEN"
+  ]
+ },
+ {
+  "id": "huggingface.classifyText",
+  "label": "Hugging Face: Classify Text",
+  "description": "Run a text-classification model on the Hugging Face Inference API; returns label/score pairs.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model ID",
+    "control": "text",
+    "placeholder": "distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+    "help": "A Hub model that supports the text-classification task"
+   },
+   {
+    "key": "inputs",
+    "label": "Input text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "HF_TOKEN"
+  ]
+ },
+ {
+  "id": "replicate.createPrediction",
+  "label": "Replicate: Create Prediction",
+  "description": "Start a model run on Replicate. Sends Prefer: wait so short runs return their output synchronously.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "version",
+    "label": "Model version",
+    "control": "text",
+    "help": "64-character model version ID from the model's API page"
+   },
+   {
+    "key": "input",
+    "label": "Input (JSON)",
+    "control": "textarea",
+    "placeholder": "{\"prompt\": \"an astronaut riding a horse\"}",
+    "help": "JSON object of the model's named inputs"
+   }
+  ],
+  "credentials": [
+   "REPLICATE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "replicate.getPrediction",
+  "label": "Replicate: Get Prediction",
+  "description": "Fetch the current state and output of a Replicate prediction by ID.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "predictionId",
+    "label": "Prediction ID",
+    "control": "text",
+    "help": "The id returned by Create Prediction"
+   }
+  ],
+  "credentials": [
+   "REPLICATE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "elevenlabs.textToSpeech",
+  "label": "ElevenLabs: Text to Speech",
+  "description": "Convert text to spoken audio via the ElevenLabs TTS API. Response body is binary audio (MPEG).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "voiceId",
+    "label": "Voice ID",
+    "control": "text",
+    "placeholder": "21m00Tcm4TlvDq8ikWAM",
+    "help": "Voice ID from your ElevenLabs voice library"
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   },
+   {
+    "key": "modelId",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "eleven_multilingual_v2",
+     "eleven_turbo_v2_5",
+     "eleven_flash_v2_5"
+    ]
+   }
+  ],
+  "credentials": [
+   "ELEVENLABS_API_KEY"
+  ]
+ },
+ {
+  "id": "deepl.translate",
+  "label": "DeepL: Translate Text",
+  "description": "Translate text via the DeepL API v2 (form-encoded).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "apiBase",
+    "label": "API host",
+    "control": "select",
+    "options": [
+     "https://api-free.deepl.com",
+     "https://api.deepl.com"
+    ],
+    "help": "Free-plan keys (ending :fx) use api-free.deepl.com"
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   },
+   {
+    "key": "targetLang",
+    "label": "Target language",
+    "control": "text",
+    "placeholder": "EN-US",
+    "help": "Target language code, e.g. DE, FR, EN-US, JA"
+   }
+  ],
+  "credentials": [
+   "DEEPL_API_KEY"
+  ]
+ },
+ {
+  "id": "libretranslate.translate",
+  "label": "LibreTranslate: Translate Text",
+  "description": "Translate text via a LibreTranslate instance (open source; self-hosted instances are keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "baseUrl",
+    "label": "Instance URL",
+    "control": "text",
+    "placeholder": "http://localhost:5000",
+    "help": "LibreTranslate instance base URL; the official libretranslate.com requires an API key, self-hosted and community mirrors are typically keyless"
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   },
+   {
+    "key": "source",
+    "label": "Source language",
+    "control": "text",
+    "placeholder": "auto",
+    "help": "ISO 639 code or auto"
+   },
+   {
+    "key": "target",
+    "label": "Target language",
+    "control": "text",
+    "placeholder": "es"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "ollama.chat",
+  "label": "Ollama: Chat",
+  "description": "Chat with a locally hosted model via the Ollama chat API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "baseUrl",
+    "label": "Ollama URL",
+    "control": "text",
+    "placeholder": "http://localhost:11434"
+   },
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "text",
+    "placeholder": "llama3.2",
+    "help": "A model pulled locally (ollama pull <model>)"
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "ollama.generate",
+  "label": "Ollama: Generate",
+  "description": "Single-shot text completion from a locally hosted model via the Ollama generate API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "baseUrl",
+    "label": "Ollama URL",
+    "control": "text",
+    "placeholder": "http://localhost:11434"
+   },
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "text",
+    "placeholder": "llama3.2"
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "voyage.createEmbedding",
+  "label": "Voyage AI: Create Embedding",
+  "description": "Create a vector embedding for a text via the Voyage AI Embeddings API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "voyage-3.5",
+     "voyage-3.5-lite",
+     "voyage-3-large",
+     "voyage-code-3"
+    ]
+   },
+   {
+    "key": "text",
+    "label": "Input text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "VOYAGE_API_KEY"
+  ]
+ },
+ {
+  "id": "groq.chatCompletion",
+  "label": "Groq: Chat Completion",
+  "description": "Fast chat completion via Groq's OpenAI-compatible Chat Completions API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "select",
+    "options": [
+     "llama-3.3-70b-versatile",
+     "llama-3.1-8b-instant"
+    ]
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "GROQ_API_KEY"
+  ]
+ },
+ {
+  "id": "openrouter.chatCompletion",
+  "label": "OpenRouter: Chat Completion",
+  "description": "Chat completion through OpenRouter's unified, OpenAI-compatible API over hundreds of models.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "ai-ml",
+  "clusterLabel": "AI & ML",
+  "config": [
+   {
+    "key": "model",
+    "label": "Model",
+    "control": "text",
+    "placeholder": "openrouter/auto",
+    "help": "Any OpenRouter model slug, e.g. openai/gpt-4o or openrouter/auto for automatic routing"
+   },
+   {
+    "key": "prompt",
+    "label": "Prompt",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "OPENROUTER_API_KEY"
+  ]
+ },
+ {
+  "id": "github.createGist",
+  "label": "GitHub: Create Gist",
+  "description": "Create a gist (single file) via the GitHub REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "filename",
+    "label": "Filename",
+    "control": "text",
+    "placeholder": "notes.md"
+   },
+   {
+    "key": "content",
+    "label": "File content",
+    "control": "textarea"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "text"
+   },
+   {
+    "key": "public",
+    "label": "Public",
+    "control": "text",
+    "placeholder": "false",
+    "help": "Literal true or false (rendered as an unquoted JSON boolean)"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.getGist",
+  "label": "GitHub: Get Gist",
+  "description": "Fetch a gist (metadata and file contents) by ID via the GitHub REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "gistId",
+    "label": "Gist ID",
+    "control": "text",
+    "placeholder": "aa5a315d61ae9438b18d"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "dropbox.uploadFile",
+  "label": "Dropbox: Upload File",
+  "description": "Upload text content to a file in Dropbox via /2/files/upload (content endpoint, Dropbox-API-Arg header + octet-stream body).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "path",
+    "label": "Path",
+    "control": "text",
+    "placeholder": "/reports/summary.txt",
+    "help": "Destination path in Dropbox, starting with /"
+   },
+   {
+    "key": "content",
+    "label": "File content",
+    "control": "textarea",
+    "help": "Text content to upload as the file body"
+   }
+  ],
+  "credentials": [
+   "DROPBOX_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "dropbox.listFolder",
+  "label": "Dropbox: List Folder",
+  "description": "List the contents of a Dropbox folder via /2/files/list_folder.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "path",
+    "label": "Folder path",
+    "control": "text",
+    "placeholder": "/reports",
+    "help": "Folder path starting with /; leave empty for the root folder"
+   }
+  ],
+  "credentials": [
+   "DROPBOX_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "dropbox.downloadFile",
+  "label": "Dropbox: Download File",
+  "description": "Download a file's contents from Dropbox via /2/files/download (content endpoint; raw file bytes returned in body).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "path",
+    "label": "Path",
+    "control": "text",
+    "placeholder": "/reports/summary.txt"
+   }
+  ],
+  "credentials": [
+   "DROPBOX_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "gdrive.listFiles",
+  "label": "Google Drive: List Files",
+  "description": "List files in Google Drive via the Drive v3 API, optionally filtered by a query.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "name contains 'report'",
+    "help": "Drive search query (q parameter); leave empty to list all accessible files"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_OAUTH_TOKEN"
+  ]
+ },
+ {
+  "id": "gdrive.getFileMetadata",
+  "label": "Google Drive: Get File Metadata",
+  "description": "Fetch metadata (id, name, mimeType) for a Drive file by ID via the Drive v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "fileId",
+    "label": "File ID",
+    "control": "text",
+    "placeholder": "1a2B3c4D5e…"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_OAUTH_TOKEN"
+  ]
+ },
+ {
+  "id": "supabase.uploadObject",
+  "label": "Supabase Storage: Upload Object",
+  "description": "Upload text content to a Supabase Storage bucket via the Storage API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://xyzcompany.supabase.co",
+    "help": "Your Supabase project URL (no trailing slash)"
+   },
+   {
+    "key": "bucket",
+    "label": "Bucket",
+    "control": "text",
+    "placeholder": "avatars"
+   },
+   {
+    "key": "path",
+    "label": "Object path",
+    "control": "text",
+    "placeholder": "reports/summary.txt"
+   },
+   {
+    "key": "content",
+    "label": "Content",
+    "control": "textarea",
+    "help": "Text content to store as the object body"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.listObjects",
+  "label": "Supabase Storage: List Objects",
+  "description": "List objects in a Supabase Storage bucket, optionally under a prefix.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://xyzcompany.supabase.co",
+    "help": "Your Supabase project URL (no trailing slash)"
+   },
+   {
+    "key": "bucket",
+    "label": "Bucket",
+    "control": "text",
+    "placeholder": "avatars"
+   },
+   {
+    "key": "prefix",
+    "label": "Prefix",
+    "control": "text",
+    "placeholder": "reports/",
+    "help": "Folder prefix to list; leave empty for the bucket root"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.selectRows",
+  "label": "Supabase: Select Rows",
+  "description": "Query rows from a Supabase Postgres table via the PostgREST /rest/v1 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://xyzcompany.supabase.co",
+    "help": "Your Supabase project URL (no trailing slash)"
+   },
+   {
+    "key": "table",
+    "label": "Table",
+    "control": "text",
+    "placeholder": "todos"
+   },
+   {
+    "key": "select",
+    "label": "Columns",
+    "control": "text",
+    "placeholder": "*",
+    "help": "PostgREST select list, e.g. * or id,name,created_at"
+   },
+   {
+    "key": "filter",
+    "label": "Filter",
+    "control": "text",
+    "placeholder": "status=eq.done",
+    "help": "Optional PostgREST filter query string, e.g. id=eq.1 or status=eq.done&limit=10 (appended verbatim)"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.insertRow",
+  "label": "Supabase: Insert Row",
+  "description": "Insert a row into a Supabase Postgres table via the PostgREST /rest/v1 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://xyzcompany.supabase.co",
+    "help": "Your Supabase project URL (no trailing slash)"
+   },
+   {
+    "key": "table",
+    "label": "Table",
+    "control": "text",
+    "placeholder": "todos"
+   },
+   {
+    "key": "row",
+    "label": "Row (JSON)",
+    "control": "textarea",
+    "placeholder": "{\"task\": \"buy milk\", \"done\": false}",
+    "help": "A JSON object of column values, sent verbatim as the request body"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "cloudflarekv.writeKey",
+  "label": "Cloudflare KV: Write Key",
+  "description": "Write a value to a Cloudflare Workers KV namespace key via the Cloudflare v4 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "accountId",
+    "label": "Account ID",
+    "control": "text",
+    "help": "Cloudflare account ID (dashboard → Workers & Pages → overview sidebar)"
+   },
+   {
+    "key": "namespaceId",
+    "label": "Namespace ID",
+    "control": "text",
+    "help": "KV namespace ID"
+   },
+   {
+    "key": "key",
+    "label": "Key",
+    "control": "text"
+   },
+   {
+    "key": "value",
+    "label": "Value",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "CLOUDFLARE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "cloudflarekv.readKey",
+  "label": "Cloudflare KV: Read Key",
+  "description": "Read a value from a Cloudflare Workers KV namespace key via the Cloudflare v4 API (raw value returned in body).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "accountId",
+    "label": "Account ID",
+    "control": "text",
+    "help": "Cloudflare account ID"
+   },
+   {
+    "key": "namespaceId",
+    "label": "Namespace ID",
+    "control": "text",
+    "help": "KV namespace ID"
+   },
+   {
+    "key": "key",
+    "label": "Key",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "CLOUDFLARE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "file.publicUrlFetch",
+  "label": "File: Fetch Public URL",
+  "description": "Fetch a file from any public URL — e.g. a public S3/GCS/R2 bucket object or a raw file link. Note: private S3 objects require SigV4 request signing, which is not supported by the http template runtime; only publicly readable URLs work here.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "url",
+    "label": "URL",
+    "control": "text",
+    "placeholder": "https://my-bucket.s3.amazonaws.com/path/file.json",
+    "help": "A publicly readable URL; no auth is sent"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "pasters.createPaste",
+  "label": "paste.rs: Create Paste",
+  "description": "Create a paste on paste.rs (keyless); the paste URL is returned in the response body.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "cloud-storage",
+  "clusterLabel": "Cloud & Storage",
+  "config": [
+   {
+    "key": "content",
+    "label": "Content",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "stripe.listCharges",
+  "label": "Stripe: List Charges",
+  "description": "List recent charges on your Stripe account.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Number of charges to return (1-100)"
+   }
+  ],
+  "credentials": [
+   "STRIPE_SECRET_KEY"
+  ]
+ },
+ {
+  "id": "stripe.createPaymentLink",
+  "label": "Stripe: Create Payment Link",
+  "description": "Create a shareable payment link for an existing Stripe Price.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "priceId",
+    "label": "Price ID",
+    "control": "text",
+    "placeholder": "price_1ABC…",
+    "help": "ID of an existing Stripe Price object"
+   },
+   {
+    "key": "quantity",
+    "label": "Quantity",
+    "control": "text",
+    "placeholder": "1"
+   }
+  ],
+  "credentials": [
+   "STRIPE_SECRET_KEY"
+  ]
+ },
+ {
+  "id": "stripe.listCustomers",
+  "label": "Stripe: List Customers",
+  "description": "List customers on your Stripe account.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Number of customers to return (1-100)"
+   }
+  ],
+  "credentials": [
+   "STRIPE_SECRET_KEY"
+  ]
+ },
+ {
+  "id": "stripe.getBalance",
+  "label": "Stripe: Get Balance",
+  "description": "Retrieve the current available and pending balance of your Stripe account.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [],
+  "credentials": [
+   "STRIPE_SECRET_KEY"
+  ]
+ },
+ {
+  "id": "shopify.listOrders",
+  "label": "Shopify: List Orders",
+  "description": "List orders from a Shopify store via the Admin REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "shopDomain",
+    "label": "Shop domain",
+    "control": "text",
+    "placeholder": "your-store.myshopify.com"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "50",
+    "help": "Number of orders to return (1-250)"
+   }
+  ],
+  "credentials": [
+   "SHOPIFY_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "shopify.listProducts",
+  "label": "Shopify: List Products",
+  "description": "List products from a Shopify store via the Admin REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "shopDomain",
+    "label": "Shop domain",
+    "control": "text",
+    "placeholder": "your-store.myshopify.com"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "50",
+    "help": "Number of products to return (1-250)"
+   }
+  ],
+  "credentials": [
+   "SHOPIFY_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "coingecko.getSimplePrice",
+  "label": "CoinGecko: Get Price",
+  "description": "Get current prices for one or more cryptocurrencies in chosen fiat currencies (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "ids",
+    "label": "Coin IDs",
+    "control": "text",
+    "placeholder": "bitcoin,ethereum",
+    "help": "Comma-separated CoinGecko coin IDs"
+   },
+   {
+    "key": "vsCurrencies",
+    "label": "Vs currencies",
+    "control": "text",
+    "placeholder": "usd,eur",
+    "help": "Comma-separated fiat/crypto currency codes"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "coingecko.getTrending",
+  "label": "CoinGecko: Trending Coins",
+  "description": "Get the top trending coins on CoinGecko in the last 24 hours (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [],
+  "credentials": []
+ },
+ {
+  "id": "coingecko.getCoinMarkets",
+  "label": "CoinGecko: Coin Market Data",
+  "description": "Get market data (price, market cap, volume, 24h change) for coins, ranked by market cap (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "vsCurrency",
+    "label": "Vs currency",
+    "control": "text",
+    "placeholder": "usd"
+   },
+   {
+    "key": "ids",
+    "label": "Coin IDs",
+    "control": "text",
+    "placeholder": "bitcoin,ethereum",
+    "help": "Comma-separated coin IDs; leave empty for top coins by market cap"
+   },
+   {
+    "key": "perPage",
+    "label": "Results per page",
+    "control": "text",
+    "placeholder": "10",
+    "help": "1-250"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "alphavantage.getQuote",
+  "label": "Alpha Vantage: Stock Quote",
+  "description": "Get the latest price and volume for a stock ticker via Alpha Vantage GLOBAL_QUOTE.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "symbol",
+    "label": "Symbol",
+    "control": "text",
+    "placeholder": "AAPL"
+   }
+  ],
+  "credentials": [
+   "ALPHAVANTAGE_API_KEY"
+  ]
+ },
+ {
+  "id": "alphavantage.getDailySeries",
+  "label": "Alpha Vantage: Daily Time Series",
+  "description": "Get daily open/high/low/close/volume history for a stock ticker via Alpha Vantage TIME_SERIES_DAILY.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "symbol",
+    "label": "Symbol",
+    "control": "text",
+    "placeholder": "MSFT"
+   },
+   {
+    "key": "outputSize",
+    "label": "Output size",
+    "control": "text",
+    "placeholder": "compact",
+    "help": "compact (latest 100 points) or full (20+ years)"
+   }
+  ],
+  "credentials": [
+   "ALPHAVANTAGE_API_KEY"
+  ]
+ },
+ {
+  "id": "frankfurter.getRates",
+  "label": "Frankfurter: Exchange Rates",
+  "description": "Get latest foreign exchange rates from the ECB via the free Frankfurter API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "base",
+    "label": "Base currency",
+    "control": "text",
+    "placeholder": "USD"
+   },
+   {
+    "key": "symbols",
+    "label": "Target currencies",
+    "control": "text",
+    "placeholder": "EUR,GBP,JPY",
+    "help": "Comma-separated ISO currency codes"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "yahoofinance.getQuote",
+  "label": "Yahoo Finance: Quote Chart",
+  "description": "Get price and chart metadata for a ticker via Yahoo Finance's public chart endpoint (keyless, unofficial).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "symbol",
+    "label": "Symbol",
+    "control": "text",
+    "placeholder": "AAPL"
+   },
+   {
+    "key": "range",
+    "label": "Range",
+    "control": "text",
+    "placeholder": "1d",
+    "help": "e.g. 1d, 5d, 1mo, 1y"
+   },
+   {
+    "key": "interval",
+    "label": "Interval",
+    "control": "text",
+    "placeholder": "1d",
+    "help": "e.g. 1m, 15m, 1d, 1wk"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "openexchangerates.getLatest",
+  "label": "Open Exchange Rates: Latest",
+  "description": "Get latest exchange rates (USD base on the free plan) from Open Exchange Rates.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "symbols",
+    "label": "Target currencies",
+    "control": "text",
+    "placeholder": "EUR,GBP,JPY",
+    "help": "Comma-separated ISO currency codes"
+   }
+  ],
+  "credentials": [
+   "OPENEXCHANGERATES_APP_ID"
+  ]
+ },
+ {
+  "id": "etherscan.getAccountBalance",
+  "label": "Etherscan: Account Balance",
+  "description": "Get the Ether balance (in wei) of an address via the Etherscan V2 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [
+   {
+    "key": "address",
+    "label": "Address",
+    "control": "text",
+    "placeholder": "0x…"
+   },
+   {
+    "key": "chainId",
+    "label": "Chain ID",
+    "control": "text",
+    "placeholder": "1",
+    "help": "1 = Ethereum mainnet; see Etherscan V2 supported chains"
+   }
+  ],
+  "credentials": [
+   "ETHERSCAN_API_KEY"
+  ]
+ },
+ {
+  "id": "etherscan.getGasOracle",
+  "label": "Etherscan: Gas Oracle",
+  "description": "Get current safe/proposed/fast gas prices on Ethereum via the Etherscan V2 gas tracker.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [],
+  "credentials": [
+   "ETHERSCAN_API_KEY"
+  ]
+ },
+ {
+  "id": "blockchain.getTicker",
+  "label": "Blockchain.info: BTC Ticker",
+  "description": "Get current Bitcoin price in major fiat currencies from blockchain.info (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "commerce-finance",
+  "clusterLabel": "Commerce & Finance",
+  "config": [],
+  "credentials": []
+ },
+ {
+  "id": "slack.sendMessage",
+  "label": "Slack: Send Message",
+  "description": "Post a message to a Slack channel via the Web API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "channel",
+    "label": "Channel",
+    "control": "text",
+    "placeholder": "#general",
+    "help": "Channel name or ID"
+   },
+   {
+    "key": "text",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "SLACK_BOT_TOKEN"
+  ]
+ },
+ {
+  "id": "slack.webhookPost",
+  "label": "Slack: Incoming Webhook",
+  "description": "Post a message to Slack via an incoming webhook URL (no bot token needed).",
+  "kind": "output",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "webhookUrl",
+    "label": "Webhook URL",
+    "control": "text",
+    "placeholder": "https://hooks.slack.com/services/…"
+   },
+   {
+    "key": "text",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "discord.sendMessage",
+  "label": "Discord: Send Message",
+  "description": "Post a message to a Discord channel via a webhook URL.",
+  "kind": "output",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "webhookUrl",
+    "label": "Webhook URL",
+    "control": "text",
+    "placeholder": "https://discord.com/api/webhooks/…"
+   },
+   {
+    "key": "content",
+    "label": "Message",
+    "control": "textarea"
+   },
+   {
+    "key": "username",
+    "label": "Override username",
+    "control": "text"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "telegram.sendMessage",
+  "label": "Telegram: Send Message",
+  "description": "Send a message to a Telegram chat via the Bot API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "chatId",
+    "label": "Chat ID",
+    "control": "text",
+    "help": "Target chat/channel ID (e.g. @channelname or numeric ID)"
+   },
+   {
+    "key": "text",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "TELEGRAM_BOT_TOKEN"
+  ]
+ },
+ {
+  "id": "twilio.sendSms",
+  "label": "Twilio: Send SMS",
+  "description": "Send an SMS text message via the Twilio API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "to",
+    "label": "To",
+    "control": "text",
+    "placeholder": "+15551234567"
+   },
+   {
+    "key": "from",
+    "label": "From",
+    "control": "text",
+    "placeholder": "+15559876543",
+    "help": "Your Twilio phone number"
+   },
+   {
+    "key": "body",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "TWILIO_ACCOUNT_SID",
+   "TWILIO_AUTH_TOKEN"
+  ]
+ },
+ {
+  "id": "sendgrid.sendEmail",
+  "label": "SendGrid: Send Email",
+  "description": "Send a transactional email via the SendGrid v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "to",
+    "label": "To",
+    "control": "text",
+    "placeholder": "user@example.com"
+   },
+   {
+    "key": "from",
+    "label": "From",
+    "control": "text",
+    "help": "A verified sender address"
+   },
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "text",
+    "label": "Body",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "SENDGRID_API_KEY"
+  ]
+ },
+ {
+  "id": "mailgun.sendEmail",
+  "label": "Mailgun: Send Email",
+  "description": "Send an email via the Mailgun API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "domain",
+    "label": "Mailgun domain",
+    "control": "text",
+    "placeholder": "mg.example.com"
+   },
+   {
+    "key": "to",
+    "label": "To",
+    "control": "text"
+   },
+   {
+    "key": "from",
+    "label": "From",
+    "control": "text"
+   },
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "text",
+    "label": "Body",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "MAILGUN_API_KEY"
+  ]
+ },
+ {
+  "id": "msteams.webhookPost",
+  "label": "Microsoft Teams: Post Message",
+  "description": "Post a message card to a Teams channel via an incoming webhook.",
+  "kind": "output",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "webhookUrl",
+    "label": "Webhook URL",
+    "control": "text"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "text",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "pushover.notify",
+  "label": "Pushover: Send Notification",
+  "description": "Send a push notification to your devices via Pushover.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "message",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "PUSHOVER_APP_TOKEN",
+   "PUSHOVER_USER_KEY"
+  ]
+ },
+ {
+  "id": "mattermost.sendMessage",
+  "label": "Mattermost: Send Message",
+  "description": "Post a message to a Mattermost channel via an incoming webhook.",
+  "kind": "output",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "webhookUrl",
+    "label": "Webhook URL",
+    "control": "text"
+   },
+   {
+    "key": "text",
+    "label": "Message",
+    "control": "textarea"
+   },
+   {
+    "key": "channel",
+    "label": "Channel override",
+    "control": "text"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "ntfy.publish",
+  "label": "ntfy: Publish Notification",
+  "description": "Publish a push notification to an ntfy.sh topic (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "communication",
+  "clusterLabel": "Communication",
+  "config": [
+   {
+    "key": "topic",
+    "label": "Topic",
+    "control": "text",
+    "placeholder": "my-alerts"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "message",
+    "label": "Message",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "hubspot.createContact",
+  "label": "HubSpot: Create Contact",
+  "description": "Create a contact in HubSpot CRM via the crm/v3 objects API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "email",
+    "label": "Email",
+    "control": "text",
+    "placeholder": "user@example.com"
+   },
+   {
+    "key": "firstname",
+    "label": "First name",
+    "control": "text"
+   },
+   {
+    "key": "lastname",
+    "label": "Last name",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "HUBSPOT_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "hubspot.listContacts",
+  "label": "HubSpot: List Contacts",
+  "description": "Read a page of contacts from HubSpot CRM via the crm/v3 objects API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "limit",
+    "label": "Page size",
+    "control": "text",
+    "placeholder": "20",
+    "help": "Number of contacts per page (max 100)"
+   }
+  ],
+  "credentials": [
+   "HUBSPOT_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "hubspot.createDeal",
+  "label": "HubSpot: Create Deal",
+  "description": "Create a deal in HubSpot CRM via the crm/v3 objects API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "dealname",
+    "label": "Deal name",
+    "control": "text"
+   },
+   {
+    "key": "amount",
+    "label": "Amount",
+    "control": "text",
+    "placeholder": "1500"
+   },
+   {
+    "key": "dealstage",
+    "label": "Deal stage",
+    "control": "text",
+    "placeholder": "appointmentscheduled",
+    "help": "Internal stage ID from your pipeline"
+   }
+  ],
+  "credentials": [
+   "HUBSPOT_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "mailchimp.addListMember",
+  "label": "Mailchimp: Add List Member",
+  "description": "Add or subscribe a member to a Mailchimp audience (list) via the Marketing API v3.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "dc",
+    "label": "Data center",
+    "control": "text",
+    "placeholder": "us21",
+    "help": "The suffix of your API key (after the dash), e.g. us21"
+   },
+   {
+    "key": "listId",
+    "label": "Audience (list) ID",
+    "control": "text"
+   },
+   {
+    "key": "email",
+    "label": "Email address",
+    "control": "text"
+   },
+   {
+    "key": "memberStatus",
+    "label": "Status",
+    "control": "text",
+    "placeholder": "subscribed",
+    "help": "subscribed, unsubscribed, cleaned, pending or transactional"
+   }
+  ],
+  "credentials": [
+   "MAILCHIMP_API_KEY"
+  ]
+ },
+ {
+  "id": "mailchimp.listCampaigns",
+  "label": "Mailchimp: List Campaigns",
+  "description": "List campaigns in a Mailchimp account via the Marketing API v3.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "dc",
+    "label": "Data center",
+    "control": "text",
+    "placeholder": "us21",
+    "help": "The suffix of your API key (after the dash), e.g. us21"
+   },
+   {
+    "key": "count",
+    "label": "Count",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Number of records to return (max 1000)"
+   }
+  ],
+  "credentials": [
+   "MAILCHIMP_API_KEY"
+  ]
+ },
+ {
+  "id": "intercom.createContact",
+  "label": "Intercom: Create Contact",
+  "description": "Create a contact (user or lead) in Intercom via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "email",
+    "label": "Email",
+    "control": "text"
+   },
+   {
+    "key": "name",
+    "label": "Name",
+    "control": "text"
+   },
+   {
+    "key": "role",
+    "label": "Role",
+    "control": "text",
+    "placeholder": "user",
+    "help": "user or lead"
+   }
+  ],
+  "credentials": [
+   "INTERCOM_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "intercom.listConversations",
+  "label": "Intercom: List Conversations",
+  "description": "List conversations in an Intercom workspace via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "perPage",
+    "label": "Page size",
+    "control": "text",
+    "placeholder": "20",
+    "help": "Conversations per page (max 150)"
+   }
+  ],
+  "credentials": [
+   "INTERCOM_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "zendesk.createTicket",
+  "label": "Zendesk: Create Ticket",
+  "description": "Create a support ticket in Zendesk via the Support API v2.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "subdomain",
+    "label": "Zendesk subdomain",
+    "control": "text",
+    "placeholder": "mycompany",
+    "help": "The <subdomain> in <subdomain>.zendesk.com"
+   },
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "comment",
+    "label": "Description",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "ZENDESK_EMAIL",
+   "ZENDESK_API_TOKEN"
+  ]
+ },
+ {
+  "id": "zendesk.searchTickets",
+  "label": "Zendesk: Search Tickets",
+  "description": "Search tickets and other objects in Zendesk via the Support API search endpoint.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "subdomain",
+    "label": "Zendesk subdomain",
+    "control": "text",
+    "placeholder": "mycompany",
+    "help": "The <subdomain> in <subdomain>.zendesk.com"
+   },
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text",
+    "placeholder": "type:ticket status:open",
+    "help": "Zendesk search syntax, e.g. type:ticket status:open"
+   }
+  ],
+  "credentials": [
+   "ZENDESK_EMAIL",
+   "ZENDESK_API_TOKEN"
+  ]
+ },
+ {
+  "id": "pipedrive.createDeal",
+  "label": "Pipedrive: Create Deal",
+  "description": "Create a deal in Pipedrive via the REST API v1.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "title",
+    "label": "Deal title",
+    "control": "text"
+   },
+   {
+    "key": "value",
+    "label": "Value",
+    "control": "text",
+    "placeholder": "5000"
+   },
+   {
+    "key": "currency",
+    "label": "Currency",
+    "control": "text",
+    "placeholder": "USD"
+   }
+  ],
+  "credentials": [
+   "PIPEDRIVE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "pipedrive.listPersons",
+  "label": "Pipedrive: List Persons",
+  "description": "List person records in Pipedrive via the REST API v1.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "limit",
+    "label": "Page size",
+    "control": "text",
+    "placeholder": "50",
+    "help": "Items shown per page (max 500)"
+   }
+  ],
+  "credentials": [
+   "PIPEDRIVE_API_TOKEN"
+  ]
+ },
+ {
+  "id": "typeform.listResponses",
+  "label": "Typeform: List Responses",
+  "description": "Retrieve form responses from Typeform via the Responses API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "formId",
+    "label": "Form ID",
+    "control": "text",
+    "help": "The form ID from the form URL (typeform.com/to/<formId>)"
+   },
+   {
+    "key": "pageSize",
+    "label": "Page size",
+    "control": "text",
+    "placeholder": "25",
+    "help": "Number of responses to return (max 1000)"
+   }
+  ],
+  "credentials": [
+   "TYPEFORM_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "brevo.sendEmail",
+  "label": "Brevo: Send Transactional Email",
+  "description": "Send a transactional email via the Brevo (formerly Sendinblue) v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "fromEmail",
+    "label": "From email",
+    "control": "text",
+    "help": "A verified sender address"
+   },
+   {
+    "key": "to",
+    "label": "To",
+    "control": "text",
+    "placeholder": "user@example.com"
+   },
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "text",
+    "label": "Body",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "BREVO_API_KEY"
+  ]
+ },
+ {
+  "id": "brevo.addContact",
+  "label": "Brevo: Add Contact",
+  "description": "Create a contact in Brevo (formerly Sendinblue) via the v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "email",
+    "label": "Email",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "BREVO_API_KEY"
+  ]
+ },
+ {
+  "id": "freshdesk.createTicket",
+  "label": "Freshdesk: Create Ticket",
+  "description": "Create a support ticket in Freshdesk via the API v2.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "subdomain",
+    "label": "Freshdesk subdomain",
+    "control": "text",
+    "placeholder": "mycompany",
+    "help": "The <subdomain> in <subdomain>.freshdesk.com"
+   },
+   {
+    "key": "email",
+    "label": "Requester email",
+    "control": "text"
+   },
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "FRESHDESK_API_KEY"
+  ]
+ },
+ {
+  "id": "activecampaign.createContact",
+  "label": "ActiveCampaign: Create Contact",
+  "description": "Create a contact in ActiveCampaign via the v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "accountUrl",
+    "label": "Account API URL",
+    "control": "text",
+    "placeholder": "https://youraccount.api-us1.com",
+    "help": "Your account-specific base URL (Settings → Developer)"
+   },
+   {
+    "key": "email",
+    "label": "Email",
+    "control": "text"
+   },
+   {
+    "key": "firstName",
+    "label": "First name",
+    "control": "text"
+   },
+   {
+    "key": "lastName",
+    "label": "Last name",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "ACTIVECAMPAIGN_API_KEY"
+  ]
+ },
+ {
+  "id": "buttondown.sendEmail",
+  "label": "Buttondown: Send Email",
+  "description": "Create and send a newsletter email via the Buttondown API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "crm-marketing",
+  "clusterLabel": "CRM & Marketing",
+  "config": [
+   {
+    "key": "subject",
+    "label": "Subject",
+    "control": "text"
+   },
+   {
+    "key": "bodyText",
+    "label": "Body",
+    "control": "textarea",
+    "help": "Markdown supported"
+   }
+  ],
+  "credentials": [
+   "BUTTONDOWN_API_KEY"
+  ]
+ },
+ {
+  "id": "graphql.query",
+  "label": "GraphQL: Query",
+  "description": "Execute a GraphQL query or mutation against any public GraphQL endpoint.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "endpoint",
+    "label": "Endpoint URL",
+    "control": "text",
+    "placeholder": "https://api.example.com/graphql"
+   },
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "textarea",
+    "placeholder": "query { viewer { id } }"
+   },
+   {
+    "key": "variables",
+    "label": "Variables (JSON object)",
+    "control": "textarea",
+    "placeholder": "{}",
+    "help": "JSON object of query variables; use {} if none"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "rss.fetchFeed",
+  "label": "RSS/Atom: Fetch Feed",
+  "description": "Fetch an RSS or Atom feed URL; the raw XML is returned in body for the reasoner to read.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "feedUrl",
+    "label": "Feed URL",
+    "control": "text",
+    "placeholder": "https://example.com/feed.xml"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "sitemap.fetch",
+  "label": "Sitemap: Fetch",
+  "description": "Fetch a site's sitemap.xml; the raw XML is returned in body for the reasoner to read.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "sitemapUrl",
+    "label": "Sitemap URL",
+    "control": "text",
+    "placeholder": "https://example.com/sitemap.xml"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "wayback.checkAvailability",
+  "label": "Wayback Machine: Check Availability",
+  "description": "Look up the closest archived snapshot of a URL via the Internet Archive availability API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "url",
+    "label": "URL",
+    "control": "text",
+    "placeholder": "https://example.com"
+   },
+   {
+    "key": "timestamp",
+    "label": "Timestamp",
+    "control": "text",
+    "placeholder": "20200101",
+    "help": "Optional YYYYMMDDhhmmss to find the snapshot closest to this time"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "openmeteo.getForecast",
+  "label": "Open-Meteo: Weather Forecast",
+  "description": "Get current conditions and a daily forecast for a lat/lon via the Open-Meteo API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "latitude",
+    "label": "Latitude",
+    "control": "text",
+    "placeholder": "52.52"
+   },
+   {
+    "key": "longitude",
+    "label": "Longitude",
+    "control": "text",
+    "placeholder": "13.41"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "openmeteo.geocode",
+  "label": "Open-Meteo: Geocode Place Name",
+  "description": "Resolve a place name to coordinates via the Open-Meteo geocoding API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "name",
+    "label": "Place name",
+    "control": "text",
+    "placeholder": "Berlin"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "openweathermap.getCurrentWeather",
+  "label": "OpenWeatherMap: Current Weather",
+  "description": "Get current weather for a city via the OpenWeatherMap API (requires API key).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "city",
+    "label": "City",
+    "control": "text",
+    "placeholder": "London,GB",
+    "help": "City name, optionally with country code"
+   },
+   {
+    "key": "units",
+    "label": "Units",
+    "control": "text",
+    "placeholder": "metric",
+    "help": "standard, metric or imperial"
+   }
+  ],
+  "credentials": [
+   "OPENWEATHERMAP_API_KEY"
+  ]
+ },
+ {
+  "id": "nominatim.geocode",
+  "label": "Nominatim: Geocode Address",
+  "description": "Resolve a free-form address to coordinates via OpenStreetMap Nominatim (keyless; identifies the app per usage policy).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "query",
+    "label": "Address / place",
+    "control": "text",
+    "placeholder": "1600 Pennsylvania Ave NW, Washington DC"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "nominatim.reverseGeocode",
+  "label": "Nominatim: Reverse Geocode",
+  "description": "Resolve coordinates to an address via OpenStreetMap Nominatim (keyless; identifies the app per usage policy).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "lat",
+    "label": "Latitude",
+    "control": "text",
+    "placeholder": "48.8584"
+   },
+   {
+    "key": "lon",
+    "label": "Longitude",
+    "control": "text",
+    "placeholder": "2.2945"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "ipapi.geolocate",
+  "label": "ip-api: Geolocate IP",
+  "description": "Look up geolocation, ISP and timezone for an IP address via ip-api.com (keyless; free tier is HTTP only).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "ip",
+    "label": "IP address",
+    "control": "text",
+    "placeholder": "8.8.8.8"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "restcountries.getCountry",
+  "label": "REST Countries: Country Info",
+  "description": "Fetch country facts (capital, population, currencies, languages) by name via REST Countries (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "name",
+    "label": "Country name",
+    "control": "text",
+    "placeholder": "japan"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "secedgar.searchFullText",
+  "label": "SEC EDGAR: Full-Text Search",
+  "description": "Search the full text of SEC EDGAR filings via the EDGAR full-text search API (keyless; identifies the app per SEC fair-access policy).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text",
+    "placeholder": "\"climate risk\""
+   },
+   {
+    "key": "forms",
+    "label": "Form types",
+    "control": "text",
+    "placeholder": "10-K",
+    "help": "Optional comma-separated form types, e.g. 10-K,8-K"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "googlenews.fetchRss",
+  "label": "Google News: Search RSS",
+  "description": "Fetch Google News search results as an RSS feed (keyless); the raw XML is returned in body for the reasoner to read.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text",
+    "placeholder": "artificial intelligence"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "web.screenshot",
+  "label": "Web: Screenshot Page",
+  "description": "Open one or more URLs in a real browser and capture what the rendered page shows (works on JS-heavy sites).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://example.com",
+    "help": "One URL per line"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "web.scrapePage",
+  "label": "Web: Scrape Full Page",
+  "description": "Load one or more URLs in a real browser and extract the full rendered page content (works on JS-heavy sites).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://example.com/article",
+    "help": "One URL per line"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "urlscan.submitScan",
+  "label": "urlscan.io: Submit Scan",
+  "description": "Submit a URL to urlscan.io for scanning and get back the result links (requires API key).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "data-web",
+  "clusterLabel": "Web & Data",
+  "config": [
+   {
+    "key": "url",
+    "label": "URL to scan",
+    "control": "text",
+    "placeholder": "https://suspicious.example.com"
+   },
+   {
+    "key": "visibility",
+    "label": "Visibility",
+    "control": "text",
+    "placeholder": "public",
+    "help": "public, unlisted or private"
+   }
+  ],
+  "credentials": [
+   "URLSCAN_API_KEY"
+  ]
+ },
+ {
+  "id": "supabase.select",
+  "label": "Supabase: Select Rows",
+  "description": "Read rows from a Supabase table via the PostgREST REST API, with optional PostgREST filters.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://abcdefgh.supabase.co",
+    "help": "Your Supabase project URL (no trailing slash)"
+   },
+   {
+    "key": "table",
+    "label": "Table",
+    "control": "text",
+    "placeholder": "todos"
+   },
+   {
+    "key": "columns",
+    "label": "Columns",
+    "control": "text",
+    "placeholder": "*",
+    "help": "Comma-separated column list for select=, e.g. id,name or *"
+   },
+   {
+    "key": "filters",
+    "label": "Filters",
+    "control": "text",
+    "placeholder": "status=eq.active&limit=10",
+    "help": "Raw PostgREST filter query string (operators: eq, gt, lt, like, in, order, limit, offset)"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.insert",
+  "label": "Supabase: Insert Row",
+  "description": "Insert a row (or array of rows) into a Supabase table via PostgREST.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://abcdefgh.supabase.co"
+   },
+   {
+    "key": "table",
+    "label": "Table",
+    "control": "text",
+    "placeholder": "todos"
+   },
+   {
+    "key": "row",
+    "label": "Row JSON",
+    "control": "textarea",
+    "placeholder": "{\"title\": \"buy milk\", \"done\": false}",
+    "help": "JSON object (or array of objects) to insert; keys must match column names"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.update",
+  "label": "Supabase: Update Rows",
+  "description": "Update rows matching PostgREST filters in a Supabase table.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://abcdefgh.supabase.co"
+   },
+   {
+    "key": "table",
+    "label": "Table",
+    "control": "text",
+    "placeholder": "todos"
+   },
+   {
+    "key": "filters",
+    "label": "Filters",
+    "control": "text",
+    "placeholder": "id=eq.42",
+    "help": "Raw PostgREST filter query string selecting which rows to update (required — prevents accidental full-table updates)"
+   },
+   {
+    "key": "changes",
+    "label": "Changes JSON",
+    "control": "textarea",
+    "placeholder": "{\"done\": true}",
+    "help": "JSON object of columns to set"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "supabase.rpc",
+  "label": "Supabase: Call Function (RPC)",
+  "description": "Call a Postgres function exposed by Supabase PostgREST at /rest/v1/rpc/<function>.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "projectUrl",
+    "label": "Project URL",
+    "control": "text",
+    "placeholder": "https://abcdefgh.supabase.co"
+   },
+   {
+    "key": "functionName",
+    "label": "Function name",
+    "control": "text",
+    "placeholder": "get_user_stats"
+   },
+   {
+    "key": "args",
+    "label": "Arguments JSON",
+    "control": "textarea",
+    "placeholder": "{}",
+    "help": "JSON object of named function arguments; use {} for none"
+   }
+  ],
+  "credentials": [
+   "SUPABASE_SERVICE_KEY"
+  ]
+ },
+ {
+  "id": "firebase.getJson",
+  "label": "Firebase Realtime DB: Get JSON",
+  "description": "Read the JSON value at a path in a Firebase Realtime Database via its REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "databaseUrl",
+    "label": "Database URL",
+    "control": "text",
+    "placeholder": "https://myapp-default-rtdb.firebaseio.com",
+    "help": "Realtime Database URL (no trailing slash)"
+   },
+   {
+    "key": "path",
+    "label": "Path",
+    "control": "text",
+    "placeholder": "users/alice",
+    "help": "Data path without leading slash or .json suffix"
+   },
+   {
+    "key": "query",
+    "label": "Query string",
+    "control": "text",
+    "placeholder": "?auth=DATABASE_SECRET",
+    "help": "Optional raw query string incl. leading ? — e.g. ?auth=<token> for secured rules, or ?orderBy=\"$key\"&limitToFirst=10. Leave blank for public read rules."
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "firebase.putJson",
+  "label": "Firebase Realtime DB: Put JSON",
+  "description": "Write (replace) the JSON value at a path in a Firebase Realtime Database via its REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "databaseUrl",
+    "label": "Database URL",
+    "control": "text",
+    "placeholder": "https://myapp-default-rtdb.firebaseio.com"
+   },
+   {
+    "key": "path",
+    "label": "Path",
+    "control": "text",
+    "placeholder": "users/alice"
+   },
+   {
+    "key": "data",
+    "label": "JSON value",
+    "control": "textarea",
+    "placeholder": "{\"name\": \"Alice\", \"age\": 30}",
+    "help": "JSON value to store — replaces any existing data at the path"
+   },
+   {
+    "key": "query",
+    "label": "Query string",
+    "control": "text",
+    "placeholder": "?auth=DATABASE_SECRET",
+    "help": "Optional raw query string incl. leading ? — e.g. ?auth=<token>. Leave blank for public write rules."
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "upstash.get",
+  "label": "Upstash Redis: GET",
+  "description": "Read a key's value from Upstash Redis via its REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "key",
+    "label": "Key",
+    "control": "text",
+    "placeholder": "session:123"
+   }
+  ],
+  "credentials": [
+   "UPSTASH_REDIS_REST_URL",
+   "UPSTASH_REDIS_REST_TOKEN"
+  ]
+ },
+ {
+  "id": "upstash.set",
+  "label": "Upstash Redis: SET",
+  "description": "Set a key to a value in Upstash Redis via its REST API (value sent as the request body).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "key",
+    "label": "Key",
+    "control": "text",
+    "placeholder": "session:123"
+   },
+   {
+    "key": "value",
+    "label": "Value",
+    "control": "textarea",
+    "help": "Stored as a string; sent as the request body per the Upstash REST convention"
+   }
+  ],
+  "credentials": [
+   "UPSTASH_REDIS_REST_URL",
+   "UPSTASH_REDIS_REST_TOKEN"
+  ]
+ },
+ {
+  "id": "upstash.lpush",
+  "label": "Upstash Redis: LPUSH",
+  "description": "Push a value onto the head of a Redis list in Upstash via its REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "key",
+    "label": "List key",
+    "control": "text",
+    "placeholder": "jobs"
+   },
+   {
+    "key": "value",
+    "label": "Value",
+    "control": "textarea",
+    "help": "Element to push; sent as the request body per the Upstash REST convention"
+   }
+  ],
+  "credentials": [
+   "UPSTASH_REDIS_REST_URL",
+   "UPSTASH_REDIS_REST_TOKEN"
+  ]
+ },
+ {
+  "id": "hasura.runQuery",
+  "label": "Hasura: Run GraphQL Query",
+  "description": "Execute a GraphQL query or mutation against a Hasura GraphQL endpoint using the admin secret.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "endpoint",
+    "label": "GraphQL endpoint",
+    "control": "text",
+    "placeholder": "https://my-app.hasura.app/v1/graphql"
+   },
+   {
+    "key": "query",
+    "label": "GraphQL query",
+    "control": "textarea",
+    "placeholder": "query { users(limit: 10) { id name } }"
+   }
+  ],
+  "credentials": [
+   "HASURA_ADMIN_SECRET"
+  ]
+ },
+ {
+  "id": "baserow.listRows",
+  "label": "Baserow: List Rows",
+  "description": "List rows from a Baserow table via its database token API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "baseUrl",
+    "label": "Baserow URL",
+    "control": "text",
+    "placeholder": "https://api.baserow.io",
+    "help": "https://api.baserow.io for hosted, or your self-hosted instance URL (no trailing slash)"
+   },
+   {
+    "key": "tableId",
+    "label": "Table ID",
+    "control": "text",
+    "placeholder": "12345",
+    "help": "Numeric table ID from the table URL"
+   }
+  ],
+  "credentials": [
+   "BASEROW_TOKEN"
+  ]
+ },
+ {
+  "id": "nocodb.listRows",
+  "label": "NocoDB: List Rows",
+  "description": "List records from a NocoDB table via the v2 Data API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "databases",
+  "clusterLabel": "Databases",
+  "config": [
+   {
+    "key": "baseUrl",
+    "label": "NocoDB URL",
+    "control": "text",
+    "placeholder": "https://app.nocodb.com",
+    "help": "Your NocoDB instance URL (no trailing slash)"
+   },
+   {
+    "key": "tableId",
+    "label": "Table ID",
+    "control": "text",
+    "placeholder": "m1a2b3c4d5e6f7g",
+    "help": "Table ID from table details (not the table name)"
+   }
+  ],
+  "credentials": [
+   "NOCODB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.createIssue",
+  "label": "GitHub: Create Issue",
+  "description": "Open a new issue in a GitHub repository via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat",
+    "help": "Repository owner (user or org)"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text",
+    "placeholder": "hello-world"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "body",
+    "label": "Body",
+    "control": "textarea",
+    "help": "Issue body (Markdown)"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.listIssues",
+  "label": "GitHub: List Issues",
+  "description": "List issues in a GitHub repository, filtered by state.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "state",
+    "label": "State",
+    "control": "text",
+    "placeholder": "open",
+    "help": "open, closed or all"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.getRepo",
+  "label": "GitHub: Get Repository",
+  "description": "Fetch metadata for a GitHub repository (stars, forks, default branch, …).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.listPullRequests",
+  "label": "GitHub: List Pull Requests",
+  "description": "List pull requests in a GitHub repository, filtered by state.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "state",
+    "label": "State",
+    "control": "text",
+    "placeholder": "open",
+    "help": "open, closed or all"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.createComment",
+  "label": "GitHub: Create Issue Comment",
+  "description": "Add a comment to a GitHub issue or pull request.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "issueNumber",
+    "label": "Issue / PR number",
+    "control": "text",
+    "placeholder": "42"
+   },
+   {
+    "key": "commentBody",
+    "label": "Comment",
+    "control": "textarea",
+    "help": "Comment text (Markdown)"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.searchCode",
+  "label": "GitHub: Search Code",
+  "description": "Search code across GitHub with the code search API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "addClass repo:jquery/jquery",
+    "help": "Code search query; supports qualifiers like repo:, org:, language:, path:"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.searchRepos",
+  "label": "GitHub: Search Repositories",
+  "description": "Search repositories across GitHub by keywords and qualifiers.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "tetris language:assembly",
+    "help": "Repo search query; supports qualifiers like language:, stars:>n, topic:"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.getFileContents",
+  "label": "GitHub: Get File Contents",
+  "description": "Read a file from a GitHub repository (content returned base64-encoded).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "path",
+    "label": "File path",
+    "control": "text",
+    "placeholder": "src/index.js",
+    "help": "Path within the repo (no leading slash)"
+   },
+   {
+    "key": "ref",
+    "label": "Ref",
+    "control": "text",
+    "placeholder": "main",
+    "help": "Branch, tag or commit SHA (defaults to the default branch)"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.listCommits",
+  "label": "GitHub: List Commits",
+  "description": "List recent commits in a GitHub repository.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "perPage",
+    "label": "Per page",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Number of commits to return (max 100)"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "github.dispatchWorkflow",
+  "label": "GitHub: Trigger Workflow",
+  "description": "Trigger a GitHub Actions workflow run via workflow_dispatch (returns 204 on success).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "owner",
+    "label": "Owner",
+    "control": "text",
+    "placeholder": "octocat"
+   },
+   {
+    "key": "repo",
+    "label": "Repository",
+    "control": "text"
+   },
+   {
+    "key": "workflowId",
+    "label": "Workflow",
+    "control": "text",
+    "placeholder": "ci.yml",
+    "help": "Workflow file name (e.g. ci.yml) or numeric workflow ID; must have a workflow_dispatch trigger"
+   },
+   {
+    "key": "ref",
+    "label": "Ref",
+    "control": "text",
+    "placeholder": "main",
+    "help": "Branch or tag to run the workflow on"
+   }
+  ],
+  "credentials": [
+   "GITHUB_TOKEN"
+  ]
+ },
+ {
+  "id": "gitlab.createIssue",
+  "label": "GitLab: Create Issue",
+  "description": "Open a new issue in a GitLab project via the REST API v4.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "projectId",
+    "label": "Project",
+    "control": "text",
+    "placeholder": "group/project",
+    "help": "Numeric project ID or full path (e.g. group/project)"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea",
+    "help": "Issue description (Markdown)"
+   }
+  ],
+  "credentials": [
+   "GITLAB_TOKEN"
+  ]
+ },
+ {
+  "id": "gitlab.listMergeRequests",
+  "label": "GitLab: List Merge Requests",
+  "description": "List merge requests in a GitLab project, filtered by state.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "projectId",
+    "label": "Project",
+    "control": "text",
+    "placeholder": "group/project",
+    "help": "Numeric project ID or full path (e.g. group/project)"
+   },
+   {
+    "key": "state",
+    "label": "State",
+    "control": "text",
+    "placeholder": "opened",
+    "help": "opened, closed, merged, locked or all"
+   }
+  ],
+  "credentials": [
+   "GITLAB_TOKEN"
+  ]
+ },
+ {
+  "id": "jira.createIssue",
+  "label": "Jira: Create Issue",
+  "description": "Create an issue in Jira Cloud via the REST API v3.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "siteUrl",
+    "label": "Site URL",
+    "control": "text",
+    "placeholder": "https://your-domain.atlassian.net",
+    "help": "Your Jira Cloud base URL, no trailing slash"
+   },
+   {
+    "key": "projectKey",
+    "label": "Project key",
+    "control": "text",
+    "placeholder": "ENG"
+   },
+   {
+    "key": "issueType",
+    "label": "Issue type",
+    "control": "text",
+    "placeholder": "Task",
+    "help": "Issue type name, e.g. Task, Bug, Story"
+   },
+   {
+    "key": "summary",
+    "label": "Summary",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea",
+    "help": "Plain-text description (wrapped into Atlassian Document Format)"
+   }
+  ],
+  "credentials": [
+   "JIRA_EMAIL",
+   "JIRA_API_TOKEN"
+  ]
+ },
+ {
+  "id": "jira.searchJql",
+  "label": "Jira: Search Issues (JQL)",
+  "description": "Search Jira Cloud issues with a JQL query via the enhanced search API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "siteUrl",
+    "label": "Site URL",
+    "control": "text",
+    "placeholder": "https://your-domain.atlassian.net",
+    "help": "Your Jira Cloud base URL, no trailing slash"
+   },
+   {
+    "key": "jql",
+    "label": "JQL",
+    "control": "textarea",
+    "placeholder": "project = ENG AND status = \"In Progress\" ORDER BY created DESC"
+   },
+   {
+    "key": "maxResults",
+    "label": "Max results",
+    "control": "text",
+    "placeholder": "20"
+   }
+  ],
+  "credentials": [
+   "JIRA_EMAIL",
+   "JIRA_API_TOKEN"
+  ]
+ },
+ {
+  "id": "linear.createIssue",
+  "label": "Linear: Create Issue",
+  "description": "Create an issue in Linear via the GraphQL API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "teamId",
+    "label": "Team ID",
+    "control": "text",
+    "help": "Linear team UUID (query the teams { nodes { id name } } GraphQL field to find it)"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea",
+    "help": "Issue description (Markdown)"
+   }
+  ],
+  "credentials": [
+   "LINEAR_API_KEY"
+  ]
+ },
+ {
+  "id": "sentry.listIssues",
+  "label": "Sentry: List Issues",
+  "description": "List issues for a Sentry project, optionally filtered by a search query.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "organizationSlug",
+    "label": "Organization slug",
+    "control": "text",
+    "placeholder": "my-org"
+   },
+   {
+    "key": "projectSlug",
+    "label": "Project slug",
+    "control": "text",
+    "placeholder": "my-app"
+   },
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "is:unresolved",
+    "help": "Sentry search query, e.g. is:unresolved or is:assigned"
+   }
+  ],
+  "credentials": [
+   "SENTRY_AUTH_TOKEN"
+  ]
+ },
+ {
+  "id": "pagerduty.triggerEvent",
+  "label": "PagerDuty: Trigger Event",
+  "description": "Trigger an alert event via the PagerDuty Events API v2.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "summary",
+    "label": "Summary",
+    "control": "text",
+    "help": "Brief description of the event"
+   },
+   {
+    "key": "source",
+    "label": "Source",
+    "control": "text",
+    "placeholder": "agently-workflow",
+    "help": "Unique location of the affected system"
+   },
+   {
+    "key": "severity",
+    "label": "Severity",
+    "control": "text",
+    "placeholder": "error",
+    "help": "critical, error, warning or info"
+   }
+  ],
+  "credentials": [
+   "PAGERDUTY_ROUTING_KEY"
+  ]
+ },
+ {
+  "id": "circleci.triggerPipeline",
+  "label": "CircleCI: Trigger Pipeline",
+  "description": "Trigger a pipeline for a project branch via the CircleCI API v2.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "projectSlug",
+    "label": "Project slug",
+    "control": "text",
+    "placeholder": "gh/my-org/my-repo",
+    "help": "vcs/org/repo, e.g. gh/my-org/my-repo or circleci/<org-id>/<project-id>"
+   },
+   {
+    "key": "branch",
+    "label": "Branch",
+    "control": "text",
+    "placeholder": "main"
+   }
+  ],
+  "credentials": [
+   "CIRCLECI_TOKEN"
+  ]
+ },
+ {
+  "id": "vercel.listDeployments",
+  "label": "Vercel: List Deployments",
+  "description": "List recent deployments for the authenticated Vercel account or team.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Max number of deployments to return"
+   }
+  ],
+  "credentials": [
+   "VERCEL_TOKEN"
+  ]
+ },
+ {
+  "id": "netlify.triggerBuildHook",
+  "label": "Netlify: Trigger Build Hook",
+  "description": "Trigger a site build via a Netlify build hook URL (the URL itself is the secret).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "buildHookUrl",
+    "label": "Build hook URL",
+    "control": "text",
+    "placeholder": "https://api.netlify.com/build_hooks/…",
+    "help": "From Site settings → Build & deploy → Build hooks"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "npm.getPackageInfo",
+  "label": "npm: Get Package Info",
+  "description": "Fetch the latest published version metadata for an npm package (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "package",
+    "label": "Package name",
+    "control": "text",
+    "placeholder": "lodash",
+    "help": "Package name, scoped names like @scope/name supported"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "pypi.getPackageInfo",
+  "label": "PyPI: Get Package Info",
+  "description": "Fetch metadata for a Python package from the PyPI JSON API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "devtools",
+  "clusterLabel": "Developer Tools",
+  "config": [
+   {
+    "key": "package",
+    "label": "Package name",
+    "control": "text",
+    "placeholder": "requests"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "notion.createPage",
+  "label": "Notion: Create Page",
+  "description": "Create a new page under a parent page with a title.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "parentPageId",
+    "label": "Parent page ID",
+    "control": "text",
+    "help": "ID of the page the new page is created under (share the page with your integration)"
+   },
+   {
+    "key": "title",
+    "label": "Title",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "NOTION_API_KEY"
+  ]
+ },
+ {
+  "id": "notion.queryDatabase",
+  "label": "Notion: Query Database",
+  "description": "Query a Notion database and return its pages (unfiltered).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "databaseId",
+    "label": "Database ID",
+    "control": "text",
+    "help": "The 32-char database ID from the database URL"
+   }
+  ],
+  "credentials": [
+   "NOTION_API_KEY"
+  ]
+ },
+ {
+  "id": "notion.appendBlock",
+  "label": "Notion: Append Block",
+  "description": "Append a paragraph block to a Notion page or block.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "blockId",
+    "label": "Page or block ID",
+    "control": "text",
+    "help": "ID of the page (or block) to append the paragraph to"
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "NOTION_API_KEY"
+  ]
+ },
+ {
+  "id": "airtable.listRecords",
+  "label": "Airtable: List Records",
+  "description": "List up to 100 records from an Airtable table.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "baseId",
+    "label": "Base ID",
+    "control": "text",
+    "placeholder": "appXXXXXXXXXXXXXX"
+   },
+   {
+    "key": "table",
+    "label": "Table name or ID",
+    "control": "text",
+    "placeholder": "Table 1"
+   }
+  ],
+  "credentials": [
+   "AIRTABLE_API_KEY"
+  ]
+ },
+ {
+  "id": "airtable.createRecord",
+  "label": "Airtable: Create Record",
+  "description": "Create a single record in an Airtable table.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "baseId",
+    "label": "Base ID",
+    "control": "text",
+    "placeholder": "appXXXXXXXXXXXXXX"
+   },
+   {
+    "key": "table",
+    "label": "Table name or ID",
+    "control": "text",
+    "placeholder": "Table 1"
+   },
+   {
+    "key": "fields",
+    "label": "Fields",
+    "control": "textarea",
+    "help": "JSON object mapping field names to values, e.g. {\"Name\": \"Alice\", \"Status\": \"Todo\"}"
+   }
+  ],
+  "credentials": [
+   "AIRTABLE_API_KEY"
+  ]
+ },
+ {
+  "id": "gsheets.appendRow",
+  "label": "Google Sheets: Append Row",
+  "description": "Append a row of values to a Google Sheet range via the Sheets v4 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "spreadsheetId",
+    "label": "Spreadsheet ID",
+    "control": "text",
+    "help": "The long ID from the sheet URL"
+   },
+   {
+    "key": "range",
+    "label": "Range",
+    "control": "text",
+    "placeholder": "Sheet1!A:C",
+    "help": "A1-notation range the row is appended after"
+   },
+   {
+    "key": "values",
+    "label": "Row values",
+    "control": "textarea",
+    "help": "JSON array of cell values for the row, e.g. [\"Alice\", 42, \"done\"]"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_SHEETS_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "gsheets.readRange",
+  "label": "Google Sheets: Read Range",
+  "description": "Read cell values from a Google Sheet range via the Sheets v4 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "spreadsheetId",
+    "label": "Spreadsheet ID",
+    "control": "text",
+    "help": "The long ID from the sheet URL"
+   },
+   {
+    "key": "range",
+    "label": "Range",
+    "control": "text",
+    "placeholder": "Sheet1!A1:C10",
+    "help": "A1-notation range to read"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_SHEETS_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "gcalendar.listEvents",
+  "label": "Google Calendar: List Events",
+  "description": "List upcoming events on a Google Calendar via the Calendar v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "calendarId",
+    "label": "Calendar ID",
+    "control": "text",
+    "placeholder": "primary",
+    "help": "Calendar ID; use \"primary\" for the account's main calendar"
+   },
+   {
+    "key": "timeMin",
+    "label": "From (RFC3339)",
+    "control": "text",
+    "placeholder": "2026-07-08T00:00:00Z",
+    "help": "Only events ending after this timestamp are returned"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_CALENDAR_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "gcalendar.createEvent",
+  "label": "Google Calendar: Create Event",
+  "description": "Create an event on a Google Calendar via the Calendar v3 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "calendarId",
+    "label": "Calendar ID",
+    "control": "text",
+    "placeholder": "primary"
+   },
+   {
+    "key": "summary",
+    "label": "Title",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea"
+   },
+   {
+    "key": "start",
+    "label": "Start (RFC3339)",
+    "control": "text",
+    "placeholder": "2026-07-10T15:00:00Z"
+   },
+   {
+    "key": "end",
+    "label": "End (RFC3339)",
+    "control": "text",
+    "placeholder": "2026-07-10T16:00:00Z"
+   }
+  ],
+  "credentials": [
+   "GOOGLE_CALENDAR_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "todoist.createTask",
+  "label": "Todoist: Create Task",
+  "description": "Create a task in Todoist via the REST v2 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "content",
+    "label": "Task",
+    "control": "text",
+    "placeholder": "Buy milk"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea"
+   },
+   {
+    "key": "dueString",
+    "label": "Due",
+    "control": "text",
+    "placeholder": "tomorrow at 12:00",
+    "help": "Human-readable due date parsed by Todoist"
+   }
+  ],
+  "credentials": [
+   "TODOIST_API_TOKEN"
+  ]
+ },
+ {
+  "id": "todoist.listTasks",
+  "label": "Todoist: List Tasks",
+  "description": "List all active (uncompleted) tasks via the Todoist REST v2 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [],
+  "credentials": [
+   "TODOIST_API_TOKEN"
+  ]
+ },
+ {
+  "id": "trello.createCard",
+  "label": "Trello: Create Card",
+  "description": "Create a card on a Trello list via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "listId",
+    "label": "List ID",
+    "control": "text",
+    "help": "ID of the list to add the card to"
+   },
+   {
+    "key": "name",
+    "label": "Card name",
+    "control": "text"
+   },
+   {
+    "key": "desc",
+    "label": "Description",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "TRELLO_API_KEY",
+   "TRELLO_API_TOKEN"
+  ]
+ },
+ {
+  "id": "trello.listCards",
+  "label": "Trello: List Cards",
+  "description": "List all cards on a Trello list via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "listId",
+    "label": "List ID",
+    "control": "text",
+    "help": "ID of the list to read cards from"
+   }
+  ],
+  "credentials": [
+   "TRELLO_API_KEY",
+   "TRELLO_API_TOKEN"
+  ]
+ },
+ {
+  "id": "asana.createTask",
+  "label": "Asana: Create Task",
+  "description": "Create a task in an Asana project via the REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "name",
+    "label": "Task name",
+    "control": "text"
+   },
+   {
+    "key": "notes",
+    "label": "Notes",
+    "control": "textarea"
+   },
+   {
+    "key": "projectId",
+    "label": "Project GID",
+    "control": "text",
+    "help": "GID of the project to add the task to"
+   }
+  ],
+  "credentials": [
+   "ASANA_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "monday.createItem",
+  "label": "Monday.com: Create Item",
+  "description": "Create an item on a Monday.com board via the GraphQL API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "boardId",
+    "label": "Board ID",
+    "control": "text",
+    "help": "Numeric board ID (visible in the board URL)"
+   },
+   {
+    "key": "itemName",
+    "label": "Item name",
+    "control": "text"
+   }
+  ],
+  "credentials": [
+   "MONDAY_API_TOKEN"
+  ]
+ },
+ {
+  "id": "clickup.createTask",
+  "label": "ClickUp: Create Task",
+  "description": "Create a task in a ClickUp list via the v2 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "listId",
+    "label": "List ID",
+    "control": "text",
+    "help": "Numeric ID of the list to create the task in"
+   },
+   {
+    "key": "name",
+    "label": "Task name",
+    "control": "text"
+   },
+   {
+    "key": "description",
+    "label": "Description",
+    "control": "textarea"
+   }
+  ],
+  "credentials": [
+   "CLICKUP_API_TOKEN"
+  ]
+ },
+ {
+  "id": "calendly.listScheduledEvents",
+  "label": "Calendly: List Scheduled Events",
+  "description": "List scheduled events for a Calendly user via the v2 API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "productivity",
+  "clusterLabel": "Productivity",
+  "config": [
+   {
+    "key": "userUri",
+    "label": "User URI",
+    "control": "text",
+    "placeholder": "https://api.calendly.com/users/XXXXXXXX",
+    "help": "Your Calendly user URI — retrieve it once via GET https://api.calendly.com/users/me"
+   }
+  ],
+  "credentials": [
+   "CALENDLY_API_TOKEN"
+  ]
+ },
+ {
+  "id": "arxiv.search",
+  "label": "arXiv: Search Papers",
+  "description": "Search arXiv preprints via the export Atom API (keyless). Response body is Atom XML.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text",
+    "placeholder": "all:transformer attention",
+    "help": "arXiv query syntax, e.g. all:electron, ti:\"large language models\", cat:cs.CL"
+   },
+   {
+    "key": "maxResults",
+    "label": "Max results",
+    "control": "text",
+    "placeholder": "10"
+   },
+   {
+    "key": "sortBy",
+    "label": "Sort by",
+    "control": "select",
+    "options": [
+     "relevance",
+     "lastUpdatedDate",
+     "submittedDate"
+    ]
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "hackernews.search",
+  "label": "Hacker News: Search",
+  "description": "Full-text search over Hacker News stories and comments via the Algolia API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "rust async"
+   },
+   {
+    "key": "tags",
+    "label": "Filter tags",
+    "control": "select",
+    "options": [
+     "story",
+     "comment",
+     "ask_hn",
+     "show_hn",
+     "front_page"
+    ],
+    "help": "Restrict results to one item type"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "hackernews.topStories",
+  "label": "Hacker News: Top Stories",
+  "description": "Fetch the current top story IDs from the official HN Firebase API (keyless). Body is a JSON array of item IDs; fetch details per item at /v0/item/{id}.json.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [],
+  "credentials": []
+ },
+ {
+  "id": "reddit.hotPosts",
+  "label": "Reddit: Hot Posts",
+  "description": "Fetch the hot posts of a subreddit via the public JSON listing (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "subreddit",
+    "label": "Subreddit",
+    "control": "text",
+    "placeholder": "MachineLearning",
+    "help": "Subreddit name without r/"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "25",
+    "help": "Max 100"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "reddit.topPosts",
+  "label": "Reddit: Top Posts",
+  "description": "Fetch the top posts of a subreddit for a timeframe via the public JSON listing (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "subreddit",
+    "label": "Subreddit",
+    "control": "text",
+    "placeholder": "programming"
+   },
+   {
+    "key": "timeframe",
+    "label": "Timeframe",
+    "control": "select",
+    "options": [
+     "hour",
+     "day",
+     "week",
+     "month",
+     "year",
+     "all"
+    ]
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "25"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "reddit.search",
+  "label": "Reddit: Search",
+  "description": "Search Reddit posts sitewide via the public JSON search endpoint (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text"
+   },
+   {
+    "key": "sort",
+    "label": "Sort",
+    "control": "select",
+    "options": [
+     "relevance",
+     "hot",
+     "top",
+     "new",
+     "comments"
+    ]
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "25"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "wikipedia.getSummary",
+  "label": "Wikipedia: Page Summary",
+  "description": "Fetch the lead summary of an English Wikipedia page via the REST API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "title",
+    "label": "Page title",
+    "control": "text",
+    "placeholder": "Alan_Turing",
+    "help": "Exact page title; use underscores instead of spaces"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "wikipedia.search",
+  "label": "Wikipedia: Search Pages",
+  "description": "Search English Wikipedia page titles and content via the MediaWiki REST search API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "10",
+    "help": "1–100"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "pubmed.search",
+  "label": "PubMed: Search (ESearch)",
+  "description": "Search PubMed for article IDs via the NCBI E-utilities esearch endpoint (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "term",
+    "label": "Search term",
+    "control": "text",
+    "placeholder": "crispr gene editing",
+    "help": "PubMed query syntax, e.g. asthma[mesh] AND 2024[pdat]"
+   },
+   {
+    "key": "retmax",
+    "label": "Max IDs",
+    "control": "text",
+    "placeholder": "20"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "pubmed.getSummaries",
+  "label": "PubMed: Get Summaries (ESummary)",
+  "description": "Fetch article metadata for PubMed IDs via the NCBI E-utilities esummary endpoint (keyless). Pair with PubMed Search.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "ids",
+    "label": "PubMed IDs",
+    "control": "text",
+    "placeholder": "36038631,35235726",
+    "help": "Comma-separated PMIDs (e.g. from pubmed.search ids output)"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "semanticscholar.searchPapers",
+  "label": "Semantic Scholar: Search Papers",
+  "description": "Search academic papers via the Semantic Scholar Graph API (keyless, rate-limited).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "graph neural networks"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Max 100"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "crossref.searchWorks",
+  "label": "Crossref: Search Works",
+  "description": "Search scholarly works (DOIs, journals, books) via the Crossref REST API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text"
+   },
+   {
+    "key": "rows",
+    "label": "Rows",
+    "control": "text",
+    "placeholder": "10",
+    "help": "Number of results (max 1000)"
+   },
+   {
+    "key": "mailto",
+    "label": "Contact email",
+    "control": "text",
+    "help": "Optional; joins the Crossref polite pool for better service"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "stackexchange.search",
+  "label": "Stack Exchange: Search Questions",
+  "description": "Search questions on a Stack Exchange site (e.g. Stack Overflow) via the public API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "python asyncio timeout"
+   },
+   {
+    "key": "site",
+    "label": "Site",
+    "control": "text",
+    "placeholder": "stackoverflow",
+    "help": "API site parameter, e.g. stackoverflow, serverfault, superuser"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "openalex.searchWorks",
+  "label": "OpenAlex: Search Works",
+  "description": "Search the open catalog of scholarly works via the OpenAlex API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text"
+   },
+   {
+    "key": "perPage",
+    "label": "Results per page",
+    "control": "text",
+    "placeholder": "10",
+    "help": "1–200"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "newsapi.topHeadlines",
+  "label": "NewsAPI: Top Headlines",
+  "description": "Fetch breaking news headlines by country, category or keyword via NewsAPI.org (API key required).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "country",
+    "label": "Country",
+    "control": "text",
+    "placeholder": "us",
+    "help": "2-letter ISO code; leave empty when using only q"
+   },
+   {
+    "key": "category",
+    "label": "Category",
+    "control": "select",
+    "options": [
+     "business",
+     "entertainment",
+     "general",
+     "health",
+     "science",
+     "sports",
+     "technology"
+    ]
+   },
+   {
+    "key": "q",
+    "label": "Keyword",
+    "control": "text",
+    "help": "At least one of country, category or keyword must be set"
+   }
+  ],
+  "credentials": [
+   "NEWSAPI_API_KEY"
+  ]
+ },
+ {
+  "id": "gdelt.searchDocs",
+  "label": "GDELT: Search News Documents",
+  "description": "Search worldwide news coverage via the GDELT DOC 2.0 API (keyless).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [
+   {
+    "key": "query",
+    "label": "Query",
+    "control": "text",
+    "placeholder": "\"climate change\" sourcelang:english",
+    "help": "GDELT query syntax; supports sourcelang:, domain:, sourcecountry: operators"
+   },
+   {
+    "key": "timespan",
+    "label": "Timespan",
+    "control": "text",
+    "placeholder": "24h",
+    "help": "How far back to search, e.g. 1h, 24h, 7d, 3m"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "lobsters.getHottest",
+  "label": "Lobsters: Hottest Stories",
+  "description": "Fetch the current hottest stories from Lobste.rs via its public JSON feed (keyless). Body is a JSON array of stories.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "research-news",
+  "clusterLabel": "Research & News",
+  "config": [],
+  "credentials": []
+ },
+ {
+  "id": "youtube.searchVideos",
+  "label": "YouTube: Search Videos",
+  "description": "Search YouTube videos by keyword via the Data API v3 search endpoint.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text",
+    "placeholder": "ai agents tutorial"
+   },
+   {
+    "key": "maxResults",
+    "label": "Max results",
+    "control": "text",
+    "placeholder": "10",
+    "help": "1-50, defaults to 5 if empty"
+   }
+  ],
+  "credentials": [
+   "YOUTUBE_API_KEY"
+  ]
+ },
+ {
+  "id": "youtube.getChannel",
+  "label": "YouTube: Get Channel",
+  "description": "Fetch a YouTube channel's snippet and statistics (subscribers, views, video count) by channel ID.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "channelId",
+    "label": "Channel ID",
+    "control": "text",
+    "placeholder": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+    "help": "The channel ID (starts with UC…)"
+   }
+  ],
+  "credentials": [
+   "YOUTUBE_API_KEY"
+  ]
+ },
+ {
+  "id": "youtube.listComments",
+  "label": "YouTube: List Video Comments",
+  "description": "List top-level comment threads on a YouTube video via the Data API v3.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "videoId",
+    "label": "Video ID",
+    "control": "text",
+    "placeholder": "dQw4w9WgXcQ"
+   },
+   {
+    "key": "maxResults",
+    "label": "Max results",
+    "control": "text",
+    "placeholder": "20",
+    "help": "1-100, defaults to 20 if empty"
+   }
+  ],
+  "credentials": [
+   "YOUTUBE_API_KEY"
+  ]
+ },
+ {
+  "id": "mastodon.postStatus",
+  "label": "Mastodon: Post Status",
+  "description": "Publish a status (toot) to a Mastodon instance via its REST API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "instanceUrl",
+    "label": "Instance URL",
+    "control": "text",
+    "placeholder": "https://mastodon.social",
+    "help": "Base URL of your Mastodon instance, no trailing slash"
+   },
+   {
+    "key": "status",
+    "label": "Status text",
+    "control": "textarea"
+   },
+   {
+    "key": "visibility",
+    "label": "Visibility",
+    "control": "text",
+    "placeholder": "public",
+    "help": "public, unlisted, private or direct"
+   }
+  ],
+  "credentials": [
+   "MASTODON_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "mastodon.search",
+  "label": "Mastodon: Search",
+  "description": "Search accounts, statuses and hashtags on a Mastodon instance via the v2 search API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "instanceUrl",
+    "label": "Instance URL",
+    "control": "text",
+    "placeholder": "https://mastodon.social",
+    "help": "Base URL of your Mastodon instance, no trailing slash"
+   },
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text"
+   },
+   {
+    "key": "type",
+    "label": "Result type",
+    "control": "text",
+    "placeholder": "statuses",
+    "help": "accounts, hashtags or statuses; empty searches all"
+   }
+  ],
+  "credentials": [
+   "MASTODON_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "bluesky.createSession",
+  "label": "Bluesky: Create Session",
+  "description": "Authenticate against Bluesky via com.atproto.server.createSession, returning an access JWT and DID for subsequent XRPC calls.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [],
+  "credentials": [
+   "BLUESKY_HANDLE",
+   "BLUESKY_APP_PASSWORD"
+  ]
+ },
+ {
+  "id": "bluesky.createPost",
+  "label": "Bluesky: Create Post",
+  "description": "Create a post record via com.atproto.repo.createRecord. Requires the access JWT and DID from a bluesky.createSession node upstream.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "accessJwt",
+    "label": "Access JWT",
+    "control": "text",
+    "help": "Reference the session node, e.g. {{outputs.<sessionNodeId>.accessJwt}}"
+   },
+   {
+    "key": "repoDid",
+    "label": "Repo DID",
+    "control": "text",
+    "help": "Reference the session node, e.g. {{outputs.<sessionNodeId>.did}}"
+   },
+   {
+    "key": "text",
+    "label": "Post text",
+    "control": "textarea",
+    "help": "Max 300 characters"
+   },
+   {
+    "key": "createdAt",
+    "label": "Created at",
+    "control": "text",
+    "placeholder": "2026-07-08T12:00:00Z",
+    "help": "ISO 8601 UTC timestamp for the record"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "bluesky.searchPosts",
+  "label": "Bluesky: Search Posts",
+  "description": "Search public Bluesky posts via the keyless public AppView API (app.bsky.feed.searchPosts).",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "25",
+    "help": "1-100, defaults to 25 if empty"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "twitch.getStreams",
+  "label": "Twitch: Get Streams",
+  "description": "Fetch live streams from the Twitch Helix API, filtered by broadcaster login or game ID.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "userLogin",
+    "label": "Broadcaster login",
+    "control": "text",
+    "placeholder": "shroud",
+    "help": "Twitch login name; leave empty with Game ID set to browse by game"
+   },
+   {
+    "key": "gameId",
+    "label": "Game ID",
+    "control": "text",
+    "help": "Numeric game/category ID"
+   }
+  ],
+  "credentials": [
+   "TWITCH_CLIENT_ID",
+   "TWITCH_APP_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "twitch.searchChannels",
+  "label": "Twitch: Search Channels",
+  "description": "Search Twitch channels by name via the Helix search/channels endpoint.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text"
+   },
+   {
+    "key": "liveOnly",
+    "label": "Live only",
+    "control": "text",
+    "placeholder": "false",
+    "help": "true to return only channels currently live"
+   }
+  ],
+  "credentials": [
+   "TWITCH_CLIENT_ID",
+   "TWITCH_APP_ACCESS_TOKEN"
+  ]
+ },
+ {
+  "id": "x.searchPosts",
+  "label": "X (Twitter): Search Posts",
+  "description": "Search recent posts on X via the browser runtime (X's API is gated behind paid tiers, so this reads the public search page).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "query",
+    "label": "Search query",
+    "control": "text"
+   },
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://x.com/search?q={{urlencode config.query}}&f=live",
+    "help": "One URL per line; templated with config values"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "x.getProfile",
+  "label": "X (Twitter): Get Profile",
+  "description": "Read a public X profile page (bio, follower counts, recent posts) via the browser runtime.",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "username",
+    "label": "Username",
+    "control": "text",
+    "placeholder": "nasa",
+    "help": "Handle without the @"
+   },
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://x.com/{{config.username}}",
+    "help": "One URL per line; templated with config values"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "instagram.getProfile",
+  "label": "Instagram: Get Profile",
+  "description": "Read a public Instagram profile page (bio, post grid, counts) via the browser runtime (the Graph API requires app review, so this reads the public page).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "username",
+    "label": "Username",
+    "control": "text",
+    "placeholder": "natgeo"
+   },
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://www.instagram.com/{{config.username}}/",
+    "help": "One URL per line; templated with config values"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "linkedin.getCompanyPage",
+  "label": "LinkedIn: Get Company Page",
+  "description": "Read a public LinkedIn company page (about, headcount, recent posts) via the browser runtime (LinkedIn's API is partner-gated).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "companySlug",
+    "label": "Company slug",
+    "control": "text",
+    "placeholder": "anthropic",
+    "help": "The slug from linkedin.com/company/<slug>"
+   },
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://www.linkedin.com/company/{{config.companySlug}}/",
+    "help": "One URL per line; templated with config values"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "tiktok.getProfile",
+  "label": "TikTok: Get Profile",
+  "description": "Read a public TikTok profile page (bio, follower counts, recent videos) via the browser runtime (TikTok's API requires app approval).",
+  "kind": "action",
+  "runtime": "browser",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "username",
+    "label": "Username",
+    "control": "text",
+    "placeholder": "khaby.lame",
+    "help": "Handle without the @"
+   },
+   {
+    "key": "urls",
+    "label": "URLs",
+    "control": "textarea",
+    "placeholder": "https://www.tiktok.com/@{{config.username}}",
+    "help": "One URL per line; templated with config values"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "reddit.getUserPosts",
+  "label": "Reddit: Get User Posts",
+  "description": "Fetch a Reddit user's submitted posts via the keyless public JSON listing.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "social",
+  "clusterLabel": "Social Media",
+  "config": [
+   {
+    "key": "username",
+    "label": "Username",
+    "control": "text",
+    "placeholder": "spez",
+    "help": "Reddit username without the u/ prefix"
+   },
+   {
+    "key": "limit",
+    "label": "Limit",
+    "control": "text",
+    "placeholder": "25",
+    "help": "1-100, defaults to 25 if empty"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "csv.parse",
+  "label": "CSV: Parse",
+  "description": "Parse CSV text into structured rows using Python's csv module. With a header row, each row becomes an object keyed by column name.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "text",
+    "label": "CSV text",
+    "control": "textarea",
+    "help": "Raw CSV content. Config values are passed to the sandbox program via the stdin payload's \"config\" key."
+   },
+   {
+    "key": "delimiter",
+    "label": "Delimiter",
+    "control": "text",
+    "placeholder": ",",
+    "help": "Single-character field separator (default ,)"
+   },
+   {
+    "key": "hasHeader",
+    "label": "First row is header",
+    "control": "select",
+    "options": [
+     "true",
+     "false"
+    ],
+    "help": "true: rows become objects keyed by header; false: rows stay arrays"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "csv.compose",
+  "label": "CSV: Compose",
+  "description": "Serialize a JSON array of rows (objects or arrays) into CSV text using Python's csv module.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "rows",
+    "label": "Rows (JSON array)",
+    "control": "textarea",
+    "placeholder": "[{\"name\": \"Ada\", \"age\": 36}]",
+    "help": "JSON array of objects (header from first object's keys) or arrays. Passed to the program via stdin config."
+   },
+   {
+    "key": "delimiter",
+    "label": "Delimiter",
+    "control": "text",
+    "placeholder": ","
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "json.query",
+  "label": "JSON: Query Path",
+  "description": "Extract a value from a JSON document by dotted path (e.g. items.0.name). Falls back to the upstream input when no data is supplied.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "data",
+    "label": "JSON data",
+    "control": "textarea",
+    "help": "JSON text to query. Leave empty to query the node's upstream input. Config reaches the program via the stdin payload's \"config\" key."
+   },
+   {
+    "key": "path",
+    "label": "Dotted path",
+    "control": "text",
+    "placeholder": "items.0.name",
+    "help": "Dot-separated keys; numeric segments index into arrays"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "json.transform",
+  "label": "JSON: Transform Rows",
+  "description": "Filter a JSON array of objects by a simple field comparison, or pick a subset of fields from every row.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "rows",
+    "label": "Rows (JSON array)",
+    "control": "textarea",
+    "help": "JSON array of objects to transform. Config values arrive in the program via stdin under \"config\"."
+   },
+   {
+    "key": "mode",
+    "label": "Mode",
+    "control": "select",
+    "options": [
+     "filter",
+     "pick"
+    ],
+    "help": "filter: keep rows matching field/op/value; pick: keep only the listed fields"
+   },
+   {
+    "key": "field",
+    "label": "Field (filter)",
+    "control": "text"
+   },
+   {
+    "key": "op",
+    "label": "Operator (filter)",
+    "control": "select",
+    "options": [
+     "eq",
+     "ne",
+     "contains",
+     "gt",
+     "lt"
+    ]
+   },
+   {
+    "key": "value",
+    "label": "Value (filter)",
+    "control": "text"
+   },
+   {
+    "key": "fields",
+    "label": "Fields (pick)",
+    "control": "text",
+    "placeholder": "name, email",
+    "help": "Comma-separated field names to keep in pick mode"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "xml.parse",
+  "label": "XML: Parse",
+  "description": "Parse XML text into a nested dict (tag, attrs, text, children) using xml.etree.ElementTree.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "xml",
+    "label": "XML text",
+    "control": "textarea",
+    "help": "XML document to parse. Delivered to the sandbox program via stdin config."
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "regex.extract",
+  "label": "Regex: Extract Matches",
+  "description": "Run re.findall with a configured pattern over text and return all matches (groups become arrays).",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "pattern",
+    "label": "Pattern",
+    "control": "text",
+    "placeholder": "\\b[\\w.]+@[\\w.]+\\b",
+    "help": "Python regular expression. Config values reach the program via stdin under \"config\"."
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   },
+   {
+    "key": "ignoreCase",
+    "label": "Ignore case",
+    "control": "select",
+    "options": [
+     "false",
+     "true"
+    ]
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "text.diff",
+  "label": "Text: Unified Diff",
+  "description": "Compare two texts line-by-line and produce a unified diff via difflib.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "textA",
+    "label": "Original text",
+    "control": "textarea",
+    "help": "Both texts are handed to the sandbox program via the stdin payload's \"config\" key."
+   },
+   {
+    "key": "textB",
+    "label": "New text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "datetime.now",
+  "label": "Date/Time: Now (Formatted)",
+  "description": "Get the current date/time formatted with a strftime pattern, plus ISO-8601 and epoch forms. Optional fixed UTC offset.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "format",
+    "label": "Format",
+    "control": "text",
+    "placeholder": "%Y-%m-%d %H:%M:%S",
+    "help": "Python strftime pattern (default ISO-like). Config is passed to the program via stdin under \"config\"."
+   },
+   {
+    "key": "utcOffsetHours",
+    "label": "UTC offset (hours)",
+    "control": "text",
+    "placeholder": "0",
+    "help": "e.g. 5.5 for IST, -8 for PST; default 0 (UTC)"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "hash.digest",
+  "label": "Hash: Digest Text",
+  "description": "Compute an md5, sha1, sha256 or sha512 hex digest of UTF-8 text via hashlib.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea",
+    "help": "Text to hash (UTF-8). Config reaches the program via the stdin payload's \"config\" key."
+   },
+   {
+    "key": "algorithm",
+    "label": "Algorithm",
+    "control": "select",
+    "options": [
+     "sha256",
+     "md5",
+     "sha1",
+     "sha512"
+    ]
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "base64.encodeDecode",
+  "label": "Base64: Encode / Decode",
+  "description": "Base64-encode UTF-8 text or decode a base64 string back to text.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "mode",
+    "label": "Mode",
+    "control": "select",
+    "options": [
+     "encode",
+     "decode"
+    ],
+    "help": "Config values are passed to the sandbox program via stdin under \"config\"."
+   },
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "url.parse",
+  "label": "URL: Parse Components",
+  "description": "Split a URL into scheme, host, port, path, query params and fragment via urllib.parse.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "url",
+    "label": "URL",
+    "control": "text",
+    "placeholder": "https://example.com/a?x=1",
+    "help": "URL to decompose. Delivered to the program via the stdin payload's \"config\" key."
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "uuid.generate",
+  "label": "UUID: Generate",
+  "description": "Generate one or more random UUIDv4 identifiers.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "count",
+    "label": "Count",
+    "control": "text",
+    "placeholder": "1",
+    "help": "How many UUIDs to generate (1-100). Passed to the program via stdin under \"config\"."
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "template.render",
+  "label": "Template: Render Text",
+  "description": "Render a text template with Python str.format-style {field} placeholders, filled from a JSON values object merged over the upstream input. Unknown placeholders are left as-is.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "template",
+    "label": "Template",
+    "control": "textarea",
+    "placeholder": "Hello {name}, your order {orderId} shipped.",
+    "help": "Simple {field} placeholders only (no dotted paths). Config reaches the program via stdin under \"config\"."
+   },
+   {
+    "key": "values",
+    "label": "Values (JSON object)",
+    "control": "textarea",
+    "placeholder": "{\"name\": \"Ada\"}",
+    "help": "Optional JSON object; merged over the node's upstream input fields"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "text.wordcount",
+  "label": "Text: Word Count & Top Terms",
+  "description": "Count words, unique terms, characters and lines in a text, and list the most frequent terms.",
+  "kind": "action",
+  "runtime": "code",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "text",
+    "label": "Text",
+    "control": "textarea",
+    "help": "Text to analyze. Config values are passed to the sandbox program via stdin under \"config\"."
+   },
+   {
+    "key": "topN",
+    "label": "Top terms",
+    "control": "text",
+    "placeholder": "10",
+    "help": "How many most-frequent terms to return (1-50)"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "httpbin.get",
+  "label": "HTTPBin: Echo Request",
+  "description": "Send a GET to httpbin.org/get and receive your request echoed back (args, headers, origin IP). Useful for testing pipelines without credentials.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "value",
+    "label": "Echo value",
+    "control": "text",
+    "help": "Optional value sent as the ?value= query parameter and echoed back"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "qrserver.generateQr",
+  "label": "QR Server: Generate QR Code",
+  "description": "Generate a QR code for any text via the keyless api.qrserver.com create-qr-code endpoint. Requested as SVG so the body is usable markup; the same URL with format=png serves an image.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [
+   {
+    "key": "data",
+    "label": "Data",
+    "control": "textarea",
+    "placeholder": "https://example.com",
+    "help": "Text or URL to encode in the QR code"
+   },
+   {
+    "key": "size",
+    "label": "Size",
+    "control": "text",
+    "placeholder": "200x200",
+    "help": "WIDTHxHEIGHT in pixels (default 200x200)"
+   }
+  ],
+  "credentials": []
+ },
+ {
+  "id": "ipify.getIp",
+  "label": "ipify: Get Public IP",
+  "description": "Fetch the caller's public IP address from the keyless ipify API.",
+  "kind": "action",
+  "runtime": "http",
+  "cluster": "utilities-files",
+  "clusterLabel": "Utilities & Files",
+  "config": [],
+  "credentials": []
+ }
+]

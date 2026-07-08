@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import smtplib
+import urllib.parse
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import browser, db, llm
+from . import browser, catalog, db, llm, sandbox
 from .config import CONFIG
 
 
@@ -36,6 +38,9 @@ class NodeContext:
     upstream: dict[str, dict]      # upstream node key → that node's output dict
     run_input: dict[str, Any]      # the run's trigger input
     label: str = ""
+    # Extra template roots (loop fan-out injects {"item": …, "loop": {...}} here so
+    # body nodes can reference {{item}} / {{loop.<key>.index}}).
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,8 +66,17 @@ def handles(*types: str) -> Callable[[Handler], Handler]:
 
 
 def handler_for(node_type: str) -> Handler:
-    """Return the handler for a node type, or a passthrough for unknown types."""
-    return _REGISTRY.get(node_type, _passthrough)
+    """Return the handler for a node type.
+
+    Resolution order: code-backed built-ins (this registry) → the shared
+    integration catalog (generic executor, hundreds of types as data) →
+    passthrough for genuinely unknown types.
+    """
+    if node_type in _REGISTRY:
+        return _REGISTRY[node_type]
+    if catalog.spec_for(node_type) is not None:
+        return _integration
+    return _passthrough
 
 
 def supported_types() -> list[str]:
@@ -83,7 +97,7 @@ def render(template: Any, ctx: NodeContext) -> str:
     if not isinstance(template, str):
         return "" if template is None else str(template)
 
-    root = {"input": ctx.run_input, "outputs": ctx.upstream}
+    root = {"input": ctx.run_input, "outputs": ctx.upstream, **ctx.extra}
 
     def resolve(expr: str) -> str:
         cur: Any = root
@@ -95,6 +109,49 @@ def render(template: Any, ctx: NodeContext) -> str:
         if cur is None:
             return ""
         return cur if isinstance(cur, str) else json.dumps(cur)
+
+    return _TOKEN.sub(lambda m: resolve(m.group(1)), template)
+
+
+def render_tpl(template: Any, ctx: NodeContext, extra_roots: dict[str, Any]) -> str:
+    """render() plus catalog-template extensions.
+
+    Integration definitions (packages/nodes) template over two more roots —
+    `config` (the node's filled config) and `credentials` (env vars) — and two
+    helpers for safe embedding: `{{json expr}}` (JSON-encoded, for JSON bodies)
+    and `{{urlencode expr}}` (percent-encoded, for query strings / form bodies).
+    Same fail-open semantics as render(): unknown references collapse to "".
+    """
+    if not isinstance(template, str):
+        return "" if template is None else str(template)
+
+    root = {"input": ctx.run_input, "outputs": ctx.upstream, **ctx.extra, **extra_roots}
+
+    def lookup(expr: str) -> Any:
+        cur: Any = root
+        for part in expr.split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            else:
+                return None
+        return cur
+
+    def resolve(raw: str) -> str:
+        expr = raw.strip()
+        helper = ""
+        for prefix in ("json ", "urlencode "):
+            if expr.startswith(prefix):
+                helper, expr = prefix.strip(), expr[len(prefix):].strip()
+                break
+        val = lookup(expr)
+        if helper == "json":
+            return json.dumps("" if val is None else val)
+        if helper == "urlencode":
+            s = "" if val is None else (val if isinstance(val, str) else json.dumps(val))
+            return urllib.parse.quote(s, safe="")
+        if val is None:
+            return ""
+        return val if isinstance(val, str) else json.dumps(val)
 
     return _TOKEN.sub(lambda m: resolve(m.group(1)), template)
 
@@ -184,20 +241,57 @@ async def _http(ctx: NodeContext) -> NodeResult:
         return NodeResult(output={"error": str(exc)}, summary=f"HTTP failed: {exc}")
 
 
-@handles("tool.code", "tool.db")
-async def _recorded(ctx: NodeContext) -> NodeResult:
-    """Code / DB steps are recorded honestly, not executed on the shared runtime.
-
-    Matches the web catalog's help text ("Recorded, not executed …"). The source
-    is preserved so a later, sandboxed executor can run it for real.
+@handles("tool.code")
+async def _code(ctx: NodeContext) -> NodeResult:
+    """Execute a code snippet in the subprocess sandbox — opt-in via
+    TOOL_CODE_ENABLED=1. Unconfigured environments record the source instead
+    (the old behaviour), with a loud log pointing at the gate.
     """
-    kind = "code" if ctx.node["type"] == "tool.code" else "query"
-    source = _cfg(ctx, "source") or _cfg(ctx, "query")
-    await db.append_log(
-        ctx.run_id, "info", "system", ctx.node["key"],
-        f"Recorded {kind} (not executed on shared runtime)", detail=source or None,
+    language = _cfg(ctx, "language") or "python"
+    source = _cfg(ctx, "source")
+    key = ctx.node["key"]
+    if not CONFIG.tool_code_enabled:
+        await db.append_log(
+            ctx.run_id, "warn", "system", key,
+            "Code recorded, not executed — set TOOL_CODE_ENABLED=1 to run tool.code for real",
+            detail=source or None,
+        )
+        return NodeResult(output={"code": source, "executed": False}, summary="Recorded code (sandbox disabled)")
+
+    payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": ctx.node.get("config", {}), **ctx.extra}
+    res = await sandbox.run(language, source, payload)
+    if not res.ok:
+        await db.append_log(ctx.run_id, "error", "tool", key, f"Code failed: {res.error}", detail=res.stdout or None)
+        return NodeResult(output={"error": res.error, "stdout": res.stdout, "executed": True}, summary=f"Code failed: {_clip(res.error, 120)}")
+    await db.append_log(ctx.run_id, "info", "tool", key, f"Code ran ({language})", detail=_clip(res.stdout, 500) or None)
+    return NodeResult(
+        output={"result": res.result, "stdout": res.stdout, "executed": True},
+        summary="Code ran" if res.result is None else _clip(json.dumps(res.result)),
     )
-    return NodeResult(output={kind: source, "executed": False}, summary=f"Recorded {kind}")
+
+
+@handles("tool.db")
+async def _db_query(ctx: NodeContext) -> NodeResult:
+    """Run SQL against the dedicated TOOL_DB_URL database — never the platform
+    Postgres. Unconfigured environments record the query instead.
+    """
+    query = render(_cfg(ctx, "query"), ctx)
+    key = ctx.node["key"]
+    if not CONFIG.tool_db_url:
+        await db.append_log(
+            ctx.run_id, "info", "system", key,
+            "Query recorded, not executed — set TOOL_DB_URL to run tool.db against a database",
+            detail=query or None,
+        )
+        return NodeResult(output={"query": query, "executed": False}, summary="Recorded query (no TOOL_DB_URL)")
+
+    try:
+        rows, count = await db.run_tool_query(CONFIG.tool_db_url, query, max_rows=200)
+    except Exception as exc:  # noqa: BLE001 — surface as node output, not a crash
+        await db.append_log(ctx.run_id, "error", "tool", key, f"Query failed: {exc}", detail=query)
+        return NodeResult(output={"error": str(exc), "executed": True}, summary=f"Query failed: {_clip(str(exc), 120)}")
+    await db.append_log(ctx.run_id, "info", "tool", key, f"Query returned {count} row(s)", detail=query)
+    return NodeResult(output={"rows": rows, "rowCount": count, "executed": True}, summary=f"{count} row(s)")
 
 
 @handles("logic.branch", "logic.filter")
@@ -213,14 +307,16 @@ async def _condition(ctx: NodeContext) -> NodeResult:
 
 @handles("logic.loop")
 async def _loop(ctx: NodeContext) -> NodeResult:
-    """Resolve an items list and expose it to descendants.
+    """Resolve the items list. The ORCHESTRATOR owns the fan-out.
 
-    Scope (honest): this does NOT fan out the downstream subgraph once per item —
-    that would require the engine to clone descendant nodes per iteration, which is
-    the clean v2. Instead it resolves the item list and publishes it as
-    `outputs.<key>.items` / `.count`, so a downstream node can reference the whole
-    collection (e.g. an agent that iterates the list in one prompt, or an http node
-    templating over it). Real per-item fan-out is a documented follow-up.
+    This handler's only job is resolving config.items (a dotted ref like
+    `outputs.fetch.items`) to a concrete list. Both orchestrators — the per-node
+    DynamicWorkflow and the single-activity engine.execute_graph — then run the
+    loop's dominated body once per item (plan.loop_body), injecting `{{item}}` /
+    `{{loop.<key>.index}}`, and attach the collected per-item outputs here as
+    `outputs.<key>.results`. Splitting it this way keeps the handler pure enough
+    to run as ONE Temporal activity while the fan-out stays deterministic
+    workflow-side.
     """
     expr = _cfg(ctx, "items")
     items = _resolve_ref(expr, ctx)
@@ -228,7 +324,7 @@ async def _loop(ctx: NodeContext) -> NodeResult:
     count = len(items)
     await db.append_log(
         ctx.run_id, "info", "system", ctx.node["key"],
-        f"Loop resolved {count} item(s) — exposed to descendants (no per-item fan-out)",
+        f"Loop resolved {count} item(s) — fanning body out per item",
     )
     return NodeResult(
         output={"items": items, "count": count},
@@ -343,6 +439,129 @@ async def _report(ctx: NodeContext) -> NodeResult:
     ext = "pdf" if fmt == "pdf" else "md"
     await db.add_artifact(ctx.run_id, f"{_slug(title)}.{ext}", "report", ctx.label or "Composer", body)
     return NodeResult(output={"title": title, "format": fmt}, summary=f"Report: {title}")
+
+
+async def _integration(ctx: NodeContext) -> NodeResult:
+    """Generic executor for catalog-defined integration nodes (packages/nodes).
+
+    One handler for hundreds of node types: the definition declares a runtime —
+      http    → render the request template (config/credentials roots + json/
+                urlencode helpers) and perform it; outputMap lifts response fields.
+      browser → drive the existing browser stack over the templated URLs.
+      code    → run the definition's program in the tool.code sandbox (same
+                TOOL_CODE_ENABLED gate).
+      llm     → complete with the definition's system/prompt templates.
+
+    Missing credentials degrade to record-intent with a loud log — a graph never
+    fails because an env var isn't set on this deployment.
+    """
+    spec = catalog.spec_for(str(ctx.node.get("type", ""))) or {}
+    key = ctx.node["key"]
+    runtime = spec.get("runtime", "http")
+
+    creds: dict[str, str] = {}
+    missing: list[str] = []
+    for c in spec.get("credentials") or []:
+        val = os.getenv(c.get("key", ""), "")
+        if val:
+            creds[c["key"]] = val
+        else:
+            missing.append(c.get("key", "?"))
+    if missing:
+        await db.append_log(
+            ctx.run_id, "warn", "system", key,
+            f"{ctx.node.get('type')} recorded — missing credential env var(s): {', '.join(missing)}",
+        )
+        return NodeResult(
+            output={"recorded": True, "executed": False, "missingCredentials": missing},
+            summary=f"Recorded (needs {', '.join(missing)})",
+        )
+
+    cfg = ctx.node.get("config", {}) or {}
+    roots = {"config": cfg, "credentials": creds}
+
+    if runtime == "browser":
+        raw = render_tpl(_cfg(ctx, "urls"), ctx, roots)
+        urls = [u.strip() for u in re.split(r"[\s,]+", raw) if u.strip()]
+        findings = await browser.run_browse(ctx.run_id, ctx.label or spec.get("label", key), urls)
+        return NodeResult(output={"text": findings, "urls": urls, "pages": len(urls)}, summary=f"Visited {len(urls)} page(s)")
+
+    if runtime == "code":
+        code_spec = spec.get("code") or {}
+        if not CONFIG.tool_code_enabled:
+            await db.append_log(
+                ctx.run_id, "warn", "system", key,
+                f"{ctx.node.get('type')} recorded — set TOOL_CODE_ENABLED=1 to execute code-runtime nodes",
+            )
+            return NodeResult(output={"recorded": True, "executed": False}, summary="Recorded (sandbox disabled)")
+        payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": cfg, **ctx.extra}
+        res = await sandbox.run(code_spec.get("language", "python"), code_spec.get("source", ""), payload)
+        if not res.ok:
+            return NodeResult(output={"error": res.error, "stdout": res.stdout, "executed": True}, summary=f"Failed: {_clip(res.error, 120)}")
+        out = res.result if isinstance(res.result, dict) else {"result": res.result}
+        out.setdefault("stdout", res.stdout)
+        out["executed"] = True
+        return NodeResult(output=out, summary=_clip(json.dumps(res.result)) if res.result is not None else "Ran")
+
+    if runtime == "llm":
+        llm_spec = spec.get("llm") or {}
+        system = render_tpl(llm_spec.get("system", "You are a helpful agent."), ctx, roots)
+        prompt = render_tpl(llm_spec.get("prompt", ""), ctx, roots)
+        model = _cfg(ctx, "model") or CONFIG.model
+        out = await llm.complete(ctx.run_id, key, system=system, user=prompt, model=model)
+        return NodeResult(
+            output={"text": out.text, "model": model}, summary=_clip(out.text),
+            tokens_in=out.tokens_in, tokens_out=out.tokens_out, cost_usd=out.cost_usd,
+        )
+
+    # Default: http.
+    http_spec = spec.get("http") or {}
+    method = (http_spec.get("method") or "GET").upper()
+    url = render_tpl(http_spec.get("url", ""), ctx, roots)
+    if not url:
+        return NodeResult(output={"error": "no url in definition"}, summary="Skipped — no URL")
+    headers = {
+        str(hk): render_tpl(hv, ctx, roots)
+        for hk, hv in (http_spec.get("headers") or {}).items()
+    }
+    headers = {k: v for k, v in headers.items() if v}  # drop headers that resolved empty
+    body = render_tpl(http_spec.get("body", ""), ctx, roots)
+    auth = None
+    if isinstance(http_spec.get("auth"), dict) and http_spec["auth"].get("type") == "basic":
+        auth = (
+            render_tpl(http_spec["auth"].get("username", ""), ctx, roots),
+            render_tpl(http_spec["auth"].get("password", ""), ctx, roots),
+        )
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
+    except Exception as exc:  # noqa: BLE001 — surface as node output, not a crash
+        await db.append_log(ctx.run_id, "error", "tool", key, f"{method} {url} failed: {exc}")
+        return NodeResult(output={"error": str(exc)}, summary=f"HTTP failed: {_clip(str(exc), 120)}")
+
+    text = resp.text[:8000]
+    output: dict[str, Any] = {"status": resp.status_code, "body": text}
+    # outputMap: output field → dotted path into the parsed JSON response.
+    if http_spec.get("outputMap"):
+        try:
+            parsed = resp.json()
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            for field_name, path in http_spec["outputMap"].items():
+                cur: Any = parsed
+                for part in str(path).split("."):
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+                        cur = cur[int(part)]
+                    else:
+                        cur = None
+                        break
+                if cur is not None:
+                    output[field_name] = cur
+    await db.append_log(ctx.run_id, "info", "tool", key, f"{method} {url} → {resp.status_code}")
+    return NodeResult(output=output, summary=f"{method} {_clip(url, 80)} → {resp.status_code}")
 
 
 async def _passthrough(ctx: NodeContext) -> NodeResult:

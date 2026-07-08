@@ -1,0 +1,830 @@
+{
+  "cluster": "productivity",
+  "label": "Productivity",
+  "description": "Notes, databases, spreadsheets, calendars, tasks and project management services.",
+  "nodes": [
+    {
+      "id": "notion.createPage",
+      "label": "Notion: Create Page",
+      "description": "Create a new page under a parent page with a title.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion page create note document wiki knowledge base write",
+      "config": [
+        {
+          "key": "parentPageId",
+          "label": "Parent page ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the page the new page is created under (share the page with your integration)"
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "control": "text",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "id",
+        "url",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret (ntn_… / secret_…) from notion.so/my-integrations; the parent page must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"parent\": {\"page_id\": {{json config.parentPageId}}}, \"properties\": {\"title\": {\"title\": [{\"text\": {\"content\": {{json config.title}}}}]}}}",
+        "outputMap": {
+          "id": "id",
+          "url": "url"
+        }
+      }
+    },
+    {
+      "id": "notion.queryDatabase",
+      "label": "Notion: Query Database",
+      "description": "Query a Notion database and return its pages (unfiltered).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion database query list rows pages records fetch read table",
+      "config": [
+        {
+          "key": "databaseId",
+          "label": "Database ID",
+          "control": "text",
+          "required": true,
+          "help": "The 32-char database ID from the database URL"
+        }
+      ],
+      "outputs": [
+        "results",
+        "has_more",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret; the database must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/databases/{{config.databaseId}}/query",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{}",
+        "outputMap": {
+          "results": "results",
+          "has_more": "has_more"
+        }
+      }
+    },
+    {
+      "id": "notion.appendBlock",
+      "label": "Notion: Append Block",
+      "description": "Append a paragraph block to a Notion page or block.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion block append paragraph content add text page write update",
+      "config": [
+        {
+          "key": "blockId",
+          "label": "Page or block ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the page (or block) to append the paragraph to"
+        },
+        {
+          "key": "text",
+          "label": "Text",
+          "control": "textarea",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "results",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret; the target page must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://api.notion.com/v1/blocks/{{config.blockId}}/children",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"children\": [{\"object\": \"block\", \"type\": \"paragraph\", \"paragraph\": {\"rich_text\": [{\"type\": \"text\", \"text\": {\"content\": {{json config.text}}}}]}}]}",
+        "outputMap": {
+          "results": "results"
+        }
+      }
+    },
+    {
+      "id": "airtable.listRecords",
+      "label": "Airtable: List Records",
+      "description": "List up to 100 records from an Airtable table.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable records list rows table base fetch read database query",
+      "config": [
+        {
+          "key": "baseId",
+          "label": "Base ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "appXXXXXXXXXXXXXX"
+        },
+        {
+          "key": "table",
+          "label": "Table name or ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "Table 1"
+        }
+      ],
+      "outputs": [
+        "records",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "AIRTABLE_API_KEY",
+          "help": "Personal access token (pat…) with data.records:read scope on the base"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.table}}?maxRecords=100",
+        "headers": {
+          "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}"
+        },
+        "outputMap": {
+          "records": "records"
+        }
+      }
+    },
+    {
+      "id": "airtable.createRecord",
+      "label": "Airtable: Create Record",
+      "description": "Create a single record in an Airtable table.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable record create row insert add table base database write",
+      "config": [
+        {
+          "key": "baseId",
+          "label": "Base ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "appXXXXXXXXXXXXXX"
+        },
+        {
+          "key": "table",
+          "label": "Table name or ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "Table 1"
+        },
+        {
+          "key": "fields",
+          "label": "Fields",
+          "control": "textarea",
+          "required": true,
+          "help": "JSON object mapping field names to values, e.g. {\"Name\": \"Alice\", \"Status\": \"Todo\"}"
+        }
+      ],
+      "outputs": [
+        "id",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "AIRTABLE_API_KEY",
+          "help": "Personal access token (pat…) with data.records:write scope on the base"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.table}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"fields\": {{json config.fields}}}",
+        "outputMap": {
+          "id": "id"
+        }
+      }
+    },
+    {
+      "id": "gsheets.appendRow",
+      "label": "Google Sheets: Append Row",
+      "description": "Append a row of values to a Google Sheet range via the Sheets v4 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets spreadsheet append row insert add values cell write csv",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the sheet URL"
+        },
+        {
+          "key": "range",
+          "label": "Range",
+          "control": "text",
+          "required": true,
+          "placeholder": "Sheet1!A:C",
+          "help": "A1-notation range the row is appended after"
+        },
+        {
+          "key": "values",
+          "label": "Row values",
+          "control": "textarea",
+          "required": true,
+          "help": "JSON array of cell values for the row, e.g. [\"Alice\", 42, \"done\"]"
+        }
+      ],
+      "outputs": [
+        "updates",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}/values/{{urlencode config.range}}:append?valueInputOption=USER_ENTERED",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"values\": [{{json config.values}}]}",
+        "outputMap": {
+          "updates": "updates"
+        }
+      }
+    },
+    {
+      "id": "gsheets.readRange",
+      "label": "Google Sheets: Read Range",
+      "description": "Read cell values from a Google Sheet range via the Sheets v4 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets spreadsheet read range values cells fetch get rows data",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the sheet URL"
+        },
+        {
+          "key": "range",
+          "label": "Range",
+          "control": "text",
+          "required": true,
+          "placeholder": "Sheet1!A1:C10",
+          "help": "A1-notation range to read"
+        }
+      ],
+      "outputs": [
+        "values",
+        "range",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with spreadsheets.readonly (or spreadsheets) scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}/values/{{urlencode config.range}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "values": "values",
+          "range": "range"
+        }
+      }
+    },
+    {
+      "id": "gcalendar.listEvents",
+      "label": "Google Calendar: List Events",
+      "description": "List upcoming events on a Google Calendar via the Calendar v3 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google calendar events list upcoming schedule agenda meetings fetch",
+      "config": [
+        {
+          "key": "calendarId",
+          "label": "Calendar ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "primary",
+          "help": "Calendar ID; use \"primary\" for the account's main calendar"
+        },
+        {
+          "key": "timeMin",
+          "label": "From (RFC3339)",
+          "control": "text",
+          "required": true,
+          "placeholder": "2026-07-08T00:00:00Z",
+          "help": "Only events ending after this timestamp are returned"
+        }
+      ],
+      "outputs": [
+        "items",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_CALENDAR_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/calendar.readonly (or calendar) scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/{{urlencode config.calendarId}}/events?maxResults=50&singleEvents=true&orderBy=startTime&timeMin={{urlencode config.timeMin}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_CALENDAR_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "items": "items"
+        }
+      }
+    },
+    {
+      "id": "gcalendar.createEvent",
+      "label": "Google Calendar: Create Event",
+      "description": "Create an event on a Google Calendar via the Calendar v3 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google calendar event create meeting schedule appointment book invite",
+      "config": [
+        {
+          "key": "calendarId",
+          "label": "Calendar ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "primary"
+        },
+        {
+          "key": "summary",
+          "label": "Title",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "control": "textarea",
+          "required": false
+        },
+        {
+          "key": "start",
+          "label": "Start (RFC3339)",
+          "control": "text",
+          "required": true,
+          "placeholder": "2026-07-10T15:00:00Z"
+        },
+        {
+          "key": "end",
+          "label": "End (RFC3339)",
+          "control": "text",
+          "required": true,
+          "placeholder": "2026-07-10T16:00:00Z"
+        }
+      ],
+      "outputs": [
+        "id",
+        "htmlLink",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_CALENDAR_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/calendar.events scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/{{urlencode config.calendarId}}/events",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_CALENDAR_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"summary\": {{json config.summary}}, \"description\": {{json config.description}}, \"start\": {\"dateTime\": {{json config.start}}}, \"end\": {\"dateTime\": {{json config.end}}}}",
+        "outputMap": {
+          "id": "id",
+          "htmlLink": "htmlLink"
+        }
+      }
+    },
+    {
+      "id": "todoist.createTask",
+      "label": "Todoist: Create Task",
+      "description": "Create a task in Todoist via the REST v2 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "todoist task todo create add reminder due date checklist",
+      "config": [
+        {
+          "key": "content",
+          "label": "Task",
+          "control": "text",
+          "required": true,
+          "placeholder": "Buy milk"
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "control": "textarea",
+          "required": false
+        },
+        {
+          "key": "dueString",
+          "label": "Due",
+          "control": "text",
+          "required": false,
+          "placeholder": "tomorrow at 12:00",
+          "help": "Human-readable due date parsed by Todoist"
+        }
+      ],
+      "outputs": [
+        "id",
+        "url",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "TODOIST_API_TOKEN",
+          "help": "API token from Todoist Settings → Integrations → Developer"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.todoist.com/rest/v2/tasks",
+        "headers": {
+          "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"content\": {{json config.content}}, \"description\": {{json config.description}}, \"due_string\": {{json config.dueString}}}",
+        "outputMap": {
+          "id": "id",
+          "url": "url"
+        }
+      }
+    },
+    {
+      "id": "todoist.listTasks",
+      "label": "Todoist: List Tasks",
+      "description": "List all active (uncompleted) tasks via the Todoist REST v2 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "todoist tasks list todo active fetch read open items",
+      "config": [],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "TODOIST_API_TOKEN",
+          "help": "API token from Todoist Settings → Integrations → Developer"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.todoist.com/rest/v2/tasks",
+        "headers": {
+          "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}"
+        }
+      }
+    },
+    {
+      "id": "trello.createCard",
+      "label": "Trello: Create Card",
+      "description": "Create a card on a Trello list via the REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card create board list kanban task add ticket",
+      "config": [
+        {
+          "key": "listId",
+          "label": "List ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the list to add the card to"
+        },
+        {
+          "key": "name",
+          "label": "Card name",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "desc",
+          "label": "Description",
+          "control": "textarea",
+          "required": false
+        }
+      ],
+      "outputs": [
+        "id",
+        "url",
+        "shortUrl",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "TRELLO_API_KEY",
+          "help": "API key from trello.com/power-ups/admin"
+        },
+        {
+          "key": "TRELLO_API_TOKEN",
+          "help": "Member token authorized for your API key"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.trello.com/1/cards?idList={{urlencode config.listId}}&name={{urlencode config.name}}&desc={{urlencode config.desc}}&key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": {},
+        "outputMap": {
+          "id": "id",
+          "url": "url",
+          "shortUrl": "shortUrl"
+        }
+      }
+    },
+    {
+      "id": "trello.listCards",
+      "label": "Trello: List Cards",
+      "description": "List all cards on a Trello list via the REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello cards list board kanban fetch read tickets tasks",
+      "config": [
+        {
+          "key": "listId",
+          "label": "List ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the list to read cards from"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "TRELLO_API_KEY",
+          "help": "API key from trello.com/power-ups/admin"
+        },
+        {
+          "key": "TRELLO_API_TOKEN",
+          "help": "Member token authorized for your API key"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.trello.com/1/lists/{{config.listId}}/cards?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": {}
+      }
+    },
+    {
+      "id": "asana.createTask",
+      "label": "Asana: Create Task",
+      "description": "Create a task in an Asana project via the REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "asana task create project work item add assign todo",
+      "config": [
+        {
+          "key": "name",
+          "label": "Task name",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "control": "textarea",
+          "required": false
+        },
+        {
+          "key": "projectId",
+          "label": "Project GID",
+          "control": "text",
+          "required": true,
+          "help": "GID of the project to add the task to"
+        }
+      ],
+      "outputs": [
+        "gid",
+        "permalink_url",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "ASANA_ACCESS_TOKEN",
+          "help": "Personal access token from app.asana.com/0/developer-console"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://app.asana.com/api/1.0/tasks",
+        "headers": {
+          "Authorization": "Bearer {{credentials.ASANA_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"data\": {\"name\": {{json config.name}}, \"notes\": {{json config.notes}}, \"projects\": [{{json config.projectId}}]}}",
+        "outputMap": {
+          "gid": "data.gid",
+          "permalink_url": "data.permalink_url"
+        }
+      }
+    },
+    {
+      "id": "monday.createItem",
+      "label": "Monday.com: Create Item",
+      "description": "Create an item on a Monday.com board via the GraphQL API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "monday board item create task row project graphql work os add",
+      "config": [
+        {
+          "key": "boardId",
+          "label": "Board ID",
+          "control": "text",
+          "required": true,
+          "help": "Numeric board ID (visible in the board URL)"
+        },
+        {
+          "key": "itemName",
+          "label": "Item name",
+          "control": "text",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "id",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "MONDAY_API_TOKEN",
+          "help": "Personal API token from monday.com Admin → API (sent as the Authorization header)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "headers": {
+          "Authorization": "{{credentials.MONDAY_API_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"query\": \"mutation ($boardId: ID!, $itemName: String!) { create_item (board_id: $boardId, item_name: $itemName) { id } }\", \"variables\": {\"boardId\": {{json config.boardId}}, \"itemName\": {{json config.itemName}}}}",
+        "outputMap": {
+          "id": "data.create_item.id"
+        }
+      }
+    },
+    {
+      "id": "clickup.createTask",
+      "label": "ClickUp: Create Task",
+      "description": "Create a task in a ClickUp list via the v2 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup task create list project todo add work item ticket",
+      "config": [
+        {
+          "key": "listId",
+          "label": "List ID",
+          "control": "text",
+          "required": true,
+          "help": "Numeric ID of the list to create the task in"
+        },
+        {
+          "key": "name",
+          "label": "Task name",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "control": "textarea",
+          "required": false
+        }
+      ],
+      "outputs": [
+        "id",
+        "url",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "CLICKUP_API_TOKEN",
+          "help": "Personal API token (pk_…) from ClickUp Settings → Apps (sent as the Authorization header, no Bearer prefix)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.clickup.com/api/v2/list/{{config.listId}}/task",
+        "headers": {
+          "Authorization": "{{credentials.CLICKUP_API_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"name\": {{json config.name}}, \"description\": {{json config.description}}}",
+        "outputMap": {
+          "id": "id",
+          "url": "url"
+        }
+      }
+    },
+    {
+      "id": "calendly.listScheduledEvents",
+      "label": "Calendly: List Scheduled Events",
+      "description": "List scheduled events for a Calendly user via the v2 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "calendly scheduled events meetings bookings list calendar appointments fetch",
+      "config": [
+        {
+          "key": "userUri",
+          "label": "User URI",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://api.calendly.com/users/XXXXXXXX",
+          "help": "Your Calendly user URI — retrieve it once via GET https://api.calendly.com/users/me"
+        }
+      ],
+      "outputs": [
+        "collection",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "CALENDLY_API_TOKEN",
+          "help": "Personal access token from Calendly Integrations → API & Webhooks"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.calendly.com/scheduled_events?user={{urlencode config.userUri}}&count=20",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CALENDLY_API_TOKEN}}"
+        },
+        "outputMap": {
+          "collection": "collection"
+        }
+      }
+    }
+  ]
+}

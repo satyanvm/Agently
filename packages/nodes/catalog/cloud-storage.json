@@ -1,0 +1,724 @@
+{
+  "cluster": "cloud-storage",
+  "label": "Cloud & Storage",
+  "description": "File storage, object stores, key-value stores, gists and pastebins. AWS S3 and Backblaze B2 are intentionally omitted: SigV4 request signing and multi-step auth flows cannot be expressed as static headers in the http template runtime.",
+  "nodes": [
+    {
+      "id": "github.createGist",
+      "label": "GitHub: Create Gist",
+      "description": "Create a gist (single file) via the GitHub REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github gist create snippet share code paste file upload",
+      "config": [
+        {
+          "key": "filename",
+          "label": "Filename",
+          "control": "text",
+          "required": true,
+          "placeholder": "notes.md"
+        },
+        {
+          "key": "content",
+          "label": "File content",
+          "control": "textarea",
+          "required": true
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "control": "text",
+          "required": false
+        },
+        {
+          "key": "public",
+          "label": "Public",
+          "control": "text",
+          "required": true,
+          "placeholder": "false",
+          "help": "Literal true or false (rendered as an unquoted JSON boolean)"
+        }
+      ],
+      "outputs": [
+        "id",
+        "htmlUrl",
+        "status",
+        "body",
+        "html_url"
+      ],
+      "credentials": [
+        {
+          "key": "GITHUB_TOKEN",
+          "help": "Personal access token with the gist scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.github.com/gists",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
+          "Accept": "application/vnd.github+json",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"description\": {{json config.description}}, \"public\": {{config.public}}, \"files\": { {{json config.filename}}: {\"content\": {{json config.content}}} }}",
+        "outputMap": {
+          "id": "id",
+          "html_url": "htmlUrl"
+        }
+      }
+    },
+    {
+      "id": "github.getGist",
+      "label": "GitHub: Get Gist",
+      "description": "Fetch a gist (metadata and file contents) by ID via the GitHub REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github gist get fetch read snippet code file download",
+      "config": [
+        {
+          "key": "gistId",
+          "label": "Gist ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aa5a315d61ae9438b18d"
+        }
+      ],
+      "outputs": [
+        "description",
+        "htmlUrl",
+        "files",
+        "status",
+        "body",
+        "html_url"
+      ],
+      "credentials": [
+        {
+          "key": "GITHUB_TOKEN",
+          "help": "Personal access token (public gists work with any valid token; secret gists need the gist scope)"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/gists/{{config.gistId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
+          "Accept": "application/vnd.github+json"
+        },
+        "outputMap": {
+          "description": "description",
+          "html_url": "htmlUrl",
+          "files": "files"
+        }
+      }
+    },
+    {
+      "id": "dropbox.uploadFile",
+      "label": "Dropbox: Upload File",
+      "description": "Upload text content to a file in Dropbox via /2/files/upload (content endpoint, Dropbox-API-Arg header + octet-stream body).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "dropbox upload file save write put content storage cloud",
+      "config": [
+        {
+          "key": "path",
+          "label": "Path",
+          "control": "text",
+          "required": true,
+          "placeholder": "/reports/summary.txt",
+          "help": "Destination path in Dropbox, starting with /"
+        },
+        {
+          "key": "content",
+          "label": "File content",
+          "control": "textarea",
+          "required": true,
+          "help": "Text content to upload as the file body"
+        }
+      ],
+      "outputs": [
+        "name",
+        "pathDisplay",
+        "id",
+        "status",
+        "body",
+        "path_display"
+      ],
+      "credentials": [
+        {
+          "key": "DROPBOX_ACCESS_TOKEN",
+          "help": "OAuth access token with files.content.write scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://content.dropboxapi.com/2/files/upload",
+        "headers": {
+          "Authorization": "Bearer {{credentials.DROPBOX_ACCESS_TOKEN}}",
+          "Dropbox-API-Arg": "{\"path\": {{json config.path}}, \"mode\": \"overwrite\"}",
+          "Content-Type": "application/octet-stream"
+        },
+        "body": "{{config.content}}",
+        "outputMap": {
+          "name": "name",
+          "path_display": "pathDisplay",
+          "id": "id"
+        }
+      }
+    },
+    {
+      "id": "dropbox.listFolder",
+      "label": "Dropbox: List Folder",
+      "description": "List the contents of a Dropbox folder via /2/files/list_folder.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "dropbox list folder files directory browse contents storage",
+      "config": [
+        {
+          "key": "path",
+          "label": "Folder path",
+          "control": "text",
+          "required": false,
+          "placeholder": "/reports",
+          "help": "Folder path starting with /; leave empty for the root folder"
+        }
+      ],
+      "outputs": [
+        "entries",
+        "hasMore",
+        "status",
+        "body",
+        "has_more"
+      ],
+      "credentials": [
+        {
+          "key": "DROPBOX_ACCESS_TOKEN",
+          "help": "OAuth access token with files.metadata.read scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.dropboxapi.com/2/files/list_folder",
+        "headers": {
+          "Authorization": "Bearer {{credentials.DROPBOX_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"path\": {{json config.path}}}",
+        "outputMap": {
+          "entries": "entries",
+          "has_more": "hasMore"
+        }
+      }
+    },
+    {
+      "id": "dropbox.downloadFile",
+      "label": "Dropbox: Download File",
+      "description": "Download a file's contents from Dropbox via /2/files/download (content endpoint; raw file bytes returned in body).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "dropbox download file read get fetch content storage",
+      "config": [
+        {
+          "key": "path",
+          "label": "Path",
+          "control": "text",
+          "required": true,
+          "placeholder": "/reports/summary.txt"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "DROPBOX_ACCESS_TOKEN",
+          "help": "OAuth access token with files.content.read scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://content.dropboxapi.com/2/files/download",
+        "headers": {
+          "Authorization": "Bearer {{credentials.DROPBOX_ACCESS_TOKEN}}",
+          "Dropbox-API-Arg": "{\"path\": {{json config.path}}}"
+        }
+      }
+    },
+    {
+      "id": "gdrive.listFiles",
+      "label": "Google Drive: List Files",
+      "description": "List files in Google Drive via the Drive v3 API, optionally filtered by a query.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive list files search folder documents storage cloud",
+      "config": [
+        {
+          "key": "query",
+          "label": "Query",
+          "control": "text",
+          "required": false,
+          "placeholder": "name contains 'report'",
+          "help": "Drive search query (q parameter); leave empty to list all accessible files"
+        }
+      ],
+      "outputs": [
+        "files",
+        "nextPageToken",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth 2.0 access token with a Drive scope (e.g. drive.readonly). This platform does not perform an OAuth flow — you must supply a valid, typically short-lived, user access token obtained externally (e.g. via Google's OAuth 2.0 Playground)."
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files?q={{urlencode config.query}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
+        },
+        "outputMap": {
+          "files": "files",
+          "nextPageToken": "nextPageToken"
+        }
+      }
+    },
+    {
+      "id": "gdrive.getFileMetadata",
+      "label": "Google Drive: Get File Metadata",
+      "description": "Fetch metadata (id, name, mimeType) for a Drive file by ID via the Drive v3 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive file metadata get info name mimetype id",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "1a2B3c4D5e…"
+        }
+      ],
+      "outputs": [
+        "id",
+        "name",
+        "mimeType",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth 2.0 access token with a Drive scope. This platform does not perform an OAuth flow — you must supply a valid, typically short-lived, user access token obtained externally (e.g. via Google's OAuth 2.0 Playground)."
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/{{config.fileId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "mimeType": "mimeType"
+        }
+      }
+    },
+    {
+      "id": "supabase.uploadObject",
+      "label": "Supabase Storage: Upload Object",
+      "description": "Upload text content to a Supabase Storage bucket via the Storage API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase storage upload object file bucket save write put",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://xyzcompany.supabase.co",
+          "help": "Your Supabase project URL (no trailing slash)"
+        },
+        {
+          "key": "bucket",
+          "label": "Bucket",
+          "control": "text",
+          "required": true,
+          "placeholder": "avatars"
+        },
+        {
+          "key": "path",
+          "label": "Object path",
+          "control": "text",
+          "required": true,
+          "placeholder": "reports/summary.txt"
+        },
+        {
+          "key": "content",
+          "label": "Content",
+          "control": "textarea",
+          "required": true,
+          "help": "Text content to store as the object body"
+        }
+      ],
+      "outputs": [
+        "key",
+        "status",
+        "body",
+        "Key"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role key (secret; bypasses RLS) or an anon key permitted by your storage policies"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.projectUrl}}/storage/v1/object/{{config.bucket}}/{{config.path}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/octet-stream",
+          "x-upsert": "true"
+        },
+        "body": "{{config.content}}",
+        "outputMap": {
+          "Key": "key"
+        }
+      }
+    },
+    {
+      "id": "supabase.listObjects",
+      "label": "Supabase Storage: List Objects",
+      "description": "List objects in a Supabase Storage bucket, optionally under a prefix.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase storage list objects files bucket browse prefix",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://xyzcompany.supabase.co",
+          "help": "Your Supabase project URL (no trailing slash)"
+        },
+        {
+          "key": "bucket",
+          "label": "Bucket",
+          "control": "text",
+          "required": true,
+          "placeholder": "avatars"
+        },
+        {
+          "key": "prefix",
+          "label": "Prefix",
+          "control": "text",
+          "required": false,
+          "placeholder": "reports/",
+          "help": "Folder prefix to list; leave empty for the bucket root"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role key (secret; bypasses RLS) or an anon key permitted by your storage policies"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.projectUrl}}/storage/v1/object/list/{{config.bucket}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"prefix\": {{json config.prefix}}, \"limit\": 100}"
+      }
+    },
+    {
+      "id": "supabase.selectRows",
+      "label": "Supabase: Select Rows",
+      "description": "Query rows from a Supabase Postgres table via the PostgREST /rest/v1 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres database select query rows read table postgrest",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://xyzcompany.supabase.co",
+          "help": "Your Supabase project URL (no trailing slash)"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "control": "text",
+          "required": true,
+          "placeholder": "todos"
+        },
+        {
+          "key": "select",
+          "label": "Columns",
+          "control": "text",
+          "required": true,
+          "placeholder": "*",
+          "help": "PostgREST select list, e.g. * or id,name,created_at"
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "control": "text",
+          "required": false,
+          "placeholder": "status=eq.done",
+          "help": "Optional PostgREST filter query string, e.g. id=eq.1 or status=eq.done&limit=10 (appended verbatim)"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role key (secret; bypasses RLS) or an anon key subject to your row-level-security policies"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{config.projectUrl}}/rest/v1/{{config.table}}?select={{urlencode config.select}}&{{config.filter}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}"
+        }
+      }
+    },
+    {
+      "id": "supabase.insertRow",
+      "label": "Supabase: Insert Row",
+      "description": "Insert a row into a Supabase Postgres table via the PostgREST /rest/v1 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres database insert row create record table write postgrest",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://xyzcompany.supabase.co",
+          "help": "Your Supabase project URL (no trailing slash)"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "control": "text",
+          "required": true,
+          "placeholder": "todos"
+        },
+        {
+          "key": "row",
+          "label": "Row (JSON)",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "{\"task\": \"buy milk\", \"done\": false}",
+          "help": "A JSON object of column values, sent verbatim as the request body"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role key (secret; bypasses RLS) or an anon key subject to your row-level-security policies"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.projectUrl}}/rest/v1/{{config.table}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        "body": "{{config.row}}"
+      }
+    },
+    {
+      "id": "cloudflarekv.writeKey",
+      "label": "Cloudflare KV: Write Key",
+      "description": "Write a value to a Cloudflare Workers KV namespace key via the Cloudflare v4 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "cloudflare kv key value write put store workers namespace cache",
+      "config": [
+        {
+          "key": "accountId",
+          "label": "Account ID",
+          "control": "text",
+          "required": true,
+          "help": "Cloudflare account ID (dashboard → Workers & Pages → overview sidebar)"
+        },
+        {
+          "key": "namespaceId",
+          "label": "Namespace ID",
+          "control": "text",
+          "required": true,
+          "help": "KV namespace ID"
+        },
+        {
+          "key": "key",
+          "label": "Key",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "value",
+          "label": "Value",
+          "control": "textarea",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "success",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "CLOUDFLARE_API_TOKEN",
+          "help": "API token with Workers KV Storage Edit permission"
+        }
+      ],
+      "http": {
+        "method": "PUT",
+        "url": "https://api.cloudflare.com/client/v4/accounts/{{config.accountId}}/storage/kv/namespaces/{{config.namespaceId}}/values/{{urlencode config.key}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLOUDFLARE_API_TOKEN}}",
+          "Content-Type": "text/plain"
+        },
+        "body": "{{config.value}}",
+        "outputMap": {
+          "success": "success"
+        }
+      }
+    },
+    {
+      "id": "cloudflarekv.readKey",
+      "label": "Cloudflare KV: Read Key",
+      "description": "Read a value from a Cloudflare Workers KV namespace key via the Cloudflare v4 API (raw value returned in body).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "cloudflare kv key value read get fetch workers namespace cache",
+      "config": [
+        {
+          "key": "accountId",
+          "label": "Account ID",
+          "control": "text",
+          "required": true,
+          "help": "Cloudflare account ID"
+        },
+        {
+          "key": "namespaceId",
+          "label": "Namespace ID",
+          "control": "text",
+          "required": true,
+          "help": "KV namespace ID"
+        },
+        {
+          "key": "key",
+          "label": "Key",
+          "control": "text",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "CLOUDFLARE_API_TOKEN",
+          "help": "API token with Workers KV Storage Read permission"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.cloudflare.com/client/v4/accounts/{{config.accountId}}/storage/kv/namespaces/{{config.namespaceId}}/values/{{urlencode config.key}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLOUDFLARE_API_TOKEN}}"
+        }
+      }
+    },
+    {
+      "id": "file.publicUrlFetch",
+      "label": "File: Fetch Public URL",
+      "description": "Fetch a file from any public URL — e.g. a public S3/GCS/R2 bucket object or a raw file link. Note: private S3 objects require SigV4 request signing, which is not supported by the http template runtime; only publicly readable URLs work here.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "file fetch download url public s3 bucket object http get raw",
+      "config": [
+        {
+          "key": "url",
+          "label": "URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://my-bucket.s3.amazonaws.com/path/file.json",
+          "help": "A publicly readable URL; no auth is sent"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "{{config.url}}"
+      }
+    },
+    {
+      "id": "pasters.createPaste",
+      "label": "paste.rs: Create Paste",
+      "description": "Create a paste on paste.rs (keyless); the paste URL is returned in the response body.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "paste pastebin share text snippet create keyless simple",
+      "config": [
+        {
+          "key": "content",
+          "label": "Content",
+          "control": "textarea",
+          "required": true
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "https://paste.rs/",
+        "headers": {
+          "Content-Type": "text/plain"
+        },
+        "body": "{{config.content}}"
+      }
+    }
+  ]
+}

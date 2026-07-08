@@ -1,0 +1,199 @@
+{
+  "cluster": "builtin",
+  "label": "Core",
+  "description": "Code-backed platform primitives: triggers, agents, generic tools, control flow, outputs. Executed by apps/reasoner/reasoner/nodes.py, not the generic integration runtime.",
+  "nodes": [
+    {
+      "id": "trigger.manual",
+      "label": "Manual trigger",
+      "description": "Start the workflow on demand; seeds the run input downstream.",
+      "kind": "trigger",
+      "runtime": "builtin",
+      "search": "start manual run on demand trigger begin",
+      "config": [],
+      "outputs": ["input"],
+      "credentials": []
+    },
+    {
+      "id": "trigger.webhook",
+      "label": "Webhook trigger",
+      "description": "Start the workflow from an incoming HTTP request.",
+      "kind": "trigger",
+      "runtime": "builtin",
+      "search": "webhook http trigger incoming event start",
+      "config": [{ "key": "path", "label": "Path", "control": "text", "required": false, "placeholder": "/hooks/my-workflow" }],
+      "outputs": ["input"],
+      "credentials": []
+    },
+    {
+      "id": "trigger.schedule",
+      "label": "Schedule trigger",
+      "description": "Run on a cron schedule (e.g. every weekday at 9am).",
+      "kind": "trigger",
+      "runtime": "builtin",
+      "search": "schedule cron daily hourly recurring timer trigger",
+      "config": [{ "key": "cron", "label": "Cron", "control": "text", "required": false, "placeholder": "0 9 * * 1-5" }],
+      "outputs": ["input"],
+      "credentials": []
+    },
+    {
+      "id": "agent.llm",
+      "label": "AI agent",
+      "description": "Reason over upstream outputs with a large language model. The workhorse for research, synthesis, extraction, transformation and summarization.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "ai llm agent reason summarize synthesize extract classify write analyze transform parse",
+      "config": [
+        { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true, "help": "Supports {{input.x}} and {{outputs.key.field}}" },
+        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] }
+      ],
+      "outputs": ["text", "model"],
+      "credentials": []
+    },
+    {
+      "id": "agent.chat",
+      "label": "Chat completion",
+      "description": "Single-turn prompt → response, no tool use.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "chat completion single turn prompt response llm",
+      "config": [
+        { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
+        { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true },
+        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] }
+      ],
+      "outputs": ["text", "model"],
+      "credentials": []
+    },
+    {
+      "id": "tool.browser",
+      "label": "Browser",
+      "description": "Drive a real browser: navigate URLs and extract page text. For JS-heavy or auth-walled sites a plain HTTP request can't read.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "browser navigate scrape extract page web visit javascript render click",
+      "config": [{ "key": "urls", "label": "URLs (one per line)", "control": "textarea", "required": true, "placeholder": "https://example.com" }],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "tool.http",
+      "label": "HTTP request",
+      "description": "Call any REST API or fetch any URL. The universal escape hatch for data sources without a dedicated node.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "http api rest get post fetch request call url json rss feed",
+      "config": [
+        { "key": "method", "label": "Method", "control": "select", "required": false, "options": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        { "key": "url", "label": "URL", "control": "text", "required": true },
+        { "key": "headers", "label": "Headers (JSON)", "control": "textarea", "required": false },
+        { "key": "body", "label": "Body", "control": "textarea", "required": false }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": []
+    },
+    {
+      "id": "tool.code",
+      "label": "Run code",
+      "description": "Execute a Python or JavaScript snippet in a sandboxed subprocess. Upstream outputs and run input arrive as JSON on stdin. Requires TOOL_CODE_ENABLED=1; otherwise the code is recorded, not executed.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "code python javascript execute script transform parse compute csv json convert",
+      "config": [
+        { "key": "language", "label": "Language", "control": "select", "required": true, "options": ["python", "javascript"] },
+        { "key": "source", "label": "Source", "control": "textarea", "required": true, "help": "stdin = {\"input\": …, \"outputs\": …}; print a JSON object to emit fields" }
+      ],
+      "outputs": ["result", "stdout", "executed"],
+      "credentials": []
+    },
+    {
+      "id": "tool.db",
+      "label": "Database query",
+      "description": "Run SQL against the operator-configured TOOL_DB_URL database. Without TOOL_DB_URL the query is recorded, not executed. Never touches the platform database.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "database sql query select insert postgres rows",
+      "config": [{ "key": "query", "label": "SQL", "control": "textarea", "required": true }],
+      "outputs": ["rows", "rowCount", "executed"],
+      "credentials": [{ "key": "TOOL_DB_URL", "help": "Postgres URL of the user-facing database this node may query" }],
+      "http": null
+    },
+    {
+      "id": "logic.branch",
+      "label": "If / Else",
+      "description": "Gate: evaluate a condition; when false, the entire downstream subgraph is skipped.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "if else branch condition gate compare decide",
+      "config": [{ "key": "condition", "label": "Condition", "control": "text", "required": true, "placeholder": "outputs.fetch.status == 200" }],
+      "outputs": ["passed", "condition"],
+      "credentials": []
+    },
+    {
+      "id": "logic.filter",
+      "label": "Filter",
+      "description": "Gate: pass the flow through only when the condition holds; otherwise skip downstream.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "filter condition keep when rule gate",
+      "config": [{ "key": "condition", "label": "Keep when", "control": "text", "required": true }],
+      "outputs": ["passed", "condition"],
+      "credentials": []
+    },
+    {
+      "id": "logic.loop",
+      "label": "Loop",
+      "description": "Fan out: resolve a list and run the downstream branch once per item. Inside the body, {{item}} is the current element and {{loop.<key>.index}} the position; collected results appear as outputs.<key>.results.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "loop foreach iterate items map fan out each repeat",
+      "config": [{ "key": "items", "label": "Items expression", "control": "text", "required": true, "placeholder": "outputs.fetch.items" }],
+      "outputs": ["items", "count", "results"],
+      "credentials": []
+    },
+    {
+      "id": "output.email",
+      "label": "Send email",
+      "description": "Deliver an email over the platform SMTP seam; records intent when SMTP is unconfigured.",
+      "kind": "output",
+      "runtime": "builtin",
+      "search": "email send mail deliver notify digest smtp",
+      "config": [
+        { "key": "to", "label": "To", "control": "text", "required": true },
+        { "key": "subject", "label": "Subject", "control": "text", "required": false },
+        { "key": "body", "label": "Body", "control": "textarea", "required": false, "help": "Defaults to the most recent upstream text output" }
+      ],
+      "outputs": ["delivered", "channel", "to"],
+      "credentials": []
+    },
+    {
+      "id": "output.slack",
+      "label": "Send to Slack",
+      "description": "Post a message to a Slack incoming webhook; records intent when unconfigured.",
+      "kind": "output",
+      "runtime": "builtin",
+      "search": "slack post webhook message notify output",
+      "config": [
+        { "key": "webhookUrl", "label": "Webhook URL", "control": "text", "required": false },
+        { "key": "message", "label": "Message", "control": "textarea", "required": false }
+      ],
+      "outputs": ["delivered", "channel"],
+      "credentials": []
+    },
+    {
+      "id": "output.report",
+      "label": "Generate report",
+      "description": "Compose a markdown or PDF report artifact from upstream text.",
+      "kind": "output",
+      "runtime": "builtin",
+      "search": "report artifact markdown pdf compose document digest",
+      "config": [
+        { "key": "title", "label": "Title", "control": "text", "required": true },
+        { "key": "format", "label": "Format", "control": "select", "required": false, "options": ["markdown", "pdf"] }
+      ],
+      "outputs": ["title", "format"],
+      "credentials": []
+    }
+  ]
+}
