@@ -116,9 +116,21 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	// Created as QUEUED: the control plane (this API) only enqueues; the data
 	// plane (worker) claims it via claim_next_run() and drives execution. The old
 	// flow marked it RUNNING here because there was no worker — that's now wrong.
+	//
+	// Engine: an explicit request wins; otherwise route by the graph itself.
+	// TYPED graphs (every node carries a catalog type — the compiler and the
+	// visual builder both emit these) can only be interpreted by the Temporal
+	// reasoner's dynamic engine. Legacy untyped digest graphs keep the native
+	// Go worker.
 	engine := input.Engine
 	if engine == "" {
-		engine = "native"
+		var nodes []domain.GraphNode
+		if wf.CurrentVersionID != nil {
+			if version, ok := s.deps.Repos.Versions.GetByID(*wf.CurrentVersionID); ok {
+				nodes = version.Nodes
+			}
+		}
+		engine = engineForNodes(nodes)
 	}
 	queuedStep := "Queued"
 	if engine == "temporal" {
@@ -199,6 +211,19 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	})
 
 	return s.detail(run), nil
+}
+
+// engineForNodes routes a run to its execution plane: any typed node means the
+// Temporal reasoner (the only engine that interprets catalog node types); a legacy
+// untyped digest graph keeps the native Go worker. Mirrors the dispatcher's
+// dynamic-vs-static split on the reasoner side.
+func engineForNodes(nodes []domain.GraphNode) string {
+	for _, n := range nodes {
+		if n.Type != "" {
+			return "temporal"
+		}
+	}
+	return "native"
 }
 
 // Cancel requests cancellation of a non-terminal run.

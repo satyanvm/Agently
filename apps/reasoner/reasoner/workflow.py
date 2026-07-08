@@ -89,11 +89,17 @@ class DynamicWorkflow:
         # 2) Drive the deterministic loop; each node is its own activity.
         outputs: dict[str, dict[str, Any]] = {}
         skipped: set[str] = set()
+        fanned_out: set[str] = set()  # loop-body nodes run by the fan-out below
         done = 0
         for node in ordered:
             key = node["key"]
             agent_id = agent_ids[key]
             deps = list(node.get("dependsOn") or [])
+
+            if key in fanned_out:
+                done += 1
+                await self._progress(run_id, done, total, f"Ran {key} (loop body)")
+                continue
 
             # Pruned by an upstream gate (directly, or all deps skipped).
             if plan.should_skip(node, skipped):
@@ -141,6 +147,71 @@ class DynamicWorkflow:
                 return {"run_id": run_id, "done": False, "failed_node": key}
 
             outputs[key] = result.output or {}
+
+            # logic.loop: fan its dominated body out once per item, each body-node
+            # execution its own durable activity. The items list is part of this
+            # loop node's activity result, so a replay reconstructs the identical
+            # fan-out from history — the workflow stays deterministic.
+            if str(node.get("type", "")) == "logic.loop":
+                body_keys = plan.loop_body(key, ordered, dependents)
+                fanned_out.update(body_keys)
+                by_key = {n["key"]: n for n in ordered}
+                items = list(outputs[key].get("items") or [])
+                results: list[Any] = []
+                loop_failed = False
+                for idx, item in enumerate(items):
+                    extra = {"item": item, "loop": {key: {"index": idx}}}
+                    iter_outputs: dict[str, dict[str, Any]] = {}
+                    iter_skipped: set[str] = set()
+                    for bkey in body_keys:
+                        if bkey in iter_skipped:
+                            continue
+                        bnode = by_key[bkey]
+                        bdeps = list(bnode.get("dependsOn") or [])
+                        bupstream = {
+                            dep: (iter_outputs.get(dep) if dep in iter_outputs else outputs.get(dep, {}))
+                            for dep in bdeps
+                        }
+                        bresult = await workflow.execute_activity(
+                            activities.run_node,
+                            activities.RunNodeInput(
+                                run_id=run_id, node=bnode, agent_id=agent_ids[bkey],
+                                upstream=bupstream, run_input=run_input, extra=extra,
+                            ),
+                            start_to_close_timeout=_NODE_TIMEOUT,
+                            retry_policy=_NODE_RETRY,
+                        )
+                        if bresult.failed:
+                            await workflow.execute_activity(
+                                activities.finish_run,
+                                activities.FinishInput(run_id=run_id, status="failed", step="Failed", error=bresult.error),
+                                start_to_close_timeout=_IO_TIMEOUT,
+                                retry_policy=_NODE_RETRY,
+                            )
+                            loop_failed = True
+                            break
+                        iter_outputs[bkey] = bresult.output or {}
+                        if not bresult.gate_open:
+                            for pruned in plan.descendants(bkey, dependents):
+                                if pruned in body_keys:
+                                    iter_skipped.add(pruned)
+                    if loop_failed:
+                        return {"run_id": run_id, "done": False, "failed_node": key}
+                    outputs.update(iter_outputs)
+                    if len(iter_outputs) == 1:
+                        results.append(next(iter(iter_outputs.values())))
+                    else:
+                        results.append(iter_outputs)
+                outputs[key]["results"] = results
+                if not items:
+                    for bkey in body_keys:
+                        await workflow.execute_activity(
+                            activities.skip_node,
+                            activities.SkipNodeInput(run_id=run_id, agent_id=agent_ids[bkey], key=bkey),
+                            start_to_close_timeout=_IO_TIMEOUT,
+                            retry_policy=_NODE_RETRY,
+                        )
+                        outputs[bkey] = {"skipped": True}
 
             # Gate whose condition was false → prune its downstream subgraph.
             if not result.gate_open:

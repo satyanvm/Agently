@@ -156,7 +156,7 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	wf := domain.Workflow{
 		ID: wfID, WorkspaceID: s.deps.Repos.Workspace.Get().ID, Slug: slug,
 		Name: name, Description: description, Trigger: trigger, Schedule: plan.Schedule,
-		Tags: tags, OwnerID: ownerID, AgentCount: countFetchersAndEditor(plan.Nodes),
+		Tags: tags, OwnerID: ownerID, AgentCount: len(plan.Nodes),
 		CurrentVersionID: nil, DefaultInput: plan.DefaultInput,
 		CreatedAt: now, UpdatedAt: now, ArchivedAt: nil,
 	}
@@ -249,8 +249,6 @@ func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (doma
 	return s.ToSummary(wf), nil
 }
 
-// countFetchersAndEditor is just len(nodes), named for intent at the call site.
-func countFetchersAndEditor(nodes []domain.GraphNode) int { return len(nodes) }
 
 // uniqueSlug returns base if free, else base-2, base-3, … so Create never fails on a
 // slug collision. Bounded so a pathological case can't loop forever.

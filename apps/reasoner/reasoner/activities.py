@@ -54,6 +54,8 @@ class RunNodeInput:
     agent_id: str
     upstream: dict[str, dict]
     run_input: dict[str, Any]
+    # Loop fan-out template roots ({"item": …, "loop": {…}}); empty otherwise.
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,7 +136,7 @@ async def run_node(inp: RunNodeInput) -> RunNodeResult:
     """
     try:
         result = await engine.execute_one_node(
-            inp.run_id, inp.node, inp.agent_id, inp.upstream, inp.run_input
+            inp.run_id, inp.node, inp.agent_id, inp.upstream, inp.run_input, extra=inp.extra
         )
     except Exception as exc:  # noqa: BLE001 — surface as data, not an activity crash
         await db.set_agent_status(inp.agent_id, "failed", summary=str(exc)[:280])

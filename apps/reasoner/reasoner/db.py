@@ -37,6 +37,30 @@ async def _conn() -> AsyncIterator[psycopg.AsyncConnection]:
         await conn.close()
 
 
+# ─────────────────────────── tool.db (user database) ───────────────────────────
+
+async def run_tool_query(url: str, query: str, max_rows: int = 200) -> tuple[list[dict[str, Any]], int]:
+    """Execute SQL against the DEDICATED tool database (TOOL_DB_URL).
+
+    This is the ONLY function in this module that connects anywhere other than the
+    platform Postgres — deliberately parameterized so tool.db can never touch
+    CONFIG.database_url. Row values are stringified for JSON-safety; result size is
+    capped so a SELECT * on a huge table can't blow up node output.
+    """
+    conn = await psycopg.AsyncConnection.connect(url, autocommit=True)
+    try:
+        cur = await conn.execute(query)  # type: ignore[arg-type] — user SQL by design
+        if cur.description is None:  # INSERT/UPDATE/DDL: no result set
+            affected = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            return [], affected
+        cols = [d.name for d in cur.description]
+        rows = await cur.fetchmany(max_rows)
+        out = [{c: (v if isinstance(v, (str, int, float, bool, type(None))) else str(v)) for c, v in zip(cols, r)} for r in rows]
+        return out, len(out)
+    finally:
+        await conn.close()
+
+
 # ─────────────────────────── dispatch (claim) ───────────────────────────
 
 async def claim_queued_temporal_runs(limit: int = 10) -> list[dict[str, Any]]:

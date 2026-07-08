@@ -316,8 +316,10 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
-	// Engine selects the execution plane: "native" (default, the in-house Go
-	// worker) or "temporal" (the Temporal + LangGraph reasoner).
+	// Engine selects the execution plane: "native" (the in-house Go worker) or
+	// "temporal" (the Temporal + LangGraph reasoner). Empty means AUTO — the run
+	// service routes by the workflow's graph (typed nodes → temporal, legacy
+	// untyped digests → native). An explicit value always wins.
 	Engine string
 }
 
@@ -332,10 +334,9 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	v.enumValue("trigger", trigger, domain.ValidTriggerTypes)
 
 	engine := getString(body, "engine")
-	if engine == "" {
-		engine = "native"
+	if engine != "" {
+		v.enumValue("engine", engine, validEngines)
 	}
-	v.enumValue("engine", engine, validEngines)
 
 	out := LaunchRunInput{
 		Input:   getMap(body, "input"),

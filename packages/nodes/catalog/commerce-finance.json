@@ -1,0 +1,320 @@
+{
+  "cluster": "commerce-finance",
+  "label": "Commerce & Finance",
+  "description": "Payments, e-commerce, stocks, forex and crypto market data services.",
+  "nodes": [
+    {
+      "id": "stripe.listCharges",
+      "label": "Stripe: List Charges",
+      "description": "List recent charges on your Stripe account.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe charges payments list transactions billing card revenue",
+      "config": [
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "10", "help": "Number of charges to return (1-100)" }
+      ],
+      "outputs": ["data", "has_more", "status", "body"],
+      "credentials": [{ "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/charges?limit={{urlencode config.limit}}",
+        "headers": { "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}" },
+        "outputMap": { "data": "data", "has_more": "has_more" }
+      }
+    },
+    {
+      "id": "stripe.createPaymentLink",
+      "label": "Stripe: Create Payment Link",
+      "description": "Create a shareable payment link for an existing Stripe Price.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe payment link checkout sell invoice pay url create",
+      "config": [
+        { "key": "priceId", "label": "Price ID", "control": "text", "required": true, "placeholder": "price_1ABC…", "help": "ID of an existing Stripe Price object" },
+        { "key": "quantity", "label": "Quantity", "control": "text", "required": true, "placeholder": "1" }
+      ],
+      "outputs": ["id", "url", "status", "body"],
+      "credentials": [{ "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/payment_links",
+        "headers": { "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}", "Content-Type": "application/x-www-form-urlencoded" },
+        "body": "line_items[0][price]={{urlencode config.priceId}}&line_items[0][quantity]={{urlencode config.quantity}}",
+        "outputMap": { "id": "id", "url": "url" }
+      }
+    },
+    {
+      "id": "stripe.listCustomers",
+      "label": "Stripe: List Customers",
+      "description": "List customers on your Stripe account.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe customers list billing accounts users buyers",
+      "config": [
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "10", "help": "Number of customers to return (1-100)" }
+      ],
+      "outputs": ["data", "has_more", "status", "body"],
+      "credentials": [{ "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/customers?limit={{urlencode config.limit}}",
+        "headers": { "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}" },
+        "outputMap": { "data": "data", "has_more": "has_more" }
+      }
+    },
+    {
+      "id": "stripe.getBalance",
+      "label": "Stripe: Get Balance",
+      "description": "Retrieve the current available and pending balance of your Stripe account.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe balance available pending funds payout money account",
+      "config": [],
+      "outputs": ["available", "pending", "status", "body"],
+      "credentials": [{ "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/balance",
+        "headers": { "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}" },
+        "outputMap": { "available": "available", "pending": "pending" }
+      }
+    },
+    {
+      "id": "shopify.listOrders",
+      "label": "Shopify: List Orders",
+      "description": "List orders from a Shopify store via the Admin REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "shopify orders list ecommerce store sales fulfillment shop",
+      "config": [
+        { "key": "shopDomain", "label": "Shop domain", "control": "text", "required": true, "placeholder": "your-store.myshopify.com" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "50", "help": "Number of orders to return (1-250)" }
+      ],
+      "outputs": ["orders", "status", "body"],
+      "credentials": [{ "key": "SHOPIFY_ACCESS_TOKEN", "help": "Admin API access token (shpat_…) with read_orders scope" }],
+      "http": {
+        "method": "GET",
+        "url": "https://{{config.shopDomain}}/admin/api/2024-07/orders.json?status=any&limit={{urlencode config.limit}}",
+        "headers": { "X-Shopify-Access-Token": "{{credentials.SHOPIFY_ACCESS_TOKEN}}" },
+        "outputMap": { "orders": "orders" }
+      }
+    },
+    {
+      "id": "shopify.listProducts",
+      "label": "Shopify: List Products",
+      "description": "List products from a Shopify store via the Admin REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "shopify products list catalog inventory ecommerce store items",
+      "config": [
+        { "key": "shopDomain", "label": "Shop domain", "control": "text", "required": true, "placeholder": "your-store.myshopify.com" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "50", "help": "Number of products to return (1-250)" }
+      ],
+      "outputs": ["products", "status", "body"],
+      "credentials": [{ "key": "SHOPIFY_ACCESS_TOKEN", "help": "Admin API access token (shpat_…) with read_products scope" }],
+      "http": {
+        "method": "GET",
+        "url": "https://{{config.shopDomain}}/admin/api/2024-07/products.json?limit={{urlencode config.limit}}",
+        "headers": { "X-Shopify-Access-Token": "{{credentials.SHOPIFY_ACCESS_TOKEN}}" },
+        "outputMap": { "products": "products" }
+      }
+    },
+    {
+      "id": "coingecko.getSimplePrice",
+      "label": "CoinGecko: Get Price",
+      "description": "Get current prices for one or more cryptocurrencies in chosen fiat currencies (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "coingecko crypto price bitcoin ethereum coin usd value current",
+      "config": [
+        { "key": "ids", "label": "Coin IDs", "control": "text", "required": true, "placeholder": "bitcoin,ethereum", "help": "Comma-separated CoinGecko coin IDs" },
+        { "key": "vsCurrencies", "label": "Vs currencies", "control": "text", "required": true, "placeholder": "usd,eur", "help": "Comma-separated fiat/crypto currency codes" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids={{urlencode config.ids}}&vs_currencies={{urlencode config.vsCurrencies}}"
+      }
+    },
+    {
+      "id": "coingecko.getTrending",
+      "label": "CoinGecko: Trending Coins",
+      "description": "Get the top trending coins on CoinGecko in the last 24 hours (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "coingecko trending crypto coins popular hot search top",
+      "config": [],
+      "outputs": ["coins", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/search/trending",
+        "outputMap": { "coins": "coins" }
+      }
+    },
+    {
+      "id": "coingecko.getCoinMarkets",
+      "label": "CoinGecko: Coin Market Data",
+      "description": "Get market data (price, market cap, volume, 24h change) for coins, ranked by market cap (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "coingecko crypto market cap volume rank coins data list change",
+      "config": [
+        { "key": "vsCurrency", "label": "Vs currency", "control": "text", "required": true, "placeholder": "usd" },
+        { "key": "ids", "label": "Coin IDs", "control": "text", "required": false, "placeholder": "bitcoin,ethereum", "help": "Comma-separated coin IDs; leave empty for top coins by market cap" },
+        { "key": "perPage", "label": "Results per page", "control": "text", "required": true, "placeholder": "10", "help": "1-250" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency={{urlencode config.vsCurrency}}&ids={{urlencode config.ids}}&per_page={{urlencode config.perPage}}&page=1"
+      }
+    },
+    {
+      "id": "alphavantage.getQuote",
+      "label": "Alpha Vantage: Stock Quote",
+      "description": "Get the latest price and volume for a stock ticker via Alpha Vantage GLOBAL_QUOTE.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "alpha vantage stock quote price ticker equity shares market latest",
+      "config": [
+        { "key": "symbol", "label": "Symbol", "control": "text", "required": true, "placeholder": "AAPL" }
+      ],
+      "outputs": ["quote", "status", "body"],
+      "credentials": [{ "key": "ALPHAVANTAGE_API_KEY", "help": "Free API key from alphavantage.co" }],
+      "http": {
+        "method": "GET",
+        "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={{urlencode config.symbol}}&apikey={{urlencode credentials.ALPHAVANTAGE_API_KEY}}",
+        "outputMap": { "quote": "Global Quote" }
+      }
+    },
+    {
+      "id": "alphavantage.getDailySeries",
+      "label": "Alpha Vantage: Daily Time Series",
+      "description": "Get daily open/high/low/close/volume history for a stock ticker via Alpha Vantage TIME_SERIES_DAILY.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "alpha vantage stock daily history time series ohlc chart candles",
+      "config": [
+        { "key": "symbol", "label": "Symbol", "control": "text", "required": true, "placeholder": "MSFT" },
+        { "key": "outputSize", "label": "Output size", "control": "text", "required": true, "placeholder": "compact", "help": "compact (latest 100 points) or full (20+ years)" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "ALPHAVANTAGE_API_KEY", "help": "Free API key from alphavantage.co" }],
+      "http": {
+        "method": "GET",
+        "url": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={{urlencode config.symbol}}&outputsize={{urlencode config.outputSize}}&apikey={{urlencode credentials.ALPHAVANTAGE_API_KEY}}"
+      }
+    },
+    {
+      "id": "frankfurter.getRates",
+      "label": "Frankfurter: Exchange Rates",
+      "description": "Get latest foreign exchange rates from the ECB via the free Frankfurter API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "frankfurter forex exchange rate currency convert fx euro dollar free",
+      "config": [
+        { "key": "base", "label": "Base currency", "control": "text", "required": true, "placeholder": "USD" },
+        { "key": "symbols", "label": "Target currencies", "control": "text", "required": true, "placeholder": "EUR,GBP,JPY", "help": "Comma-separated ISO currency codes" }
+      ],
+      "outputs": ["base", "date", "rates", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.frankfurter.dev/v1/latest?base={{urlencode config.base}}&symbols={{urlencode config.symbols}}",
+        "outputMap": { "base": "base", "date": "date", "rates": "rates" }
+      }
+    },
+    {
+      "id": "yahoofinance.getQuote",
+      "label": "Yahoo Finance: Quote Chart",
+      "description": "Get price and chart metadata for a ticker via Yahoo Finance's public chart endpoint (keyless, unofficial).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "yahoo finance stock quote price ticker chart market free index etf",
+      "config": [
+        { "key": "symbol", "label": "Symbol", "control": "text", "required": true, "placeholder": "AAPL" },
+        { "key": "range", "label": "Range", "control": "text", "required": true, "placeholder": "1d", "help": "e.g. 1d, 5d, 1mo, 1y" },
+        { "key": "interval", "label": "Interval", "control": "text", "required": true, "placeholder": "1d", "help": "e.g. 1m, 15m, 1d, 1wk" }
+      ],
+      "outputs": ["chart", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/{{urlencode config.symbol}}?range={{urlencode config.range}}&interval={{urlencode config.interval}}",
+        "outputMap": { "chart": "chart" }
+      }
+    },
+    {
+      "id": "openexchangerates.getLatest",
+      "label": "Open Exchange Rates: Latest",
+      "description": "Get latest exchange rates (USD base on the free plan) from Open Exchange Rates.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "open exchange rates forex currency fx convert usd latest oxr",
+      "config": [
+        { "key": "symbols", "label": "Target currencies", "control": "text", "required": true, "placeholder": "EUR,GBP,JPY", "help": "Comma-separated ISO currency codes" }
+      ],
+      "outputs": ["base", "rates", "timestamp", "status", "body"],
+      "credentials": [{ "key": "OPENEXCHANGERATES_APP_ID", "help": "App ID from openexchangerates.org" }],
+      "http": {
+        "method": "GET",
+        "url": "https://openexchangerates.org/api/latest.json?app_id={{urlencode credentials.OPENEXCHANGERATES_APP_ID}}&symbols={{urlencode config.symbols}}",
+        "outputMap": { "base": "base", "rates": "rates", "timestamp": "timestamp" }
+      }
+    },
+    {
+      "id": "etherscan.getAccountBalance",
+      "label": "Etherscan: Account Balance",
+      "description": "Get the Ether balance (in wei) of an address via the Etherscan V2 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "etherscan ethereum eth balance wallet address wei blockchain account",
+      "config": [
+        { "key": "address", "label": "Address", "control": "text", "required": true, "placeholder": "0x…" },
+        { "key": "chainId", "label": "Chain ID", "control": "text", "required": true, "placeholder": "1", "help": "1 = Ethereum mainnet; see Etherscan V2 supported chains" }
+      ],
+      "outputs": ["result", "message", "status", "body"],
+      "credentials": [{ "key": "ETHERSCAN_API_KEY", "help": "Free API key from etherscan.io" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.etherscan.io/v2/api?chainid={{urlencode config.chainId}}&module=account&action=balance&address={{urlencode config.address}}&tag=latest&apikey={{urlencode credentials.ETHERSCAN_API_KEY}}",
+        "outputMap": { "result": "result", "message": "message" }
+      }
+    },
+    {
+      "id": "etherscan.getGasOracle",
+      "label": "Etherscan: Gas Oracle",
+      "description": "Get current safe/proposed/fast gas prices on Ethereum via the Etherscan V2 gas tracker.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "etherscan gas price oracle gwei ethereum fee tracker fast safe",
+      "config": [],
+      "outputs": ["result", "message", "status", "body"],
+      "credentials": [{ "key": "ETHERSCAN_API_KEY", "help": "Free API key from etherscan.io" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.etherscan.io/v2/api?chainid=1&module=gastracker&action=gasoracle&apikey={{urlencode credentials.ETHERSCAN_API_KEY}}",
+        "outputMap": { "result": "result", "message": "message" }
+      }
+    },
+    {
+      "id": "blockchain.getTicker",
+      "label": "Blockchain.info: BTC Ticker",
+      "description": "Get current Bitcoin price in major fiat currencies from blockchain.info (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "blockchain bitcoin btc ticker price fiat usd eur exchange rate free",
+      "config": [],
+      "outputs": ["usd", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://blockchain.info/ticker",
+        "outputMap": { "usd": "USD" }
+      }
+    }
+  ]
+}

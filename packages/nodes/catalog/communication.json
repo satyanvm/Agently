@@ -1,0 +1,249 @@
+{
+  "cluster": "communication",
+  "label": "Communication",
+  "description": "Chat, messaging, email and notification services.",
+  "nodes": [
+    {
+      "id": "slack.sendMessage",
+      "label": "Slack: Send Message",
+      "description": "Post a message to a Slack channel via the Web API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack chat message notify channel post team",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "#general", "help": "Channel name or ID" },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["ok", "ts", "channel", "status", "body"],
+      "credentials": [{ "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with chat:write scope" }],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.channel}}, \"text\": {{json config.text}}}",
+        "outputMap": { "ok": "ok", "ts": "ts", "channel": "channel" }
+      }
+    },
+    {
+      "id": "slack.webhookPost",
+      "label": "Slack: Incoming Webhook",
+      "description": "Post a message to Slack via an incoming webhook URL (no bot token needed).",
+      "kind": "output",
+      "runtime": "http",
+      "search": "slack webhook incoming notify message simple",
+      "config": [
+        { "key": "webhookUrl", "label": "Webhook URL", "control": "text", "required": true, "placeholder": "https://hooks.slack.com/services/…" },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.webhookUrl}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"text\": {{json config.text}}}"
+      }
+    },
+    {
+      "id": "discord.sendMessage",
+      "label": "Discord: Send Message",
+      "description": "Post a message to a Discord channel via a webhook URL.",
+      "kind": "output",
+      "runtime": "http",
+      "search": "discord chat message webhook notify server community",
+      "config": [
+        { "key": "webhookUrl", "label": "Webhook URL", "control": "text", "required": true, "placeholder": "https://discord.com/api/webhooks/…" },
+        { "key": "content", "label": "Message", "control": "textarea", "required": true },
+        { "key": "username", "label": "Override username", "control": "text", "required": false }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.webhookUrl}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"content\": {{json config.content}}, \"username\": {{json config.username}}}"
+      }
+    },
+    {
+      "id": "telegram.sendMessage",
+      "label": "Telegram: Send Message",
+      "description": "Send a message to a Telegram chat via the Bot API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "telegram bot message chat notify send",
+      "config": [
+        { "key": "chatId", "label": "Chat ID", "control": "text", "required": true, "help": "Target chat/channel ID (e.g. @channelname or numeric ID)" },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["ok", "status", "body"],
+      "credentials": [{ "key": "TELEGRAM_BOT_TOKEN", "help": "Bot token from @BotFather" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot{{credentials.TELEGRAM_BOT_TOKEN}}/sendMessage",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"chat_id\": {{json config.chatId}}, \"text\": {{json config.text}}}",
+        "outputMap": { "ok": "ok" }
+      }
+    },
+    {
+      "id": "twilio.sendSms",
+      "label": "Twilio: Send SMS",
+      "description": "Send an SMS text message via the Twilio API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "twilio sms text message phone notify mobile",
+      "config": [
+        { "key": "to", "label": "To", "control": "text", "required": true, "placeholder": "+15551234567" },
+        { "key": "from", "label": "From", "control": "text", "required": true, "placeholder": "+15559876543", "help": "Your Twilio phone number" },
+        { "key": "body", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["sid", "status", "body"],
+      "credentials": [
+        { "key": "TWILIO_ACCOUNT_SID", "help": "Account SID (AC…)" },
+        { "key": "TWILIO_AUTH_TOKEN", "help": "Auth token" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/{{credentials.TWILIO_ACCOUNT_SID}}/Messages.json",
+        "auth": { "type": "basic", "username": "{{credentials.TWILIO_ACCOUNT_SID}}", "password": "{{credentials.TWILIO_AUTH_TOKEN}}" },
+        "headers": { "Content-Type": "application/x-www-form-urlencoded" },
+        "body": "To={{urlencode config.to}}&From={{urlencode config.from}}&Body={{urlencode config.body}}",
+        "outputMap": { "sid": "sid" }
+      }
+    },
+    {
+      "id": "sendgrid.sendEmail",
+      "label": "SendGrid: Send Email",
+      "description": "Send a transactional email via the SendGrid v3 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "sendgrid email send mail transactional deliver",
+      "config": [
+        { "key": "to", "label": "To", "control": "text", "required": true, "placeholder": "user@example.com" },
+        { "key": "from", "label": "From", "control": "text", "required": true, "help": "A verified sender address" },
+        { "key": "subject", "label": "Subject", "control": "text", "required": true },
+        { "key": "text", "label": "Body", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "SENDGRID_API_KEY", "help": "API key with Mail Send permission" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "headers": { "Authorization": "Bearer {{credentials.SENDGRID_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"personalizations\":[{\"to\":[{\"email\": {{json config.to}}}]}],\"from\":{\"email\": {{json config.from}}},\"subject\": {{json config.subject}},\"content\":[{\"type\":\"text/plain\",\"value\": {{json config.text}}}]}"
+      }
+    },
+    {
+      "id": "mailgun.sendEmail",
+      "label": "Mailgun: Send Email",
+      "description": "Send an email via the Mailgun API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "mailgun email send mail deliver notify",
+      "config": [
+        { "key": "domain", "label": "Mailgun domain", "control": "text", "required": true, "placeholder": "mg.example.com" },
+        { "key": "to", "label": "To", "control": "text", "required": true },
+        { "key": "from", "label": "From", "control": "text", "required": true },
+        { "key": "subject", "label": "Subject", "control": "text", "required": true },
+        { "key": "text", "label": "Body", "control": "textarea", "required": true }
+      ],
+      "outputs": ["id", "status", "body"],
+      "credentials": [{ "key": "MAILGUN_API_KEY", "help": "Private API key" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.mailgun.net/v3/{{config.domain}}/messages",
+        "auth": { "type": "basic", "username": "api", "password": "{{credentials.MAILGUN_API_KEY}}" },
+        "headers": { "Content-Type": "application/x-www-form-urlencoded" },
+        "body": "to={{urlencode config.to}}&from={{urlencode config.from}}&subject={{urlencode config.subject}}&text={{urlencode config.text}}",
+        "outputMap": { "id": "id" }
+      }
+    },
+    {
+      "id": "msteams.webhookPost",
+      "label": "Microsoft Teams: Post Message",
+      "description": "Post a message card to a Teams channel via an incoming webhook.",
+      "kind": "output",
+      "runtime": "http",
+      "search": "microsoft teams message webhook notify channel card",
+      "config": [
+        { "key": "webhookUrl", "label": "Webhook URL", "control": "text", "required": true },
+        { "key": "title", "label": "Title", "control": "text", "required": false },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.webhookUrl}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"title\": {{json config.title}}, \"text\": {{json config.text}}}"
+      }
+    },
+    {
+      "id": "pushover.notify",
+      "label": "Pushover: Send Notification",
+      "description": "Send a push notification to your devices via Pushover.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "pushover push notification mobile alert device",
+      "config": [
+        { "key": "title", "label": "Title", "control": "text", "required": false },
+        { "key": "message", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "PUSHOVER_APP_TOKEN", "help": "Application API token" },
+        { "key": "PUSHOVER_USER_KEY", "help": "Your user key" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.pushover.net/1/messages.json",
+        "headers": { "Content-Type": "application/x-www-form-urlencoded" },
+        "body": "token={{urlencode credentials.PUSHOVER_APP_TOKEN}}&user={{urlencode credentials.PUSHOVER_USER_KEY}}&title={{urlencode config.title}}&message={{urlencode config.message}}"
+      }
+    },
+    {
+      "id": "mattermost.sendMessage",
+      "label": "Mattermost: Send Message",
+      "description": "Post a message to a Mattermost channel via an incoming webhook.",
+      "kind": "output",
+      "runtime": "http",
+      "search": "mattermost chat message webhook notify channel",
+      "config": [
+        { "key": "webhookUrl", "label": "Webhook URL", "control": "text", "required": true },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true },
+        { "key": "channel", "label": "Channel override", "control": "text", "required": false }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.webhookUrl}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"text\": {{json config.text}}, \"channel\": {{json config.channel}}}"
+      }
+    },
+    {
+      "id": "ntfy.publish",
+      "label": "ntfy: Publish Notification",
+      "description": "Publish a push notification to an ntfy.sh topic (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "ntfy push notification topic publish free simple",
+      "config": [
+        { "key": "topic", "label": "Topic", "control": "text", "required": true, "placeholder": "my-alerts" },
+        { "key": "title", "label": "Title", "control": "text", "required": false },
+        { "key": "message", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "https://ntfy.sh/{{config.topic}}",
+        "headers": { "Title": "{{config.title}}" },
+        "body": "{{config.message}}"
+      }
+    }
+  ]
+}

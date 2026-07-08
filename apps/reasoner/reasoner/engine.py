@@ -56,6 +56,7 @@ from .plan import (  # noqa: F401 — re-exported for the engine's public surfac
     dependents_of,
     descendants,
     is_gate_open,
+    loop_body,
     should_skip,
     topo_order,
 )
@@ -95,13 +96,15 @@ async def execute_one_node(
     agent_id: str,
     upstream: dict[str, dict[str, Any]],
     run_input: dict[str, Any],
+    extra: dict[str, Any] | None = None,
 ) -> nodes.NodeResult:
     """Run ONE node's handler and write its status/usage. Raises on handler error.
 
     This is the unit the per-node orchestrator wraps in a single Temporal activity,
     and the unit `execute_graph` calls inline. It does NOT decide skips or draw
     hand-off edges — the orchestrator owns ordering/skip so that logic stays pure
-    and identical across both paths.
+    and identical across both paths. `extra` carries loop fan-out template roots
+    ({"item": …, "loop": {…}}) for body-node executions.
     """
     key = node["key"]
     await db.set_agent_status(agent_id, "running")
@@ -113,6 +116,7 @@ async def execute_one_node(
         upstream=upstream,
         run_input=run_input,
         label=agent_name(node, key),
+        extra=extra or {},
     )
     handler = nodes.handler_for(str(node.get("type", "")))
     result = await handler(ctx)
@@ -120,6 +124,65 @@ async def execute_one_node(
         await db.add_usage(run_id, result.tokens_in, result.tokens_out, result.cost_usd)
     await db.set_agent_status(agent_id, "succeeded", summary=result.summary)
     return result
+
+
+async def _fan_out_loop(
+    run_id: str,
+    loop_key: str,
+    items: list[Any],
+    body_keys: list[str],
+    plan: GraphPlan,
+    agent_ids: dict[str, str],
+    outputs: dict[str, dict[str, Any]],
+    run_input: dict[str, Any],
+) -> list[Any]:
+    """Run the loop's body once per item; return the collected per-item results.
+
+    Each iteration executes the body nodes in topological order with the template
+    roots {"item": <element>, "loop": {<loop_key>: {"index": i}}} injected. A gate
+    inside the body prunes the REST OF THAT ITERATION only. The per-item result is
+    the last body node's output (the natural "value" of the iteration), or a dict
+    of every body node's output when the body has parallel leaves.
+
+    Side effect: outputs[<body_key>] is left holding the LAST iteration's output so
+    a downstream join can still reference a body node directly; the collected list
+    lives at outputs[<loop_key>]["results"].
+    """
+    by_key = {n["key"]: n for n in plan.ordered}
+    body_nodes = [by_key[k] for k in body_keys]
+    results: list[Any] = []
+    for idx, item in enumerate(items):
+        extra = {"item": item, "loop": {loop_key: {"index": idx}}}
+        iter_outputs: dict[str, dict[str, Any]] = {}
+        iter_skipped: set[str] = set()
+        for bn in body_nodes:
+            bkey = bn["key"]
+            if bkey in iter_skipped:
+                continue
+            deps = list(bn.get("dependsOn") or [])
+            upstream = {
+                dep: (iter_outputs.get(dep) if dep in iter_outputs else outputs.get(dep, {}))
+                for dep in deps
+            }
+            result = await execute_one_node(
+                run_id, bn, agent_ids[bkey], upstream, run_input, extra=extra,
+            )
+            iter_outputs[bkey] = result.output or {}
+            if not is_gate_open(bn, iter_outputs[bkey]):
+                for pruned in descendants(bkey, plan.dependents):
+                    if pruned in body_keys:
+                        iter_skipped.add(pruned)
+        outputs.update(iter_outputs)
+        if len(iter_outputs) == 1:
+            results.append(next(iter(iter_outputs.values())))
+        else:
+            results.append(iter_outputs)
+    if items:
+        await db.append_log(
+            run_id, "info", "system", loop_key,
+            f"Loop fanned out {len(body_keys)} body node(s) × {len(items)} item(s)",
+        )
+    return results
 
 
 async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dict[str, Any]) -> dict[str, Any]:
@@ -150,11 +213,17 @@ async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dic
 
     outputs: dict[str, dict[str, Any]] = {}
     skipped: set[str] = set()
+    fanned_out: set[str] = set()  # loop-body nodes executed by the fan-out below
     done = 0
     for n in plan.ordered:
         key = n["key"]
         agent_id = agent_ids[key]
         deps = list(n.get("dependsOn") or [])
+
+        if key in fanned_out:
+            done += 1
+            await db.set_run_progress(run_id, done, total, f"Ran {key} (loop body)")
+            continue
 
         if should_skip(n, skipped):
             skipped.add(key)
@@ -184,6 +253,27 @@ async def execute_graph(run_id: str, graph: list[dict[str, Any]], run_input: dic
             return {"done": False, "error": str(exc), "failed_node": key}
 
         outputs[key] = result.output or {}
+
+        # logic.loop: fan its dominated body out once per resolved item. Body
+        # nodes are marked fanned_out so the main walk doesn't re-run them.
+        if str(n.get("type", "")) == "logic.loop":
+            body_keys = loop_body(key, plan.ordered, plan.dependents)
+            fanned_out.update(body_keys)
+            items = outputs[key].get("items") or []
+            try:
+                results = await _fan_out_loop(
+                    run_id, key, items, body_keys, plan, agent_ids, outputs, run_input,
+                )
+            except Exception as exc:  # noqa: BLE001 — a body failure fails the run cleanly
+                await db.append_log(run_id, "error", "system", key, f"Loop body failed: {exc}")
+                await db.finish_run(run_id, "failed", "Failed", error=str(exc))
+                obs.flush()
+                return {"done": False, "error": str(exc), "failed_node": key}
+            outputs[key]["results"] = results
+            if not items:
+                for bk in body_keys:
+                    await mark_skipped(run_id, agent_ids[bk], bk)
+                    outputs[bk] = {"skipped": True}
 
         # Gate node whose condition was false: prune its whole downstream subgraph.
         if not is_gate_open(n, outputs[key]):

@@ -1,0 +1,615 @@
+{
+  "cluster": "databases",
+  "label": "Databases",
+  "description": "HTTP-accessible databases and spreadsheet-style data stores. Raw TCP databases (Postgres, MySQL, …) are handled by the builtin tool.db node.",
+  "nodes": [
+    {
+      "id": "supabase.select",
+      "label": "Supabase: Select Rows",
+      "description": "Read rows from a Supabase table via the PostgREST REST API, with optional PostgREST filters.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres postgrest select query read rows table filter database",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://abcdefgh.supabase.co",
+          "help": "Your Supabase project URL (no trailing slash)"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "control": "text",
+          "required": true,
+          "placeholder": "todos"
+        },
+        {
+          "key": "columns",
+          "label": "Columns",
+          "control": "text",
+          "required": true,
+          "placeholder": "*",
+          "help": "Comma-separated column list for select=, e.g. id,name or *"
+        },
+        {
+          "key": "filters",
+          "label": "Filters",
+          "control": "text",
+          "required": false,
+          "placeholder": "status=eq.active&limit=10",
+          "help": "Raw PostgREST filter query string (operators: eq, gt, lt, like, in, order, limit, offset)"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role (or anon) API key from Project Settings → API"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{config.projectUrl}}/rest/v1/{{config.table}}?select={{urlencode config.columns}}&{{config.filters}}",
+        "headers": {
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}"
+        }
+      }
+    },
+    {
+      "id": "supabase.insert",
+      "label": "Supabase: Insert Row",
+      "description": "Insert a row (or array of rows) into a Supabase table via PostgREST.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres postgrest insert create add row record write database",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://abcdefgh.supabase.co"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "control": "text",
+          "required": true,
+          "placeholder": "todos"
+        },
+        {
+          "key": "row",
+          "label": "Row JSON",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "{\"title\": \"buy milk\", \"done\": false}",
+          "help": "JSON object (or array of objects) to insert; keys must match column names"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role API key from Project Settings → API"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.projectUrl}}/rest/v1/{{config.table}}",
+        "headers": {
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        "body": "{{config.row}}"
+      }
+    },
+    {
+      "id": "supabase.update",
+      "label": "Supabase: Update Rows",
+      "description": "Update rows matching PostgREST filters in a Supabase table.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres postgrest update patch modify row record database",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://abcdefgh.supabase.co"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "control": "text",
+          "required": true,
+          "placeholder": "todos"
+        },
+        {
+          "key": "filters",
+          "label": "Filters",
+          "control": "text",
+          "required": true,
+          "placeholder": "id=eq.42",
+          "help": "Raw PostgREST filter query string selecting which rows to update (required — prevents accidental full-table updates)"
+        },
+        {
+          "key": "changes",
+          "label": "Changes JSON",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "{\"done\": true}",
+          "help": "JSON object of columns to set"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role API key from Project Settings → API"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "{{config.projectUrl}}/rest/v1/{{config.table}}?{{config.filters}}",
+        "headers": {
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        "body": "{{config.changes}}"
+      }
+    },
+    {
+      "id": "supabase.rpc",
+      "label": "Supabase: Call Function (RPC)",
+      "description": "Call a Postgres function exposed by Supabase PostgREST at /rest/v1/rpc/<function>.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "supabase postgres postgrest rpc function call stored procedure database",
+      "config": [
+        {
+          "key": "projectUrl",
+          "label": "Project URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://abcdefgh.supabase.co"
+        },
+        {
+          "key": "functionName",
+          "label": "Function name",
+          "control": "text",
+          "required": true,
+          "placeholder": "get_user_stats"
+        },
+        {
+          "key": "args",
+          "label": "Arguments JSON",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "{}",
+          "help": "JSON object of named function arguments; use {} for none"
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "SUPABASE_SERVICE_KEY",
+          "help": "Service role API key from Project Settings → API"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.projectUrl}}/rest/v1/rpc/{{config.functionName}}",
+        "headers": {
+          "apikey": "{{credentials.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{credentials.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{{config.args}}"
+      }
+    },
+    {
+      "id": "firebase.getJson",
+      "label": "Firebase Realtime DB: Get JSON",
+      "description": "Read the JSON value at a path in a Firebase Realtime Database via its REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "firebase realtime database get read json path fetch google",
+      "config": [
+        {
+          "key": "databaseUrl",
+          "label": "Database URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://myapp-default-rtdb.firebaseio.com",
+          "help": "Realtime Database URL (no trailing slash)"
+        },
+        {
+          "key": "path",
+          "label": "Path",
+          "control": "text",
+          "required": true,
+          "placeholder": "users/alice",
+          "help": "Data path without leading slash or .json suffix"
+        },
+        {
+          "key": "query",
+          "label": "Query string",
+          "control": "text",
+          "required": false,
+          "placeholder": "?auth=DATABASE_SECRET",
+          "help": "Optional raw query string incl. leading ? — e.g. ?auth=<token> for secured rules, or ?orderBy=\"$key\"&limitToFirst=10. Leave blank for public read rules."
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "{{config.databaseUrl}}/{{config.path}}.json{{config.query}}"
+      }
+    },
+    {
+      "id": "firebase.putJson",
+      "label": "Firebase Realtime DB: Put JSON",
+      "description": "Write (replace) the JSON value at a path in a Firebase Realtime Database via its REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "firebase realtime database put write set json path save google",
+      "config": [
+        {
+          "key": "databaseUrl",
+          "label": "Database URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://myapp-default-rtdb.firebaseio.com"
+        },
+        {
+          "key": "path",
+          "label": "Path",
+          "control": "text",
+          "required": true,
+          "placeholder": "users/alice"
+        },
+        {
+          "key": "data",
+          "label": "JSON value",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "{\"name\": \"Alice\", \"age\": 30}",
+          "help": "JSON value to store — replaces any existing data at the path"
+        },
+        {
+          "key": "query",
+          "label": "Query string",
+          "control": "text",
+          "required": false,
+          "placeholder": "?auth=DATABASE_SECRET",
+          "help": "Optional raw query string incl. leading ? — e.g. ?auth=<token>. Leave blank for public write rules."
+        }
+      ],
+      "outputs": [
+        "status",
+        "body"
+      ],
+      "credentials": [],
+      "http": {
+        "method": "PUT",
+        "url": "{{config.databaseUrl}}/{{config.path}}.json{{config.query}}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{{config.data}}"
+      }
+    },
+    {
+      "id": "upstash.get",
+      "label": "Upstash Redis: GET",
+      "description": "Read a key's value from Upstash Redis via its REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "upstash redis get read key value cache kv rest",
+      "config": [
+        {
+          "key": "key",
+          "label": "Key",
+          "control": "text",
+          "required": true,
+          "placeholder": "session:123"
+        }
+      ],
+      "outputs": [
+        "result",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "UPSTASH_REDIS_REST_URL",
+          "help": "REST URL from the Upstash console, e.g. https://usw1-xyz-12345.upstash.io"
+        },
+        {
+          "key": "UPSTASH_REDIS_REST_TOKEN",
+          "help": "REST token from the Upstash console"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.UPSTASH_REDIS_REST_URL}}/get/{{urlencode config.key}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.UPSTASH_REDIS_REST_TOKEN}}"
+        },
+        "outputMap": {
+          "result": "result"
+        }
+      }
+    },
+    {
+      "id": "upstash.set",
+      "label": "Upstash Redis: SET",
+      "description": "Set a key to a value in Upstash Redis via its REST API (value sent as the request body).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "upstash redis set write store key value cache kv rest",
+      "config": [
+        {
+          "key": "key",
+          "label": "Key",
+          "control": "text",
+          "required": true,
+          "placeholder": "session:123"
+        },
+        {
+          "key": "value",
+          "label": "Value",
+          "control": "textarea",
+          "required": true,
+          "help": "Stored as a string; sent as the request body per the Upstash REST convention"
+        }
+      ],
+      "outputs": [
+        "result",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "UPSTASH_REDIS_REST_URL",
+          "help": "REST URL from the Upstash console"
+        },
+        {
+          "key": "UPSTASH_REDIS_REST_TOKEN",
+          "help": "REST token from the Upstash console"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.UPSTASH_REDIS_REST_URL}}/set/{{urlencode config.key}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.UPSTASH_REDIS_REST_TOKEN}}"
+        },
+        "body": "{{config.value}}",
+        "outputMap": {
+          "result": "result"
+        }
+      }
+    },
+    {
+      "id": "upstash.lpush",
+      "label": "Upstash Redis: LPUSH",
+      "description": "Push a value onto the head of a Redis list in Upstash via its REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "upstash redis lpush list push queue prepend cache kv rest",
+      "config": [
+        {
+          "key": "key",
+          "label": "List key",
+          "control": "text",
+          "required": true,
+          "placeholder": "jobs"
+        },
+        {
+          "key": "value",
+          "label": "Value",
+          "control": "textarea",
+          "required": true,
+          "help": "Element to push; sent as the request body per the Upstash REST convention"
+        }
+      ],
+      "outputs": [
+        "result",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "UPSTASH_REDIS_REST_URL",
+          "help": "REST URL from the Upstash console"
+        },
+        {
+          "key": "UPSTASH_REDIS_REST_TOKEN",
+          "help": "REST token from the Upstash console"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.UPSTASH_REDIS_REST_URL}}/lpush/{{urlencode config.key}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.UPSTASH_REDIS_REST_TOKEN}}"
+        },
+        "body": "{{config.value}}",
+        "outputMap": {
+          "result": "result"
+        }
+      }
+    },
+    {
+      "id": "hasura.runQuery",
+      "label": "Hasura: Run GraphQL Query",
+      "description": "Execute a GraphQL query or mutation against a Hasura GraphQL endpoint using the admin secret.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hasura graphql query mutation postgres database api run execute",
+      "config": [
+        {
+          "key": "endpoint",
+          "label": "GraphQL endpoint",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://my-app.hasura.app/v1/graphql"
+        },
+        {
+          "key": "query",
+          "label": "GraphQL query",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "query { users(limit: 10) { id name } }"
+        }
+      ],
+      "outputs": [
+        "data",
+        "errors",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "HASURA_ADMIN_SECRET",
+          "help": "Admin secret (x-hasura-admin-secret) — full access; prefer a scoped role in production"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.endpoint}}",
+        "headers": {
+          "Content-Type": "application/json",
+          "x-hasura-admin-secret": "{{credentials.HASURA_ADMIN_SECRET}}"
+        },
+        "body": "{\"query\": {{json config.query}}}",
+        "outputMap": {
+          "data": "data",
+          "errors": "errors"
+        }
+      }
+    },
+    {
+      "id": "baserow.listRows",
+      "label": "Baserow: List Rows",
+      "description": "List rows from a Baserow table via its database token API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "baserow list rows records read table database spreadsheet open source",
+      "config": [
+        {
+          "key": "baseUrl",
+          "label": "Baserow URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://api.baserow.io",
+          "help": "https://api.baserow.io for hosted, or your self-hosted instance URL (no trailing slash)"
+        },
+        {
+          "key": "tableId",
+          "label": "Table ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "12345",
+          "help": "Numeric table ID from the table URL"
+        }
+      ],
+      "outputs": [
+        "count",
+        "results",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "BASEROW_TOKEN",
+          "help": "Database token created under Settings → Database tokens (sent as 'Token <value>')"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{config.baseUrl}}/api/database/rows/table/{{config.tableId}}/?user_field_names=true",
+        "headers": {
+          "Authorization": "Token {{credentials.BASEROW_TOKEN}}"
+        },
+        "outputMap": {
+          "count": "count",
+          "results": "results"
+        }
+      }
+    },
+    {
+      "id": "nocodb.listRows",
+      "label": "NocoDB: List Rows",
+      "description": "List records from a NocoDB table via the v2 Data API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "nocodb list rows records read table database spreadsheet open source airtable alternative",
+      "config": [
+        {
+          "key": "baseUrl",
+          "label": "NocoDB URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://app.nocodb.com",
+          "help": "Your NocoDB instance URL (no trailing slash)"
+        },
+        {
+          "key": "tableId",
+          "label": "Table ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "m1a2b3c4d5e6f7g",
+          "help": "Table ID from table details (not the table name)"
+        }
+      ],
+      "outputs": [
+        "list",
+        "status",
+        "body"
+      ],
+      "credentials": [
+        {
+          "key": "NOCODB_TOKEN",
+          "help": "API token created in Team & Settings → API Tokens (sent as xc-token header)"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{config.baseUrl}}/api/v2/tables/{{config.tableId}}/records",
+        "headers": {
+          "xc-token": "{{credentials.NOCODB_TOKEN}}"
+        },
+        "outputMap": {
+          "list": "list"
+        }
+      }
+    }
+  ]
+}

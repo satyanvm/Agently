@@ -1,0 +1,298 @@
+{
+  "cluster": "data-web",
+  "label": "Web & Data",
+  "description": "Generic web-data access: GraphQL, feeds, geodata, weather, archives and page scraping.",
+  "nodes": [
+    {
+      "id": "graphql.query",
+      "label": "GraphQL: Query",
+      "description": "Execute a GraphQL query or mutation against any public GraphQL endpoint.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "graphql query mutation api endpoint generic fetch data schema",
+      "config": [
+        { "key": "endpoint", "label": "Endpoint URL", "control": "text", "required": true, "placeholder": "https://api.example.com/graphql" },
+        { "key": "query", "label": "Query", "control": "textarea", "required": true, "placeholder": "query { viewer { id } }" },
+        { "key": "variables", "label": "Variables (JSON object)", "control": "textarea", "required": true, "placeholder": "{}", "help": "JSON object of query variables; use {} if none" }
+      ],
+      "outputs": ["data", "errors", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.endpoint}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"query\": {{json config.query}}, \"variables\": {{config.variables}}}",
+        "outputMap": { "data": "data", "errors": "errors" }
+      }
+    },
+    {
+      "id": "rss.fetchFeed",
+      "label": "RSS/Atom: Fetch Feed",
+      "description": "Fetch an RSS or Atom feed URL; the raw XML is returned in body for the reasoner to read.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "rss atom feed fetch news blog subscribe xml syndication updates",
+      "config": [
+        { "key": "feedUrl", "label": "Feed URL", "control": "text", "required": true, "placeholder": "https://example.com/feed.xml" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "{{config.feedUrl}}",
+        "headers": { "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml" }
+      }
+    },
+    {
+      "id": "sitemap.fetch",
+      "label": "Sitemap: Fetch",
+      "description": "Fetch a site's sitemap.xml; the raw XML is returned in body for the reasoner to read.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "sitemap xml urls crawl site pages index discover seo",
+      "config": [
+        { "key": "sitemapUrl", "label": "Sitemap URL", "control": "text", "required": true, "placeholder": "https://example.com/sitemap.xml" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "{{config.sitemapUrl}}",
+        "headers": { "Accept": "application/xml, text/xml" }
+      }
+    },
+    {
+      "id": "wayback.checkAvailability",
+      "label": "Wayback Machine: Check Availability",
+      "description": "Look up the closest archived snapshot of a URL via the Internet Archive availability API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wayback machine internet archive snapshot history archived url availability",
+      "config": [
+        { "key": "url", "label": "URL", "control": "text", "required": true, "placeholder": "https://example.com" },
+        { "key": "timestamp", "label": "Timestamp", "control": "text", "required": false, "placeholder": "20200101", "help": "Optional YYYYMMDDhhmmss to find the snapshot closest to this time" }
+      ],
+      "outputs": ["snapshots", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://archive.org/wayback/available?url={{urlencode config.url}}&timestamp={{urlencode config.timestamp}}",
+        "outputMap": { "snapshots": "archived_snapshots" }
+      }
+    },
+    {
+      "id": "openmeteo.getForecast",
+      "label": "Open-Meteo: Weather Forecast",
+      "description": "Get current conditions and a daily forecast for a lat/lon via the Open-Meteo API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "weather forecast temperature rain wind open meteo free keyless climate",
+      "config": [
+        { "key": "latitude", "label": "Latitude", "control": "text", "required": true, "placeholder": "52.52" },
+        { "key": "longitude", "label": "Longitude", "control": "text", "required": true, "placeholder": "13.41" }
+      ],
+      "outputs": ["current", "daily", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://api.open-meteo.com/v1/forecast?latitude={{urlencode config.latitude}}&longitude={{urlencode config.longitude}}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto",
+        "outputMap": { "current": "current", "daily": "daily" }
+      }
+    },
+    {
+      "id": "openmeteo.geocode",
+      "label": "Open-Meteo: Geocode Place Name",
+      "description": "Resolve a place name to coordinates via the Open-Meteo geocoding API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "geocode place name city coordinates latitude longitude open meteo lookup",
+      "config": [
+        { "key": "name", "label": "Place name", "control": "text", "required": true, "placeholder": "Berlin" }
+      ],
+      "outputs": ["results", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://geocoding-api.open-meteo.com/v1/search?name={{urlencode config.name}}&count=5&language=en&format=json",
+        "outputMap": { "results": "results" }
+      }
+    },
+    {
+      "id": "openweathermap.getCurrentWeather",
+      "label": "OpenWeatherMap: Current Weather",
+      "description": "Get current weather for a city via the OpenWeatherMap API (requires API key).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "openweathermap weather current temperature city conditions humidity wind",
+      "config": [
+        { "key": "city", "label": "City", "control": "text", "required": true, "placeholder": "London,GB", "help": "City name, optionally with country code" },
+        { "key": "units", "label": "Units", "control": "text", "required": false, "placeholder": "metric", "help": "standard, metric or imperial" }
+      ],
+      "outputs": ["main", "weather", "wind", "name", "status", "body"],
+      "credentials": [{ "key": "OPENWEATHERMAP_API_KEY", "help": "API key from openweathermap.org" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.openweathermap.org/data/2.5/weather?q={{urlencode config.city}}&units={{urlencode config.units}}&appid={{credentials.OPENWEATHERMAP_API_KEY}}",
+        "outputMap": { "main": "main", "weather": "weather", "wind": "wind", "name": "name" }
+      }
+    },
+    {
+      "id": "nominatim.geocode",
+      "label": "Nominatim: Geocode Address",
+      "description": "Resolve a free-form address to coordinates via OpenStreetMap Nominatim (keyless; identifies the app per usage policy).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "geocode address street coordinates openstreetmap nominatim location lookup latitude longitude",
+      "config": [
+        { "key": "query", "label": "Address / place", "control": "text", "required": true, "placeholder": "1600 Pennsylvania Ave NW, Washington DC" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://nominatim.openstreetmap.org/search?q={{urlencode config.query}}&format=jsonv2&limit=5",
+        "headers": { "User-Agent": "Agently/1.0 (+https://github.com/satyanvm/Agently)" }
+      }
+    },
+    {
+      "id": "nominatim.reverseGeocode",
+      "label": "Nominatim: Reverse Geocode",
+      "description": "Resolve coordinates to an address via OpenStreetMap Nominatim (keyless; identifies the app per usage policy).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "reverse geocode coordinates address latitude longitude openstreetmap nominatim place",
+      "config": [
+        { "key": "lat", "label": "Latitude", "control": "text", "required": true, "placeholder": "48.8584" },
+        { "key": "lon", "label": "Longitude", "control": "text", "required": true, "placeholder": "2.2945" }
+      ],
+      "outputs": ["displayName", "address", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://nominatim.openstreetmap.org/reverse?lat={{urlencode config.lat}}&lon={{urlencode config.lon}}&format=jsonv2",
+        "headers": { "User-Agent": "Agently/1.0 (+https://github.com/satyanvm/Agently)" },
+        "outputMap": { "displayName": "display_name", "address": "address" }
+      }
+    },
+    {
+      "id": "ipapi.geolocate",
+      "label": "ip-api: Geolocate IP",
+      "description": "Look up geolocation, ISP and timezone for an IP address via ip-api.com (keyless; free tier is HTTP only).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "ip address geolocation country city isp lookup locate timezone ip-api",
+      "config": [
+        { "key": "ip", "label": "IP address", "control": "text", "required": true, "placeholder": "8.8.8.8" }
+      ],
+      "outputs": ["country", "regionName", "city", "lat", "lon", "isp", "timezone", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "http://ip-api.com/json/{{urlencode config.ip}}",
+        "outputMap": { "country": "country", "regionName": "regionName", "city": "city", "lat": "lat", "lon": "lon", "isp": "isp", "timezone": "timezone" }
+      }
+    },
+    {
+      "id": "restcountries.getCountry",
+      "label": "REST Countries: Country Info",
+      "description": "Fetch country facts (capital, population, currencies, languages) by name via REST Countries (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "country capital population currency language flag region facts rest countries",
+      "config": [
+        { "key": "name", "label": "Country name", "control": "text", "required": true, "placeholder": "japan" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://restcountries.com/v3.1/name/{{urlencode config.name}}"
+      }
+    },
+    {
+      "id": "secedgar.searchFullText",
+      "label": "SEC EDGAR: Full-Text Search",
+      "description": "Search the full text of SEC EDGAR filings via the EDGAR full-text search API (keyless; identifies the app per SEC fair-access policy).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "sec edgar filings 10-k 10-q 8-k full text search company financial disclosure",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true, "placeholder": "\"climate risk\"" },
+        { "key": "forms", "label": "Form types", "control": "text", "required": false, "placeholder": "10-K", "help": "Optional comma-separated form types, e.g. 10-K,8-K" }
+      ],
+      "outputs": ["hits", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://efts.sec.gov/LATEST/search-index?q={{urlencode config.query}}&forms={{urlencode config.forms}}",
+        "headers": { "User-Agent": "Agently/1.0 (+https://github.com/satyanvm/Agently)" },
+        "outputMap": { "hits": "hits" }
+      }
+    },
+    {
+      "id": "googlenews.fetchRss",
+      "label": "Google News: Search RSS",
+      "description": "Fetch Google News search results as an RSS feed (keyless); the raw XML is returned in body for the reasoner to read.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google news headlines articles rss search topic current events press",
+      "config": [
+        { "key": "query", "label": "Search query", "control": "text", "required": true, "placeholder": "artificial intelligence" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://news.google.com/rss/search?q={{urlencode config.query}}&hl=en-US&gl=US&ceid=US:en",
+        "headers": { "Accept": "application/rss+xml, application/xml, text/xml" }
+      }
+    },
+    {
+      "id": "web.screenshot",
+      "label": "Web: Screenshot Page",
+      "description": "Open one or more URLs in a real browser and capture what the rendered page shows (works on JS-heavy sites).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "screenshot webpage capture render browser visual page image snapshot",
+      "config": [
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://example.com", "help": "One URL per line" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "web.scrapePage",
+      "label": "Web: Scrape Full Page",
+      "description": "Load one or more URLs in a real browser and extract the full rendered page content (works on JS-heavy sites).",
+      "kind": "action",
+      "runtime": "browser",
+      "search": "scrape webpage extract content text html crawl browser render fetch read",
+      "config": [
+        { "key": "urls", "label": "URLs", "control": "textarea", "required": true, "placeholder": "https://example.com/article", "help": "One URL per line" }
+      ],
+      "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "urlscan.submitScan",
+      "label": "urlscan.io: Submit Scan",
+      "description": "Submit a URL to urlscan.io for scanning and get back the result links (requires API key).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "urlscan security scan url phishing malware analyze website check threat",
+      "config": [
+        { "key": "url", "label": "URL to scan", "control": "text", "required": true, "placeholder": "https://suspicious.example.com" },
+        { "key": "visibility", "label": "Visibility", "control": "text", "required": true, "placeholder": "public", "help": "public, unlisted or private" }
+      ],
+      "outputs": ["uuid", "result", "api", "message", "status", "body"],
+      "credentials": [{ "key": "URLSCAN_API_KEY", "help": "API key from urlscan.io account settings" }],
+      "http": {
+        "method": "POST",
+        "url": "https://urlscan.io/api/v1/scan/",
+        "headers": { "API-Key": "{{credentials.URLSCAN_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"url\": {{json config.url}}, \"visibility\": {{json config.visibility}}}",
+        "outputMap": { "uuid": "uuid", "result": "result", "api": "api", "message": "message" }
+      }
+    }
+  ]
+}

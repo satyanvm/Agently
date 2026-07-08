@@ -1,125 +1,73 @@
-# Plan: Intelligent Prompt → DAG (remove fixed sources, execute anything)
+# Intelligent Prompt → DAG: map-reduce compiler over an n8n-breadth node catalog
 
-## Goal
-Any prompt compiles into an arbitrary, world-class typed-node DAG and runs on the
-Temporal reasoner. Remove the hardcoded 5 sources and the fixed fetchers→Editor
-topology. No source cookbook is given to the LLM — it is trusted to author nodes
-against the reasoner's node contract. Close the three executor gaps so the whole
-catalog is real.
+## What this delivers
 
-## What already exists (leverage, don't rebuild)
-- `apps/reasoner` **already executes arbitrary typed-node DAGs** with per-node
-  Temporal durability (`DynamicWorkflow`) and a single-activity fallback
-  (`engine.execute_graph`). Handlers cover all 15 catalog types.
-- The web builder already renders/edits arbitrary typed graphs.
-- The dispatcher routes any run whose workflow has a composed graph to
-  `DynamicWorkflow`.
-- **The only thing stuck**: the Go compiler (`planner.go`) emits the fixed
-  5-source shape and runs auto-default to `engine=native` (the Go worker, which
-  can't interpret typed nodes).
+Any prompt compiles into an arbitrary typed-node DAG over a catalog of ~208 node
+types (15 built-ins + 193 integrations across 12 clusters), executed by the
+Temporal reasoner. The old fixed 5-source / fetchers→Editor planner is gone.
 
-## Design decisions (confirmed with user)
-- Auto-route prompt-built (typed) graphs to the Temporal reasoner.
-- No example/source cookbook for the LLM. Give it the **node API contract**
-  (types, config keys, output fields, templating, limits) — not a source list.
-- Implement the executor gaps now: real `tool.code`, real `tool.db`, real
-  `logic.loop` per-item fan-out.
+## Architecture
 
----
+### The catalog is data (`packages/nodes/`)
+One JSON definition per integration; four generic runtimes (`http`, `browser`,
+`code`, `llm`) execute all of them — adding a node means adding a JSON entry,
+never code. Consumed by all three planes:
+- **Go compiler** (`apps/api/internal/services/nodecatalog.go`) — indexes + schemas + validation.
+- **Python executor** (`apps/reasoner/reasoner/catalog.py` + `nodes.py _integration`) — one generic handler.
+- **Web palette** (`node-catalog.ts` + `integration-catalog.generated.json`, regenerate via `node packages/nodes/build-web.mjs`).
 
-## Workstream A — Intelligent graph compiler (Go)
-**Files:** `apps/api/internal/services/planner.go`, `llm.go`, new `nodecatalog.go`
+### Map-reduce compilation (`apps/api/internal/services/planner.go`)
+- **Map**: one parallel call per cluster with a small fast model
+  (`PLANNER_MAP_MODEL`, default `claude-haiku-4-5`) over that cluster's compact
+  index → relevant node ids (≤8/cluster, ≤32 total).
+- **Reduce**: the big model (`PLANNER_MODEL`, default `claude-opus-4-8`) gets the
+  node contract (graph rules, templating semantics, fail-open warning) + full
+  schemas of built-ins and selected nodes only → authors the complete graph.
+- **Validate → repair**: structural rules (unknown types, dup keys, bad deps,
+  cycles, missing required config) mirrored from `reasoner/plan.py`; errors are
+  fed back verbatim, up to 2 repair rounds.
+- **Deterministic fallback**: no key / hard failure → typed
+  `trigger → agent.llm(research) → output.report [+ output.email]`. Creation
+  never fails. Compiled plans are memoized (the create dialog previews on every
+  pause in typing).
+- No source cookbook: the model is trusted to design; `tool.http`/`tool.browser`
+  remain universal escape hatches for anything not in the catalog.
 
-1. **New `nodecatalog.go`** — single source of truth for the compiler:
-   - Canonical list of the 15 node types with config keys, output fields,
-     templating rules (`{{input.x}}`, `{{outputs.key.field}}`), and honest limits.
-   - `graphPlannerSystemPrompt()` builds the system prompt from that spec.
-   - `validateGraph(nodes)` — Go port of the reasoner's structural rules: every
-     `type` known, every `dependsOn` references an existing key, no duplicate
-     keys, no cycles (Kahn). Returns actionable error strings.
-2. **Rewrite `planner.go`**:
-   - `CompilePrompt` → LLM emits a **full graph** (nodes w/ key/type/name/role/
-     config/dependsOn) + name/description/schedule/defaultInput.
-   - **Repair loop** (up to 3 tries): validate → on failure, re-prompt the model
-     with the specific errors → re-validate.
-   - **Deterministic fallback** (no key / all retries fail): emit a sensible
-     *typed* graph — `trigger.manual → agent.llm(research) → output.report`
-     (+ `output.email` if a recipient was parsed) — so create still never fails.
-     This replaces the 5-source fallback.
-   - Delete `knownSources`, `buildGraph`, `filterKnownSources`, `sourceSpec`.
-     Keep the useful deterministic extractors (email, schedule, time-of-day).
-3. **`llm.go`**: raise `max_tokens` (1024 → ~4096) so a full graph fits; add a
-   small multi-message helper for the repair turns. Keep the fail-safe contract.
+### Auto-routing (`run_service.go`, `validate/api.go`)
+Engine absent = AUTO: any typed node → `temporal`; legacy untyped digests →
+`native`. Explicit `?engine=` still wins. Prompt-compiled graphs are now also
+editable in the builder like hand-drawn ones.
 
-## Workstream B — Auto-routing to Temporal (Go)
-**Files:** `apps/api/internal/services/run_service.go`, `workflow_service.go`
+### Executor upgrades (`apps/reasoner`)
+- **Generic integration runtime** — renders `{{config.x}}` / `{{credentials.X}}`
+  (+ `{{json …}}`, `{{urlencode …}}` helpers), performs the request, lifts
+  `outputMap` fields; missing credential env vars degrade to record-intent with a
+  loud log. Basic auth supported.
+- **`tool.code` executes** (`sandbox.py`) — subprocess, 30s wall / 15s CPU /
+  512MB, stripped env, isolated tmp cwd. **Gated: `TOOL_CODE_ENABLED=1`**,
+  default off (process isolation, not a hardened VM — documented honestly).
+- **`tool.db` executes** against `TOOL_DB_URL` only (never the platform
+  Postgres); record-intent when unset.
+- **`logic.loop` fans out** its dominated body (`plan.loop_body`) once per item
+  with `{{item}}` / `{{loop.<key>.index}}`; collected `results` on the loop
+  output; gates inside a body prune that iteration only. Implemented in both the
+  per-node `DynamicWorkflow` (each body execution its own durable activity) and
+  the single-activity fallback.
 
-- Add `engineForNodes(nodes []domain.GraphNode) string`: returns `"temporal"` if
-  any node has a non-empty `Type`, else `"native"` (legacy digests still work).
-- In `RunService.Launch`, when `input.Engine == ""`, resolve engine from the
-  run's version graph instead of hardcoding `"native"`. Explicit `?engine=` wins.
-- Fix `AgentCount`/`countFetchersAndEditor` to count all nodes generically.
-- Result: prompt-built graphs execute on the reasoner; they also become editable
-  in the builder (removes the old "prompt graphs are read-only" limitation).
+## Verification (all passing)
+- Go: `go build ./... && go test ./...` in `apps/api` (planner fallback validity,
+  validation rules, layout, routing, schedule parsing).
+- Python: 39 tests in `apps/reasoner` (templating helpers, catalog routing,
+  integration http + missing-cred paths, sandbox happy/stripped-env/failure,
+  code/db gates, loop domination + fan-out + zero-items skip).
+- Web: `tsc --noEmit` clean; palette carries all 208 types grouped by cluster.
 
-## Workstream C — Close executor gaps (Python reasoner)
-**Files:** `apps/reasoner/reasoner/nodes.py`, new `sandbox.py`, `plan.py`,
-`engine.py`, `activities.py`, `workflow.py`, `config.py`
-
-1. **`tool.code` → real sandboxed run** (`sandbox.py`): subprocess for
-   Python/JS with hard timeout, `RLIMIT_CPU`/`RLIMIT_AS`, stripped env (no
-   inherited secrets), isolated temp cwd. Upstream outputs + run input passed as
-   JSON on stdin; stdout/last-expression captured as `{result, stdout}`. Honest
-   limits documented (process isolation, not a VM/gVisor jail).
-2. **`tool.db` → real execution, opt-in & safe**: execute SQL only against a
-   dedicated `TOOL_DB_URL` (new in `config.py`); when unset, keep record-intent.
-   Never touches the platform Postgres. Returns `{rows, rowCount}`.
-3. **`logic.loop` → per-item fan-out**:
-   - `plan.py`: pure helper computing a loop's **body** = descendants dominated
-     by the loop node (every root→node path passes through it).
-   - Execute the body once per resolved item, injecting `{{item}}` /
-     `{{loop.<key>.index}}`; collect per-item outputs into `outputs.<key>.results`.
-   - `engine.execute_graph`: implement fan-out inline (durable as one activity).
-   - `DynamicWorkflow`: the loop node's activity returns the item list; the
-     workflow iterates deterministically (recorded in history) invoking `run_node`
-     per (item, body-node) — preserves per-node durability. Non-loop graphs
-     unchanged.
-
-## Workstream D — Keep contract in sync (Web, minor)
-**File:** `apps/web/components/builder/node-catalog.ts`
-- Update help text: `tool.code`/`tool.db` now execute (with caveats); `logic.loop`
-  now fans out. Add `{{item}}` hint on loop-body fields. No structural changes.
-
-## Workstream E — Tests
-- **Go** (`planner_test.go`): valid graph emitted; repair recovers from a bad
-  graph; fallback is a valid typed graph with no key; `engineForNodes` selection;
-  cycle/bad-dep rejection.
-- **Python** (`tests/`): sandbox happy-path + timeout + no-network; `tool.db`
-  record vs execute; loop fan-out (N items → N body executions, results
-  collected); loop with a nested gate.
-
----
-
-## Execution approach (multi-agent)
-The project is coupled by the node contract, and worktree isolation is
-unavailable (not a git repo), so parallel file-mutating agents would conflict.
-Plan: I implement the coupled core (A, B, C) sequentially to keep the contract
-coherent, and delegate **non-overlapping** pieces to background agents where safe
-— e.g. one agent writes the Python sandbox module + its tests, another drafts the
-Go planner tests — then I integrate. I'll build/lint each side before wiring.
-
-## Verification
-- `go build ./...` + `go test ./internal/services/...` in `apps/api`.
-- `python -m pytest` in `apps/reasoner`.
-- End-to-end sanity: compile a non-digest prompt (e.g. "scrape my competitor's
-  pricing page daily, diff it, and Slack me changes") → confirm a valid typed
-  graph, engine=temporal, and a dispatched dynamic run.
-
-## Risks / honest limits
-- `tool.code` isolation is process-level (timeout + rlimits + clean env), not a
-  hardened VM. Documented; `TOOL_CODE_ENABLED` gate defaults off in shared envs.
-- `tool.db` executes only against an explicit `TOOL_DB_URL`; never the platform DB.
-- Requires the reasoner + Temporal running for prompt-built graphs to execute
-  (legacy native digests still run without them).
-- LLM graph quality depends on the contract prompt; the validate→repair loop +
-  typed fallback guarantee a runnable graph regardless.
+## Honest limits
+- Integration HTTP templates are authored against documented public APIs but not
+  live-tested per service; failures surface as node output (`status`/`error`),
+  never run crashes. Services needing SigV4/multi-step OAuth were omitted, not faked.
+- `tool.code` sandbox is process-level containment; enable deliberately.
+- Prompt-built graphs need the reasoner + Temporal running; legacy native digests
+  don't.
+- Platform triggers remain manual/schedule/webhook; service "events" are modeled
+  as pollable actions.

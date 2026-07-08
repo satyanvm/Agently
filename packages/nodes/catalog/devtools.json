@@ -1,0 +1,465 @@
+{
+  "cluster": "devtools",
+  "label": "Developer Tools",
+  "description": "Source control, issue tracking, CI/CD, deploys, monitoring and package registries.",
+  "nodes": [
+    {
+      "id": "github.createIssue",
+      "label": "GitHub: Create Issue",
+      "description": "Open a new issue in a GitHub repository via the REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github issue create open bug ticket report repo",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat", "help": "Repository owner (user or org)" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true, "placeholder": "hello-world" },
+        { "key": "title", "label": "Title", "control": "text", "required": true },
+        { "key": "body", "label": "Body", "control": "textarea", "required": false, "help": "Issue body (Markdown)" }
+      ],
+      "outputs": ["number", "html_url", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Personal access token or fine-grained token with Issues: write on the repo" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/issues",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+        "body": "{\"title\": {{json config.title}}, \"body\": {{json config.body}}}",
+        "outputMap": { "number": "number", "html_url": "html_url" }
+      }
+    },
+    {
+      "id": "github.listIssues",
+      "label": "GitHub: List Issues",
+      "description": "List issues in a GitHub repository, filtered by state.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github issues list open closed repo fetch bugs tickets",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "state", "label": "State", "control": "text", "required": true, "placeholder": "open", "help": "open, closed or all" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Issues: read on the repo (or any token for public repos)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/issues?state={{urlencode config.state}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
+      }
+    },
+    {
+      "id": "github.getRepo",
+      "label": "GitHub: Get Repository",
+      "description": "Fetch metadata for a GitHub repository (stars, forks, default branch, …).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github repo repository metadata stars forks info fetch details",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true }
+      ],
+      "outputs": ["full_name", "stargazers_count", "forks_count", "open_issues_count", "default_branch", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with repo read access (public repos work with any valid token)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        "outputMap": { "full_name": "full_name", "stargazers_count": "stargazers_count", "forks_count": "forks_count", "open_issues_count": "open_issues_count", "default_branch": "default_branch" }
+      }
+    },
+    {
+      "id": "github.listPullRequests",
+      "label": "GitHub: List Pull Requests",
+      "description": "List pull requests in a GitHub repository, filtered by state.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github pull requests pr list open merged closed review repo",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "state", "label": "State", "control": "text", "required": true, "placeholder": "open", "help": "open, closed or all" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Pull requests: read on the repo" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/pulls?state={{urlencode config.state}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
+      }
+    },
+    {
+      "id": "github.createComment",
+      "label": "GitHub: Create Issue Comment",
+      "description": "Add a comment to a GitHub issue or pull request.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github comment issue pull request reply post discuss",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "issueNumber", "label": "Issue / PR number", "control": "text", "required": true, "placeholder": "42" },
+        { "key": "commentBody", "label": "Comment", "control": "textarea", "required": true, "help": "Comment text (Markdown)" }
+      ],
+      "outputs": ["id", "html_url", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Issues: write on the repo" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/issues/{{urlencode config.issueNumber}}/comments",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+        "body": "{\"body\": {{json config.commentBody}}}",
+        "outputMap": { "id": "id", "html_url": "html_url" }
+      }
+    },
+    {
+      "id": "github.searchCode",
+      "label": "GitHub: Search Code",
+      "description": "Search code across GitHub with the code search API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github search code find grep source repo:qualifier query",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "addClass repo:jquery/jquery", "help": "Code search query; supports qualifiers like repo:, org:, language:, path:" }
+      ],
+      "outputs": ["total_count", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Any valid token — code search requires authentication" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/search/code?q={{urlencode config.query}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        "outputMap": { "total_count": "total_count" }
+      }
+    },
+    {
+      "id": "github.searchRepos",
+      "label": "GitHub: Search Repositories",
+      "description": "Search repositories across GitHub by keywords and qualifiers.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github search repositories repos find discover stars language topic",
+      "config": [
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "tetris language:assembly", "help": "Repo search query; supports qualifiers like language:, stars:>n, topic:" }
+      ],
+      "outputs": ["total_count", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Any valid token (raises the rate limit)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/search/repositories?q={{urlencode config.query}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        "outputMap": { "total_count": "total_count" }
+      }
+    },
+    {
+      "id": "github.getFileContents",
+      "label": "GitHub: Get File Contents",
+      "description": "Read a file from a GitHub repository (content returned base64-encoded).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github file contents read fetch raw blob path repo download",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "path", "label": "File path", "control": "text", "required": true, "placeholder": "src/index.js", "help": "Path within the repo (no leading slash)" },
+        { "key": "ref", "label": "Ref", "control": "text", "required": false, "placeholder": "main", "help": "Branch, tag or commit SHA (defaults to the default branch)" }
+      ],
+      "outputs": ["name", "sha", "content", "encoding", "status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Contents: read on the repo" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/contents/{{config.path}}?ref={{urlencode config.ref}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        "outputMap": { "name": "name", "sha": "sha", "content": "content", "encoding": "encoding" }
+      }
+    },
+    {
+      "id": "github.listCommits",
+      "label": "GitHub: List Commits",
+      "description": "List recent commits in a GitHub repository.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github commits list history log changes recent sha branch",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "perPage", "label": "Per page", "control": "text", "required": true, "placeholder": "10", "help": "Number of commits to return (max 100)" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Contents: read on the repo" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/commits?per_page={{urlencode config.perPage}}",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
+      }
+    },
+    {
+      "id": "github.dispatchWorkflow",
+      "label": "GitHub: Trigger Workflow",
+      "description": "Trigger a GitHub Actions workflow run via workflow_dispatch (returns 204 on success).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "github actions workflow dispatch trigger run ci pipeline deploy",
+      "config": [
+        { "key": "owner", "label": "Owner", "control": "text", "required": true, "placeholder": "octocat" },
+        { "key": "repo", "label": "Repository", "control": "text", "required": true },
+        { "key": "workflowId", "label": "Workflow", "control": "text", "required": true, "placeholder": "ci.yml", "help": "Workflow file name (e.g. ci.yml) or numeric workflow ID; must have a workflow_dispatch trigger" },
+        { "key": "ref", "label": "Ref", "control": "text", "required": true, "placeholder": "main", "help": "Branch or tag to run the workflow on" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "GITHUB_TOKEN", "help": "Token with Actions: write on the repo" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/actions/workflows/{{urlencode config.workflowId}}/dispatches",
+        "headers": { "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+        "body": "{\"ref\": {{json config.ref}}}"
+      }
+    },
+    {
+      "id": "gitlab.createIssue",
+      "label": "GitLab: Create Issue",
+      "description": "Open a new issue in a GitLab project via the REST API v4.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gitlab issue create open bug ticket project report",
+      "config": [
+        { "key": "projectId", "label": "Project", "control": "text", "required": true, "placeholder": "group/project", "help": "Numeric project ID or full path (e.g. group/project)" },
+        { "key": "title", "label": "Title", "control": "text", "required": true },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false, "help": "Issue description (Markdown)" }
+      ],
+      "outputs": ["iid", "web_url", "status", "body"],
+      "credentials": [{ "key": "GITLAB_TOKEN", "help": "Personal access token with api scope (gitlab.com)" }],
+      "http": {
+        "method": "POST",
+        "url": "https://gitlab.com/api/v4/projects/{{urlencode config.projectId}}/issues",
+        "headers": { "PRIVATE-TOKEN": "{{credentials.GITLAB_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"title\": {{json config.title}}, \"description\": {{json config.description}}}",
+        "outputMap": { "iid": "iid", "web_url": "web_url" }
+      }
+    },
+    {
+      "id": "gitlab.listMergeRequests",
+      "label": "GitLab: List Merge Requests",
+      "description": "List merge requests in a GitLab project, filtered by state.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gitlab merge requests mr list opened merged closed review project",
+      "config": [
+        { "key": "projectId", "label": "Project", "control": "text", "required": true, "placeholder": "group/project", "help": "Numeric project ID or full path (e.g. group/project)" },
+        { "key": "state", "label": "State", "control": "text", "required": true, "placeholder": "opened", "help": "opened, closed, merged, locked or all" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "GITLAB_TOKEN", "help": "Personal access token with read_api scope (gitlab.com)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://gitlab.com/api/v4/projects/{{urlencode config.projectId}}/merge_requests?state={{urlencode config.state}}",
+        "headers": { "PRIVATE-TOKEN": "{{credentials.GITLAB_TOKEN}}" }
+      }
+    },
+    {
+      "id": "jira.createIssue",
+      "label": "Jira: Create Issue",
+      "description": "Create an issue in Jira Cloud via the REST API v3.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jira issue create ticket task bug story atlassian project",
+      "config": [
+        { "key": "siteUrl", "label": "Site URL", "control": "text", "required": true, "placeholder": "https://your-domain.atlassian.net", "help": "Your Jira Cloud base URL, no trailing slash" },
+        { "key": "projectKey", "label": "Project key", "control": "text", "required": true, "placeholder": "ENG" },
+        { "key": "issueType", "label": "Issue type", "control": "text", "required": true, "placeholder": "Task", "help": "Issue type name, e.g. Task, Bug, Story" },
+        { "key": "summary", "label": "Summary", "control": "text", "required": true },
+        { "key": "description", "label": "Description", "control": "textarea", "required": true, "help": "Plain-text description (wrapped into Atlassian Document Format)" }
+      ],
+      "outputs": ["id", "key", "self", "status", "body"],
+      "credentials": [
+        { "key": "JIRA_EMAIL", "help": "Atlassian account email" },
+        { "key": "JIRA_API_TOKEN", "help": "API token from id.atlassian.com/manage-profile/security/api-tokens" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{config.siteUrl}}/rest/api/3/issue",
+        "auth": { "type": "basic", "username": "{{credentials.JIRA_EMAIL}}", "password": "{{credentials.JIRA_API_TOKEN}}" },
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"fields\": {\"project\": {\"key\": {{json config.projectKey}}}, \"issuetype\": {\"name\": {{json config.issueType}}}, \"summary\": {{json config.summary}}, \"description\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": {{json config.description}}}]}]}}}",
+        "outputMap": { "id": "id", "key": "key", "self": "self" }
+      }
+    },
+    {
+      "id": "jira.searchJql",
+      "label": "Jira: Search Issues (JQL)",
+      "description": "Search Jira Cloud issues with a JQL query via the enhanced search API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jira search jql query issues filter find atlassian list",
+      "config": [
+        { "key": "siteUrl", "label": "Site URL", "control": "text", "required": true, "placeholder": "https://your-domain.atlassian.net", "help": "Your Jira Cloud base URL, no trailing slash" },
+        { "key": "jql", "label": "JQL", "control": "textarea", "required": true, "placeholder": "project = ENG AND status = \"In Progress\" ORDER BY created DESC" },
+        { "key": "maxResults", "label": "Max results", "control": "text", "required": true, "placeholder": "20" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "JIRA_EMAIL", "help": "Atlassian account email" },
+        { "key": "JIRA_API_TOKEN", "help": "API token from id.atlassian.com/manage-profile/security/api-tokens" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{config.siteUrl}}/rest/api/3/search/jql?jql={{urlencode config.jql}}&maxResults={{urlencode config.maxResults}}&fields=summary,status,assignee,priority",
+        "auth": { "type": "basic", "username": "{{credentials.JIRA_EMAIL}}", "password": "{{credentials.JIRA_API_TOKEN}}" }
+      }
+    },
+    {
+      "id": "linear.createIssue",
+      "label": "Linear: Create Issue",
+      "description": "Create an issue in Linear via the GraphQL API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "linear issue create ticket task graphql team tracker",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "Linear team UUID (query the teams { nodes { id name } } GraphQL field to find it)" },
+        { "key": "title", "label": "Title", "control": "text", "required": true },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false, "help": "Issue description (Markdown)" }
+      ],
+      "outputs": ["success", "identifier", "url", "status", "body"],
+      "credentials": [{ "key": "LINEAR_API_KEY", "help": "Personal API key (lin_api_…) from Linear Settings → Security & access; sent as-is in the Authorization header" }],
+      "http": {
+        "method": "POST",
+        "url": "https://api.linear.app/graphql",
+        "headers": { "Authorization": "{{credentials.LINEAR_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"query\": \"mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }\", \"variables\": {\"input\": {\"teamId\": {{json config.teamId}}, \"title\": {{json config.title}}, \"description\": {{json config.description}}}}}",
+        "outputMap": { "success": "data.issueCreate.success", "identifier": "data.issueCreate.issue.identifier", "url": "data.issueCreate.issue.url" }
+      }
+    },
+    {
+      "id": "sentry.listIssues",
+      "label": "Sentry: List Issues",
+      "description": "List issues for a Sentry project, optionally filtered by a search query.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "sentry issues errors list monitoring exceptions crashes unresolved",
+      "config": [
+        { "key": "organizationSlug", "label": "Organization slug", "control": "text", "required": true, "placeholder": "my-org" },
+        { "key": "projectSlug", "label": "Project slug", "control": "text", "required": true, "placeholder": "my-app" },
+        { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "is:unresolved", "help": "Sentry search query, e.g. is:unresolved or is:assigned" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "SENTRY_AUTH_TOKEN", "help": "Auth token with project:read (or org auth token) from sentry.io settings" }],
+      "http": {
+        "method": "GET",
+        "url": "https://sentry.io/api/0/projects/{{urlencode config.organizationSlug}}/{{urlencode config.projectSlug}}/issues/?query={{urlencode config.query}}",
+        "headers": { "Authorization": "Bearer {{credentials.SENTRY_AUTH_TOKEN}}" }
+      }
+    },
+    {
+      "id": "pagerduty.triggerEvent",
+      "label": "PagerDuty: Trigger Event",
+      "description": "Trigger an alert event via the PagerDuty Events API v2.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "pagerduty alert incident trigger page oncall event escalate",
+      "config": [
+        { "key": "summary", "label": "Summary", "control": "text", "required": true, "help": "Brief description of the event" },
+        { "key": "source", "label": "Source", "control": "text", "required": true, "placeholder": "agently-workflow", "help": "Unique location of the affected system" },
+        { "key": "severity", "label": "Severity", "control": "text", "required": true, "placeholder": "error", "help": "critical, error, warning or info" }
+      ],
+      "outputs": ["dedup_key", "status", "body"],
+      "credentials": [{ "key": "PAGERDUTY_ROUTING_KEY", "help": "Integration/routing key (32 chars) from an Events API v2 integration on a service" }],
+      "http": {
+        "method": "POST",
+        "url": "https://events.pagerduty.com/v2/enqueue",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"routing_key\": {{json credentials.PAGERDUTY_ROUTING_KEY}}, \"event_action\": \"trigger\", \"payload\": {\"summary\": {{json config.summary}}, \"source\": {{json config.source}}, \"severity\": {{json config.severity}}}}",
+        "outputMap": { "dedup_key": "dedup_key" }
+      }
+    },
+    {
+      "id": "circleci.triggerPipeline",
+      "label": "CircleCI: Trigger Pipeline",
+      "description": "Trigger a pipeline for a project branch via the CircleCI API v2.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "circleci pipeline trigger build ci run branch deploy",
+      "config": [
+        { "key": "projectSlug", "label": "Project slug", "control": "text", "required": true, "placeholder": "gh/my-org/my-repo", "help": "vcs/org/repo, e.g. gh/my-org/my-repo or circleci/<org-id>/<project-id>" },
+        { "key": "branch", "label": "Branch", "control": "text", "required": true, "placeholder": "main" }
+      ],
+      "outputs": ["id", "number", "state", "status", "body"],
+      "credentials": [{ "key": "CIRCLECI_TOKEN", "help": "Personal API token from app.circleci.com/settings/user/tokens" }],
+      "http": {
+        "method": "POST",
+        "url": "https://circleci.com/api/v2/project/{{config.projectSlug}}/pipeline",
+        "headers": { "Circle-Token": "{{credentials.CIRCLECI_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"branch\": {{json config.branch}}}",
+        "outputMap": { "id": "id", "number": "number", "state": "state" }
+      }
+    },
+    {
+      "id": "vercel.listDeployments",
+      "label": "Vercel: List Deployments",
+      "description": "List recent deployments for the authenticated Vercel account or team.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "vercel deployments list deploy status preview production hosting",
+      "config": [
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "10", "help": "Max number of deployments to return" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [{ "key": "VERCEL_TOKEN", "help": "Access token from vercel.com/account/tokens (scope it to the right team)" }],
+      "http": {
+        "method": "GET",
+        "url": "https://api.vercel.com/v6/deployments?limit={{urlencode config.limit}}",
+        "headers": { "Authorization": "Bearer {{credentials.VERCEL_TOKEN}}" }
+      }
+    },
+    {
+      "id": "netlify.triggerBuildHook",
+      "label": "Netlify: Trigger Build Hook",
+      "description": "Trigger a site build via a Netlify build hook URL (the URL itself is the secret).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "netlify build hook trigger deploy site rebuild static hosting",
+      "config": [
+        { "key": "buildHookUrl", "label": "Build hook URL", "control": "text", "required": true, "placeholder": "https://api.netlify.com/build_hooks/…", "help": "From Site settings → Build & deploy → Build hooks" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "POST",
+        "url": "{{config.buildHookUrl}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{}"
+      }
+    },
+    {
+      "id": "npm.getPackageInfo",
+      "label": "npm: Get Package Info",
+      "description": "Fetch the latest published version metadata for an npm package (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "npm package registry version javascript node dependency lookup latest",
+      "config": [
+        { "key": "package", "label": "Package name", "control": "text", "required": true, "placeholder": "lodash", "help": "Package name, scoped names like @scope/name supported" }
+      ],
+      "outputs": ["name", "version", "description", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://registry.npmjs.org/{{urlencode config.package}}/latest",
+        "outputMap": { "name": "name", "version": "version", "description": "description" }
+      }
+    },
+    {
+      "id": "pypi.getPackageInfo",
+      "label": "PyPI: Get Package Info",
+      "description": "Fetch metadata for a Python package from the PyPI JSON API (keyless).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "pypi python package version pip dependency registry lookup latest",
+      "config": [
+        { "key": "package", "label": "Package name", "control": "text", "required": true, "placeholder": "requests" }
+      ],
+      "outputs": ["version", "summary", "status", "body"],
+      "credentials": [],
+      "http": {
+        "method": "GET",
+        "url": "https://pypi.org/pypi/{{urlencode config.package}}/json",
+        "outputMap": { "version": "info.version", "summary": "info.summary" }
+      }
+    }
+  ]
+}

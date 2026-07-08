@@ -20,22 +20,39 @@ import (
 	"time"
 )
 
+// llmMsg is one conversation turn for multi-message calls (the reduce phase's
+// validate→repair loop replays the model's own graph plus the validator errors).
+type llmMsg struct {
+	Role    string // "user" | "assistant"
+	Content string
+}
+
 // planLLM asks a model to return ONLY a JSON object answering `system`+`user`. It
 // returns the raw JSON text. Anthropic if ANTHROPIC_API_KEY is set, else OpenAI if
 // OPENAI_API_KEY is set, else an error (caller falls back to deterministic). A short
 // timeout keeps workflow creation snappy even when the model is slow/unreachable.
 func planLLM(ctx context.Context, system, user string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	return planLLMWith(ctx, "", 1024, 25*time.Second, system, []llmMsg{{Role: "user", Content: user}})
+}
+
+// planLLMWith is the general form: explicit model (empty = env default), token
+// budget, timeout, and a message history. Same provider chain and same hard rule
+// as planLLM: never on the critical path — every caller has a deterministic floor.
+func planLLMWith(ctx context.Context, model string, maxTokens int, timeout time.Duration, system string, msgs []llmMsg) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	client := &http.Client{Timeout: 25 * time.Second}
+	client := &http.Client{Timeout: timeout}
 
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		model := envOr("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-		return anthropicJSON(ctx, client, key, model, system, user)
+		if model == "" {
+			model = envOr("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+		}
+		return anthropicJSON(ctx, client, key, model, maxTokens, system, msgs)
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		model := envOr("OPENAI_MODEL", "gpt-4o")
-		return openaiJSON(ctx, client, key, model, system, user)
+		// A caller-pinned model names an Anthropic tier; on the OpenAI fallback
+		// chain we use the env-configured model instead.
+		return openaiJSON(ctx, client, key, envOr("OPENAI_MODEL", "gpt-4o"), maxTokens, system, msgs)
 	}
 	return "", fmt.Errorf("no LLM key set")
 }
@@ -47,12 +64,16 @@ func envOr(k, def string) string {
 	return def
 }
 
-func anthropicJSON(ctx context.Context, c *http.Client, key, model, system, user string) (string, error) {
+func anthropicJSON(ctx context.Context, c *http.Client, key, model string, maxTokens int, system string, msgs []llmMsg) (string, error) {
+	messages := make([]map[string]string, len(msgs))
+	for i, m := range msgs {
+		messages[i] = map[string]string{"role": m.Role, "content": m.Content}
+	}
 	body, _ := json.Marshal(map[string]any{
 		"model":      model,
-		"max_tokens": 1024,
+		"max_tokens": maxTokens,
 		"system":     system + "\nRespond with a single JSON object and nothing else.",
-		"messages":   []map[string]string{{"role": "user", "content": user}},
+		"messages":   messages,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
@@ -82,15 +103,17 @@ func anthropicJSON(ctx context.Context, c *http.Client, key, model, system, user
 	return b.String(), nil
 }
 
-func openaiJSON(ctx context.Context, c *http.Client, key, model, system, user string) (string, error) {
+func openaiJSON(ctx context.Context, c *http.Client, key, model string, maxTokens int, system string, msgs []llmMsg) (string, error) {
+	messages := make([]map[string]string, 0, len(msgs)+1)
+	messages = append(messages, map[string]string{"role": "system", "content": system + "\nRespond with a single JSON object and nothing else."})
+	for _, m := range msgs {
+		messages = append(messages, map[string]string{"role": m.Role, "content": m.Content})
+	}
 	body, _ := json.Marshal(map[string]any{
 		"model":           model,
-		"max_tokens":      1024,
+		"max_tokens":      maxTokens,
 		"response_format": map[string]string{"type": "json_object"},
-		"messages": []map[string]string{
-			{"role": "system", "content": system + "\nRespond with a single JSON object and nothing else."},
-			{"role": "user", "content": user},
-		},
+		"messages":        messages,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")

@@ -1,26 +1,38 @@
 package services
 
 // planner.go is the heart of "a prompt becomes a running agent crew." It compiles a
-// natural-language prompt (e.g. "every morning pull the latest AI research from arXiv
-// and Reddit and email me a digest at me@gmail.com") into:
+// natural-language prompt into a TYPED node graph over the shared integration
+// catalog (packages/nodes) — any topology, any of the hundreds of catalog nodes —
+// executed by the Temporal reasoner (apps/reasoner).
 //
-//   - a workflow GRAPH (fetcher agents in parallel → an Editor that synthesizes+emails)
-//   - a DEFAULT RUN INPUT (topic, arxivQuery, subreddits, urls, email) the worker reads
-//   - an optional schedule string (captured, not yet executed)
+// The compiler is MAP-REDUCE over the catalog, because the node universe is far too
+// large to hand a model whole:
 //
-// It is HYBRID and fail-safe: a deterministic keyword parser always produces a working
-// plan; if an LLM key is present, we overlay the model's richer understanding on top.
-// The deterministic layer is the floor — the feature works with no key and no network.
+//   MAP    — for every catalog cluster in parallel, a small fast model reads that
+//            cluster's compact index ("id — label — description") plus the user's
+//            request and returns the node ids that could plausibly serve it.
+//   REDUCE — the big model receives ONLY the selected nodes' full schemas (config
+//            keys, output fields, credential slots) plus the built-in core, and
+//            authors the complete graph: keys, types, dependsOn, per-node config
+//            with {{input.x}} / {{outputs.key.field}} templating.
 //
-// Why the node NAMES matter: the worker dispatches a fetcher to its source by matching
-// the agent name ("arxiv", "hn", "reddit", "news", "web") — see worker
-// internal/agent/dag.go fetchForAgent. So the names here are a contract with the engine.
+// The reduce output goes through a VALIDATE → REPAIR loop (structural rules
+// mirrored from reasoner/plan.py in nodecatalog.go); validator errors are fed back
+// to the model verbatim for up to two repair rounds.
+//
+// It stays HYBRID and fail-safe like its predecessor: with no LLM key, on timeout,
+// or if every repair fails, we fall back to a deterministic TYPED graph
+// (trigger → research agent → report [→ email]) so creating a workflow never fails.
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/agently/api/internal/domain"
 )
@@ -28,44 +40,56 @@ import (
 // Plan is the compiled result of a prompt: everything Create needs to persist a
 // runnable workflow.
 type Plan struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Tags         []string          `json:"tags"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	Tags         []string           `json:"tags"`
 	Nodes        []domain.GraphNode `json:"nodes"`
-	DefaultInput map[string]any    `json:"defaultInput"`
-	Schedule     *string           `json:"schedule"`
-	Sources      []string          `json:"sources"` // for UI preview ("arxiv","reddit",...)
-}
-
-// sourceSpec maps a detected source key to the fetcher node the worker understands.
-// Name MUST contain the substring the worker dispatches on (fetchForAgent).
-type sourceSpec struct {
-	key   string
-	name  string
-	role  domain.AgentRole
-	model string
-}
-
-var knownSources = map[string]sourceSpec{
-	"arxiv":  {"arxiv", "arXiv Fetcher", domain.RoleResearcher, "claude-sonnet-4-6"},
-	"hn":     {"hn", "HN Fetcher", domain.RoleResearcher, "claude-sonnet-4-6"},
-	"reddit": {"reddit", "Reddit Fetcher", domain.RoleResearcher, "claude-sonnet-4-6"},
-	"news":   {"news", "News Fetcher", domain.RoleResearcher, "claude-sonnet-4-6"},
-	"web":    {"web", "Web Fetcher", domain.RoleBrowser, "claude-sonnet-4-6"},
+	DefaultInput map[string]any     `json:"defaultInput"`
+	Schedule     *string            `json:"schedule"`
+	Sources      []string           `json:"sources"` // distinct services used, for UI preview
 }
 
 var (
 	reEmail     = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)
-	reURL       = regexp.MustCompile(`https?://[^\s,)"']+`)
 	reSubreddit = regexp.MustCompile(`(?i)r/([A-Za-z0-9_]+)`)
 )
+
+// Compilation model tiers. Map wants cheap+fast; reduce wants the strongest
+// available (graph authorship is the hard part). Both env-overridable.
+func mapModel() string    { return envOr("PLANNER_MAP_MODEL", "claude-haiku-4-5") }
+func reduceModel() string { return envOr("PLANNER_MODEL", "claude-opus-4-8") }
+
+// planCache memoizes compiled plans by (prompt,name,email,schedule) so the create
+// dialog's debounced live preview (POST /workflows/plan on every pause in typing)
+// doesn't re-run the full map-reduce for the same text, and Create reuses the
+// preview's work. Small and process-local by design.
+var planCache = struct {
+	sync.Mutex
+	m map[string]Plan
+}{m: map[string]Plan{}}
+
+const planCacheMax = 64
 
 // CompilePrompt turns a prompt into a Plan. name/schedule, when non-empty, override
 // what the planner infers. Never returns an error — it always falls back to a sane
 // deterministic plan.
 func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) Plan {
-	p := deterministicPlan(prompt, email)
-	overlayLLM(ctx, prompt, &p) // best-effort; leaves p intact on any failure
+	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule
+	planCache.Lock()
+	if p, ok := planCache.m[cacheKey]; ok {
+		planCache.Unlock()
+		return p
+	}
+	planCache.Unlock()
+
+	cat := LoadCatalog()
+	p := basePlan(prompt, email)
+
+	if compiled, ok := compileGraphLLM(ctx, cat, prompt, &p); ok {
+		p.Nodes = compiled
+	} else {
+		p.Nodes = fallbackGraph(p)
+	}
 
 	if strings.TrimSpace(name) != "" {
 		p.Name = name
@@ -77,75 +101,29 @@ func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) Pl
 		s := schedule
 		p.Schedule = &s
 	}
-	if email := firstEmail(email); email != "" {
-		p.DefaultInput["email"] = email
+	if e := firstEmail(email); e != "" {
+		p.DefaultInput["email"] = e
 	}
-	// If somehow no sources were detected, default to the AI Digest shape so the
-	// workflow is always runnable rather than an empty graph.
-	if len(p.Sources) == 0 {
-		p.Sources = []string{"arxiv", "hn"}
+	p.Nodes = layoutGraph(p.Nodes)
+	p.Sources = servicesOf(p.Nodes)
+
+	planCache.Lock()
+	if len(planCache.m) >= planCacheMax { // crude but sufficient: reset when full
+		planCache.m = map[string]Plan{}
 	}
-	p.Nodes = buildGraph(p.Sources)
-	p.DefaultInput["sources"] = toAnySlice(p.Sources)
+	planCache.m[cacheKey] = p
+	planCache.Unlock()
 	return p
 }
 
-// deterministicPlan is the floor: pure keyword/regex parsing, no network.
-func deterministicPlan(prompt, email string) Plan {
+// basePlan is the deterministic floor: name/description/schedule/input extracted
+// with regexes, no network. The graph itself comes from the LLM (or fallbackGraph).
+func basePlan(prompt, email string) Plan {
 	lower := strings.ToLower(prompt)
 	input := map[string]any{}
-	var sources []string
-	seen := map[string]bool{}
-	add := func(k string) {
-		if !seen[k] {
-			seen[k] = true
-			sources = append(sources, k)
-		}
-	}
-
-	if strings.Contains(lower, "arxiv") || strings.Contains(lower, "papers") || strings.Contains(lower, "research") {
-		add("arxiv")
-	}
-	if strings.Contains(lower, "hacker news") || strings.Contains(lower, "hackernews") ||
-		strings.Contains(lower, " hn") || strings.Contains(lower, "ycombinator") ||
-		strings.Contains(lower, " yc ") || strings.Contains(lower, "y combinator") || strings.Contains(lower, "startup") {
-		add("hn")
-	}
-	if strings.Contains(lower, "reddit") || reSubreddit.MatchString(prompt) {
-		add("reddit")
-		subs := []any{}
-		for _, m := range reSubreddit.FindAllStringSubmatch(prompt, -1) {
-			subs = append(subs, m[1])
-		}
-		if len(subs) > 0 {
-			input["subreddits"] = subs
-		}
-	}
-	if strings.Contains(lower, "google news") || strings.Contains(lower, "news.google") ||
-		strings.Contains(lower, "news") {
-		add("news")
-	}
-
-	// Explicit URLs and X/Twitter → the browser-driven Web Fetcher (visits arbitrary
-	// sites; X is auth-gated so it degrades gracefully to whatever it can extract).
-	urls := []any{}
-	for _, u := range reURL.FindAllString(prompt, -1) {
-		urls = append(urls, strings.TrimRight(u, ".,);"))
-	}
-	if strings.Contains(lower, "twitter") || strings.Contains(lower, "x.com") ||
-		regexp.MustCompile(`(?i)(^|\s)x(\s|,|$)`).MatchString(lower) {
-		urls = append(urls, "https://x.com/search?q="+strings.ReplaceAll(topicFrom(lower), " ", "%20")+"&f=live")
-	}
-	if len(urls) > 0 || strings.Contains(lower, "website") || strings.Contains(lower, "visit") || strings.Contains(lower, "browse") {
-		add("web")
-		if len(urls) > 0 {
-			input["urls"] = urls
-		}
-	}
 
 	topic := topicFrom(lower)
 	input["topic"] = topic
-	input["arxivQuery"] = "all:" + topic
 	if e := firstEmail(email + " " + prompt); e != "" {
 		input["email"] = e
 	}
@@ -153,110 +131,309 @@ func deterministicPlan(prompt, email string) Plan {
 	return Plan{
 		Name:         titleFrom(topic),
 		Description:  "Auto-generated from a prompt: " + truncateStr(strings.TrimSpace(prompt), 240),
-		Tags:         []string{"prompt", "digest"},
+		Tags:         []string{"prompt"},
 		DefaultInput: input,
 		Schedule:     scheduleFrom(lower),
-		Sources:      sources,
 	}
 }
 
-// overlayLLM asks the model for a richer structured plan and overlays valid fields
-// onto p. Any failure (no key, timeout, bad JSON) leaves p exactly as it was.
-func overlayLLM(ctx context.Context, prompt string, p *Plan) {
-	const system = `You convert a user's request into a workflow plan for an AI digest agent.
-Return JSON with keys:
-  name (short title), description (one sentence), topic (search subject),
-  sources (subset of ["arxiv","hn","reddit","news","web"]),
-  arxivQuery (an arXiv search query), subreddits (array of subreddit names without r/),
-  urls (array of full URLs the browser should visit), email (recipient or ""),
-  schedule (e.g. "daily 08:00" or "" if none).
-Pick sources that match the request. Use "news" for Google News, "web" for arbitrary
-sites or X/Twitter. Only include keys you are confident about.`
+/* --------------------------------- map phase --------------------------------- */
 
-	raw, err := planLLM(ctx, system, prompt)
-	if err != nil {
-		return
-	}
-	var out struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Topic       string   `json:"topic"`
-		Sources     []string `json:"sources"`
-		ArxivQuery  string   `json:"arxivQuery"`
-		Subreddits  []string `json:"subreddits"`
-		URLs        []string `json:"urls"`
-		Email       string   `json:"email"`
-		Schedule    string   `json:"schedule"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &out); err != nil {
-		return
-	}
+// mapPhase fans one small-model call out per integration cluster (builtin is
+// always in the reduce context and never routed). Each call sees only that
+// cluster's compact index. Failures and junk are dropped silently — a missed
+// cluster costs recall, never correctness. Returns selected ids, capped and
+// stable-sorted so the reduce prompt is reproducible.
+func mapPhase(ctx context.Context, cat *Catalog, prompt string) []string {
+	const system = `You route a user's automation request to integration nodes.
+Given the request and a catalog cluster index (one node per line: "id — label — description"),
+return JSON: {"nodes": ["id", ...]} listing ONLY ids from this index that could plausibly be
+used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if none apply.`
 
-	if out.Name != "" {
-		p.Name = out.Name
-	}
-	if out.Description != "" {
-		p.Description = out.Description
-	}
-	if out.Topic != "" {
-		p.DefaultInput["topic"] = out.Topic
-	}
-	if out.ArxivQuery != "" {
-		p.DefaultInput["arxivQuery"] = out.ArxivQuery
-	}
-	if len(out.Subreddits) > 0 {
-		p.DefaultInput["subreddits"] = toAnySlice(out.Subreddits)
-	}
-	if len(out.URLs) > 0 {
-		p.DefaultInput["urls"] = toAnySlice(out.URLs)
-	}
-	if out.Email != "" && firstEmail(out.Email) != "" {
-		p.DefaultInput["email"] = firstEmail(out.Email)
-	}
-	if out.Schedule != "" {
-		s := out.Schedule
-		p.Schedule = &s
-	}
-	if valid := filterKnownSources(out.Sources); len(valid) > 0 {
-		p.Sources = valid
-	}
-}
-
-// buildGraph lays out N fetcher nodes (col 0) → one Editor (col 1) depending on all.
-func buildGraph(sources []string) []domain.GraphNode {
-	nodes := make([]domain.GraphNode, 0, len(sources)+1)
-	deps := make([]string, 0, len(sources))
-	for i, key := range sources {
-		spec, ok := knownSources[key]
-		if !ok {
+	perCluster := 8
+	var (
+		mu       sync.Mutex
+		selected []string
+		wg       sync.WaitGroup
+	)
+	for _, key := range cat.sortedClusters() {
+		if key == "builtin" {
 			continue
 		}
-		nodes = append(nodes, domain.GraphNode{
-			Key: spec.key, AgentDefinitionID: nil, Name: spec.name, Role: spec.role,
-			Model: spec.model, Col: 0, Row: i, DependsOn: nil,
-		})
-		deps = append(deps, spec.key)
+		f := cat.Clusters[key]
+		wg.Add(1)
+		go func(f catalogFile) {
+			defer wg.Done()
+			user := "Request: " + prompt + "\n\nCluster \"" + f.Label + "\":\n" + clusterIndex(f)
+			raw, err := planLLMWith(ctx, mapModel(), 512, 12*time.Second, system, []llmMsg{{Role: "user", Content: user}})
+			if err != nil {
+				return
+			}
+			var out struct {
+				Nodes []string `json:"nodes"`
+			}
+			if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
+				return
+			}
+			valid := make([]string, 0, len(out.Nodes))
+			for _, id := range out.Nodes {
+				if n, ok := cat.ByID[id]; ok && n.Cluster == f.Cluster {
+					valid = append(valid, id)
+				}
+				if len(valid) == perCluster {
+					break
+				}
+			}
+			mu.Lock()
+			selected = append(selected, valid...)
+			mu.Unlock()
+		}(f)
 	}
-	nodes = append(nodes, domain.GraphNode{
-		Key: "editor", AgentDefinitionID: nil, Name: "Editor", Role: domain.RoleWriter,
-		Model: "claude-opus-4-8", Col: 1, Row: len(sources) / 2, DependsOn: deps,
-	})
+	wg.Wait()
+
+	sort.Strings(selected)
+	const totalCap = 32
+	if len(selected) > totalCap {
+		selected = selected[:totalCap]
+	}
+	return selected
+}
+
+/* -------------------------------- reduce phase -------------------------------- */
+
+// reduceGraphSpec is the JSON the reduce model must emit.
+type reduceGraphSpec struct {
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Schedule     string         `json:"schedule"`
+	DefaultInput map[string]any `json:"defaultInput"`
+	Nodes        []struct {
+		Key       string         `json:"key"`
+		Type      string         `json:"type"`
+		Name      string         `json:"name"`
+		DependsOn []string       `json:"dependsOn"`
+		Config    map[string]any `json:"config"`
+	} `json:"nodes"`
+}
+
+// compileGraphLLM runs map → reduce → validate → repair. ok=false means the caller
+// must use the deterministic fallback (no key, hard timeout, unrepairable output).
+func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) ([]domain.GraphNode, bool) {
+	selected := mapPhase(ctx, cat, prompt)
+	system := reduceSystemPrompt(cat, selected)
+
+	msgs := []llmMsg{{Role: "user", Content: prompt}}
+	const attempts = 3 // 1 author + 2 repairs
+	for i := 0; i < attempts; i++ {
+		raw, err := planLLMWith(ctx, reduceModel(), 4096, 45*time.Second, system, msgs)
+		if err != nil {
+			return nil, false // provider-level failure: retrying won't change it
+		}
+		var spec reduceGraphSpec
+		if err := json.Unmarshal([]byte(extractJSON(raw)), &spec); err != nil {
+			msgs = append(msgs,
+				llmMsg{Role: "assistant", Content: raw},
+				llmMsg{Role: "user", Content: "That was not a single valid JSON object (" + err.Error() + "). Return the full corrected JSON object and nothing else."},
+			)
+			continue
+		}
+		nodes := toGraphNodes(spec)
+		if errs := validateGraph(nodes, cat); len(errs) > 0 {
+			msgs = append(msgs,
+				llmMsg{Role: "assistant", Content: raw},
+				llmMsg{Role: "user", Content: "Your graph failed validation:\n- " + strings.Join(errs, "\n- ") + "\nReturn the full corrected JSON object and nothing else."},
+			)
+			continue
+		}
+		overlayMeta(spec, p)
+		return nodes, true
+	}
+	return nil, false
+}
+
+// reduceSystemPrompt assembles the node contract: graph rules + full schemas for
+// the built-in core and every map-selected integration node. This is the ONLY
+// world knowledge we give the model — no source cookbook, no examples of "good"
+// services. The model is trusted to design; the contract keeps it executable.
+func reduceSystemPrompt(cat *Catalog, selected []string) string {
+	var b strings.Builder
+	b.WriteString(`You are an expert workflow architect. Convert the user's request into a directed
+acyclic graph of typed nodes that the execution engine runs. Design the best possible workflow:
+decompose the request, parallelize independent work, and wire data between nodes precisely.
+
+Return ONE JSON object:
+{
+  "name": "short title",
+  "description": "one sentence",
+  "schedule": "daily HH:MM" | "hourly" | "",
+  "defaultInput": { "topic": "...", ... },
+  "nodes": [
+    { "key": "snake_case_unique", "type": "<node type id>", "name": "Human label",
+      "dependsOn": ["upstream_key", ...], "config": { ... } }
+  ]
+}
+
+GRAPH RULES (validated mechanically — violations are returned to you to fix):
+- Every "type" must be one of the node types listed below. No other types exist.
+- "key" values are unique; every "dependsOn" entry names an existing key; no cycles.
+- Fill every required config field of a node's schema.
+- Start with exactly one trigger node: trigger.schedule when the user wants a cadence
+  (also set "schedule"), else trigger.manual. Triggers have no dependsOn.
+- End with output node(s) matching how the user wants results delivered (email, slack,
+  report). When in doubt, finish with output.report.
+
+DATA FLOW (exactness matters — unknown references resolve to EMPTY STRING, silently):
+- Config strings support {{input.x}} (run input; put user-tunable values like topic or
+  email into defaultInput and reference them this way) and {{outputs.<key>.<field>}}
+  where <key> is an upstream node's key and <field> is one of ITS listed outputs.
+  Only reference fields listed in the upstream node's "outputs".
+- logic.branch / logic.filter conditions: "<lhs> <op> <rhs>" with == != > < >= <=,
+  each side a dotted ref (outputs.fetch.status) or literal — e.g. "outputs.fetch.status == 200".
+- logic.loop fans out its downstream branch once per item: config.items is a dotted ref
+  to a list (e.g. outputs.fetch.items); inside the body use {{item}} for the current
+  element; collected results appear as outputs.<loop_key>.results.
+
+DESIGN GUIDANCE:
+- agent.llm is the workhorse for reasoning, extraction, summarizing and reformatting —
+  prefer it over tool.code for text/JSON wrangling. Give it a crisp system prompt and
+  reference upstream outputs explicitly in its prompt.
+- tool.http can call ANY public API you know of (exact documented URLs only) — the
+  integration nodes below are conveniences, not limits. tool.browser reads pages that
+  need a real browser.
+- Integration nodes declaring credentials run only where the operator configured those
+  env vars; otherwise they record intent without failing the run. Still use them when
+  they fit — but when a keyless route exists (public API via tool.http), prefer it.
+- Keep graphs as small as the request allows. Parallel branches that later join are good.
+
+NODE TYPES AVAILABLE:
+
+`)
+	// Built-in core first, always.
+	for _, n := range cat.Clusters["builtin"].Nodes {
+		b.WriteString(nodeSchema(n))
+		b.WriteString("\n")
+	}
+	// Then the map-selected integrations.
+	for _, id := range selected {
+		if n, ok := cat.ByID[id]; ok {
+			b.WriteString(nodeSchema(n))
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// toGraphNodes converts the model's spec into domain nodes: role derived from the
+// type's kind, model left to per-node config / engine defaults, layout done later.
+func toGraphNodes(spec reduceGraphSpec) []domain.GraphNode {
+	nodes := make([]domain.GraphNode, 0, len(spec.Nodes))
+	for _, n := range spec.Nodes {
+		cfg := n.Config
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		model := ""
+		if m, ok := cfg["model"].(string); ok {
+			model = m
+		}
+		name := n.Name
+		if strings.TrimSpace(name) == "" {
+			name = n.Key
+		}
+		nodes = append(nodes, domain.GraphNode{
+			Key: n.Key, AgentDefinitionID: nil, Name: name, Role: roleForType(n.Type),
+			Model: model, DependsOn: n.DependsOn, Type: n.Type, Config: cfg,
+		})
+	}
+	return nodes
+}
+
+// overlayMeta copies the reduce model's plan-level fields onto p (only when set —
+// the deterministic floor stays intact otherwise).
+func overlayMeta(spec reduceGraphSpec, p *Plan) {
+	if spec.Name != "" {
+		p.Name = spec.Name
+	}
+	if spec.Description != "" {
+		p.Description = spec.Description
+	}
+	if spec.Schedule != "" {
+		s := spec.Schedule
+		p.Schedule = &s
+	}
+	for k, v := range spec.DefaultInput {
+		p.DefaultInput[k] = v
+	}
+}
+
+/* ------------------------------ fallback graph ------------------------------ */
+
+// fallbackGraph is the deterministic floor when no LLM is reachable: a small TYPED
+// graph (trigger → research agent → report [→ email]) that the reasoner executes
+// as-is. Replaces the old fixed five-source digest shape.
+func fallbackGraph(p Plan) []domain.GraphNode {
+	trigger := domain.GraphNode{
+		Key: "trigger", Name: "Manual trigger", Role: domain.RoleOrchestrator,
+		Type: "trigger.manual", Config: map[string]any{},
+	}
+	if p.Schedule != nil {
+		trigger.Key = "schedule"
+		trigger.Name = "Schedule"
+		trigger.Type = "trigger.schedule"
+	}
+	research := domain.GraphNode{
+		Key: "research", Name: "Research Agent", Role: domain.RoleOrchestrator,
+		Model: "claude-opus-4-8", DependsOn: []string{trigger.Key}, Type: "agent.llm",
+		Config: map[string]any{
+			"system": "You are a thorough research agent. Produce a well-structured, sourced digest.",
+			"prompt": "Research the following and write a concise, well-organized digest with the most important findings first:\n\nTopic: {{input.topic}}",
+		},
+	}
+	report := domain.GraphNode{
+		Key: "report", Name: "Report", Role: domain.RoleWriter,
+		DependsOn: []string{"research"}, Type: "output.report",
+		Config: map[string]any{"title": p.Name, "format": "markdown"},
+	}
+	nodes := []domain.GraphNode{trigger, research, report}
+	if _, ok := p.DefaultInput["email"]; ok {
+		nodes = append(nodes, domain.GraphNode{
+			Key: "email", Name: "Email digest", Role: domain.RoleWriter,
+			DependsOn: []string{"research"}, Type: "output.email",
+			Config: map[string]any{"to": "{{input.email}}", "subject": p.Name},
+		})
+	}
 	return nodes
 }
 
 /* ------------------------------- small helpers ------------------------------ */
 
-func filterKnownSources(in []string) []string {
-	var out []string
+// servicesOf lists the distinct integration services a graph touches ("slack",
+// "github", …) for the UI preview chip row. Built-in kinds are skipped.
+func servicesOf(nodes []domain.GraphNode) []string {
+	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true}
 	seen := map[string]bool{}
-	for _, s := range in {
-		s = strings.ToLower(strings.TrimSpace(s))
-		if _, ok := knownSources[s]; ok && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
+	var out []string
+	for _, n := range nodes {
+		svc := strings.SplitN(n.Type, ".", 2)[0]
+		if svc == "" || builtin[svc] || seen[svc] {
+			continue
 		}
+		seen[svc] = true
+		out = append(out, svc)
 	}
+	sort.Strings(out)
 	return out
+}
+
+// extractJSON tolerates models that wrap the object in prose or code fences: it
+// returns the substring from the first '{' to the matching final '}'.
+func extractJSON(raw string) string {
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		return raw[start : end+1]
+	}
+	return raw
 }
 
 // topicFrom pulls a rough subject out of the prompt: text after "about"/"on", else
@@ -393,3 +570,8 @@ func truncateStr(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// Unused-import guards for helpers kept for other callers.
+var _ = fmt.Sprintf
+var _ = reSubreddit
+var _ = toAnySlice
