@@ -1,0 +1,8 @@
+{
+  "cluster": "databases",
+  "label": "Postgres",
+  "description": "Run SQL against a PostgreSQL database.",
+  "source": { "piece": "postgres", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "No nodes transpiled. The piece's only action (run-query) connects via the Node 'pg' driver over raw TCP with SSL options, parameterized args (JSON array), and query/connection timeouts — there is no HTTP API to map to, so it is classified needsPieceRuntime. Trigger new-row skipped per rules.",
+  "nodes": []
+}

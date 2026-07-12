@@ -1,0 +1,216 @@
+{
+  "cluster": "crm-marketing",
+  "label": "Salesforce",
+  "description": "Work with Salesforce CRM records: create leads, contacts, opportunities, and tasks, and query or manage any object.",
+  "source": { "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Auth: AP uses OAuth2 with a per-connection instance URL; mapped to SALESFORCE_ACCESS_TOKEN plus SALESFORCE_INSTANCE_URL since every REST call is rooted at the org's instance URL. createRecord/updateRecord pass config.data through as the ENTIRE request body (required field, nothing embedded around it) because Salesforce requires a true JSON object of fields and templates cannot build one from string configs; this is a whole-body passthrough, not a value embedded inside a JSON literal. Optional text fields (FirstName, Email, Phone, Title, Description, LeadSource) are kept in bodies because the Salesforce REST API treats an empty string as null for text and picklist fields. Optional lookup-ID fields (AccountId, ContactId, WhoId, WhatId, RelatedToId) were DROPPED because an empty string is not a valid Salesforce ID and would be rejected; use createRecord/updateRecord with explicit data for those. createOpportunity drops the optional numeric Amount field (API requires a JSON number; include it via createRecord instead). Dynamic dropdowns (object, record, owner, stage, picklists) became text fields with help hints. AP's 'other_fields' extra-JSON props were dropped from the fixed-field nodes; the generic createRecord covers arbitrary fields. update-contact/update-lead were not transpiled: their optional fields sent as empty strings would destructively null out existing values, and salesforce.updateRecord covers them safely. find-record and find-records-by-query build quoted SOQL from user values (quote-escaping not expressible in templates); salesforce.runSoqlQuery covers them. delete-opportunity is covered by deleteRecord. Transpilable but skipped due to the 8-node cap: create-note, create-case, add-contact-to-campaign, add-lead-to-campaign, find-child-records, send-email. needsPieceRuntime: add-file-to-record (file upload, base64), create-attachment (file upload, base64), export-report (binary download + file write, multi-request), get-record-attachments (two queries merged), run-report (heavy response transformation), upsert-by-external-id (requires typed JSON boolean allOrNone and records array), upsert-by-external-id-bulk (multi-request Bulk API job orchestration with CSV upload). Triggers (not transpiled): new-case-attachment, new-contact, new-field-history-event, new-lead, new-updated-record, new-outbound-message, new-record, new-updated-file, new-case-in-queue.",
+  "nodes": [
+    {
+      "id": "salesforce.runSoqlQuery",
+      "label": "Salesforce: Run SOQL Query",
+      "description": "Execute a SOQL query against any Salesforce object and return the matching records.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce soql query select records search find crm sql",
+      "config": [
+        { "key": "query", "label": "SOQL Query", "control": "textarea", "required": true, "placeholder": "SELECT Id, Name FROM Account LIMIT 10", "help": "Full SOQL query, e.g. SELECT Id, Name FROM Lead WHERE Email = 'a@b.com'" }
+      ],
+      "outputs": ["records", "totalSize", "done", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/query?q={{urlencode config.query}}",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}" },
+        "outputMap": { "records": "records", "totalSize": "totalSize", "done": "done" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.createRecord",
+      "label": "Salesforce: Create Record",
+      "description": "Create a record of any Salesforce object from a JSON object of field values.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce create record object sobject insert new crm account custom",
+      "config": [
+        { "key": "object", "label": "Object", "control": "text", "required": true, "placeholder": "Account", "help": "API name of the object, e.g. Account, Contact, MyObject__c" },
+        { "key": "data", "label": "Record Data (JSON)", "control": "textarea", "required": true, "placeholder": "{\"Name\": \"Acme\", \"Industry\": \"Technology\"}", "help": "A JSON object of field names and values; sent verbatim as the request body" }
+      ],
+      "outputs": ["id", "success", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/{{config.object}}",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{{config.data}}",
+        "outputMap": { "id": "id", "success": "success" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.updateRecord",
+      "label": "Salesforce: Update Record",
+      "description": "Update fields on an existing record of any Salesforce object by ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce update record edit modify patch sobject crm",
+      "config": [
+        { "key": "object", "label": "Object", "control": "text", "required": true, "placeholder": "Account", "help": "API name of the object, e.g. Account, Contact, MyObject__c" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "placeholder": "001XXXXXXXXXXXXXXX", "help": "The 15- or 18-character Salesforce record ID" },
+        { "key": "data", "label": "Fields to Update (JSON)", "control": "textarea", "required": true, "placeholder": "{\"BillingCity\": \"San Francisco\"}", "help": "A JSON object of field names and new values; sent verbatim as the request body" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/{{config.object}}/{{config.recordId}}",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{{config.data}}"
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.deleteRecord",
+      "label": "Salesforce: Delete Record",
+      "description": "Delete a record of any Salesforce object by ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce delete record remove sobject crm",
+      "config": [
+        { "key": "object", "label": "Object", "control": "text", "required": true, "placeholder": "Account", "help": "API name of the object, e.g. Account, Contact, MyObject__c" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "placeholder": "001XXXXXXXXXXXXXXX", "help": "The 15- or 18-character Salesforce record ID" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/{{config.object}}/{{config.recordId}}",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.createContact",
+      "label": "Salesforce: Create Contact",
+      "description": "Add a new contact with name, email, phone, and title details.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce create contact person new crm customer",
+      "config": [
+        { "key": "lastName", "label": "Last Name", "control": "text", "required": true },
+        { "key": "firstName", "label": "First Name", "control": "text", "required": false },
+        { "key": "email", "label": "Email", "control": "text", "required": false, "placeholder": "jane@example.com" },
+        { "key": "phone", "label": "Phone", "control": "text", "required": false },
+        { "key": "title", "label": "Title", "control": "text", "required": false, "placeholder": "VP of Sales" }
+      ],
+      "outputs": ["id", "success", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/Contact",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"LastName\": {{json config.lastName}}, \"FirstName\": {{json config.firstName}}, \"Email\": {{json config.email}}, \"Phone\": {{json config.phone}}, \"Title\": {{json config.title}}}",
+        "outputMap": { "id": "id", "success": "success" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.createLead",
+      "label": "Salesforce: Create Lead",
+      "description": "Add a new sales lead with contact and company details.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce create lead prospect new crm sales pipeline",
+      "config": [
+        { "key": "lastName", "label": "Last Name", "control": "text", "required": true },
+        { "key": "company", "label": "Company", "control": "text", "required": true },
+        { "key": "firstName", "label": "First Name", "control": "text", "required": false },
+        { "key": "email", "label": "Email", "control": "text", "required": false, "placeholder": "jane@example.com" },
+        { "key": "phone", "label": "Phone", "control": "text", "required": false },
+        { "key": "leadSource", "label": "Lead Source", "control": "text", "required": false, "placeholder": "Web", "help": "A LeadSource picklist value from your org, e.g. Web, Phone Inquiry, Partner Referral" }
+      ],
+      "outputs": ["id", "success", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/Lead",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"LastName\": {{json config.lastName}}, \"Company\": {{json config.company}}, \"FirstName\": {{json config.firstName}}, \"Email\": {{json config.email}}, \"Phone\": {{json config.phone}}, \"LeadSource\": {{json config.leadSource}}}",
+        "outputMap": { "id": "id", "success": "success" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.createOpportunity",
+      "label": "Salesforce: Create Opportunity",
+      "description": "Open a new sales opportunity with a name, stage, and expected close date.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce create opportunity deal sale pipeline stage close crm",
+      "config": [
+        { "key": "name", "label": "Name", "control": "text", "required": true, "placeholder": "Acme - New Business" },
+        { "key": "closeDate", "label": "Close Date", "control": "text", "required": true, "placeholder": "2026-09-30", "help": "Expected close date in YYYY-MM-DD format" },
+        { "key": "stageName", "label": "Stage", "control": "text", "required": true, "placeholder": "Prospecting", "help": "An Opportunity stage from your org, e.g. Prospecting, Negotiation, Closed Won" }
+      ],
+      "outputs": ["id", "success", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/Opportunity",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"Name\": {{json config.name}}, \"CloseDate\": {{json config.closeDate}}, \"StageName\": {{json config.stageName}}}",
+        "outputMap": { "id": "id", "success": "success" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "salesforce.createTask",
+      "label": "Salesforce: Create Task",
+      "description": "Create a task assigned to a user, with a subject, status, and priority.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "salesforce create task todo activity assign follow up crm",
+      "config": [
+        { "key": "subject", "label": "Subject", "control": "text", "required": true, "placeholder": "Call back customer" },
+        { "key": "ownerId", "label": "Owner (User ID)", "control": "text", "required": true, "placeholder": "005XXXXXXXXXXXXXXX", "help": "Salesforce User ID of the task owner" },
+        { "key": "status", "label": "Status", "control": "text", "required": true, "placeholder": "Not Started", "help": "A Task status from your org, e.g. Not Started, In Progress, Completed" },
+        { "key": "priority", "label": "Priority", "control": "text", "required": true, "placeholder": "Normal", "help": "A Task priority from your org, e.g. High, Normal, Low" },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false }
+      ],
+      "outputs": ["id", "success", "status", "body"],
+      "credentials": [
+        { "key": "SALESFORCE_ACCESS_TOKEN", "help": "OAuth2 access token with the api scope" },
+        { "key": "SALESFORCE_INSTANCE_URL", "help": "Your org's instance URL, e.g. https://yourorg.my.salesforce.com" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.SALESFORCE_INSTANCE_URL}}/services/data/v56.0/sobjects/Task",
+        "headers": { "Authorization": "Bearer {{credentials.SALESFORCE_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"Subject\": {{json config.subject}}, \"OwnerId\": {{json config.ownerId}}, \"Status\": {{json config.status}}, \"Priority\": {{json config.priority}}, \"Description\": {{json config.description}}}",
+        "outputMap": { "id": "id", "success": "success" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "salesforce", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

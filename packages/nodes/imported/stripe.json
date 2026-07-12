@@ -1,0 +1,215 @@
+{
+  "cluster": "commerce-finance",
+  "label": "Stripe",
+  "description": "Accept payments and manage customers, subscriptions, refunds, and invoices in Stripe.",
+  "source": { "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Stripe's API is form-encoded, so bodies use urlencode templating throughout (no JSON-body typing issues). Simplifications: createCustomer drops the optional address block (empty address[country] etc. risk validation errors); description/phone are kept because Stripe accepts empty strings for free-text fields. createPaymentIntent takes amount in the smallest currency unit directly (AP multiplied a decimal by 100) and drops optional customer/payment_method/confirm/return_url/receipt_email — empty strings there are rejected or require conditional inclusion. createRefund is full-refund only (optional amount/reason cannot be conditionally included; empty values are rejected). createSubscription supports a single price item (AP supported an item array) and drops collection_method/trial/metadata. cancelSubscription cancels immediately via DELETE; AP's cancel-at-period-end variant needs a conditional branch between two different requests. searchCustomers sends the search query as a proper query param (AP source put it in a GET body). AP's find-invoice and retrieve-invoice hit the identical endpoint — deduped into one getInvoice node. Transpilable but omitted due to the 8-action cap: create-product, create-price, create-invoice, retrieve-payment-intent, retrieve-payout, deactivate-payment-link. update-customer omitted: every field is optional and Stripe rejects empty-string email/address values, so a fixed template cannot express a partial update. Live-catalog stripe nodes (listCharges, createPaymentLink, listCustomers, getBalance) have no id collisions with this batch; AP's create-payment-link was skipped as needsPieceRuntime and the live node already covers the simple case.",
+  "nodes": [
+    {
+      "id": "stripe.createCustomer",
+      "label": "Stripe: Create Customer",
+      "description": "Add a new customer record to your Stripe account.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe customer create new billing account buyer user add",
+      "config": [
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com" },
+        { "key": "name", "label": "Name", "control": "text", "required": true, "placeholder": "Jane Doe" },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false, "help": "Internal note shown in the Stripe dashboard" },
+        { "key": "phone", "label": "Phone", "control": "text", "required": false }
+      ],
+      "outputs": ["id", "email", "name", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/customers",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "email={{urlencode config.email}}&name={{urlencode config.name}}&description={{urlencode config.description}}&phone={{urlencode config.phone}}",
+        "outputMap": { "id": "id", "email": "email", "name": "name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.searchCustomers",
+      "label": "Stripe: Search Customers",
+      "description": "Look up Stripe customers matching an email address.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe customer search find lookup email query match",
+      "config": [
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com", "help": "Exact email address to search for" }
+      ],
+      "outputs": ["data", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/customers/search?query=email%3A%27{{urlencode config.email}}%27",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}"
+        },
+        "outputMap": { "data": "data" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.getCustomer",
+      "label": "Stripe: Get Customer",
+      "description": "Fetch a Stripe customer's full record by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe customer get retrieve fetch details by id",
+      "config": [
+        { "key": "customerId", "label": "Customer ID", "control": "text", "required": true, "placeholder": "cus_…" }
+      ],
+      "outputs": ["id", "email", "name", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/customers/{{urlencode config.customerId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}"
+        },
+        "outputMap": { "id": "id", "email": "email", "name": "name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.createPaymentIntent",
+      "label": "Stripe: Create Payment Intent",
+      "description": "Start a payment flow by creating a payment intent for an amount and currency.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe payment intent charge pay collect money create checkout",
+      "config": [
+        { "key": "amount", "label": "Amount", "control": "text", "required": true, "placeholder": "1050", "help": "Amount in the smallest currency unit, e.g. 1050 = $10.50" },
+        { "key": "currency", "label": "Currency", "control": "select", "required": true, "options": ["usd", "eur", "gbp", "aud", "cad", "chf", "cny", "jpy", "inr", "sgd"] },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false, "help": "Shown on the payment in the Stripe dashboard" }
+      ],
+      "outputs": ["id", "clientSecret", "intentStatus", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/payment_intents",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "amount={{urlencode config.amount}}&currency={{urlencode config.currency}}&description={{urlencode config.description}}",
+        "outputMap": { "id": "id", "clientSecret": "client_secret", "intentStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.createRefund",
+      "label": "Stripe: Create Refund",
+      "description": "Refund a payment in full by its payment intent ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe refund money back return payment reverse chargeback",
+      "config": [
+        { "key": "paymentIntentId", "label": "Payment Intent ID", "control": "text", "required": true, "placeholder": "pi_…", "help": "The payment to refund; the full amount is refunded" }
+      ],
+      "outputs": ["id", "amount", "refundStatus", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/refunds",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "payment_intent={{urlencode config.paymentIntentId}}",
+        "outputMap": { "id": "id", "amount": "amount", "refundStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.createSubscription",
+      "label": "Stripe: Create Subscription",
+      "description": "Subscribe a customer to a recurring price.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe subscription create recurring billing plan subscribe start",
+      "config": [
+        { "key": "customerId", "label": "Customer ID", "control": "text", "required": true, "placeholder": "cus_…" },
+        { "key": "priceId", "label": "Price ID", "control": "text", "required": true, "placeholder": "price_…", "help": "A recurring Price from your Stripe Products" }
+      ],
+      "outputs": ["id", "subscriptionStatus", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/subscriptions",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "customer={{urlencode config.customerId}}&items[0][price]={{urlencode config.priceId}}",
+        "outputMap": { "id": "id", "subscriptionStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.cancelSubscription",
+      "label": "Stripe: Cancel Subscription",
+      "description": "Cancel a subscription immediately by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe subscription cancel stop end terminate unsubscribe delete",
+      "config": [
+        { "key": "subscriptionId", "label": "Subscription ID", "control": "text", "required": true, "placeholder": "sub_…", "help": "Cancels immediately, not at period end" }
+      ],
+      "outputs": ["id", "subscriptionStatus", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.stripe.com/v1/subscriptions/{{urlencode config.subscriptionId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}"
+        },
+        "outputMap": { "id": "id", "subscriptionStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "stripe.getInvoice",
+      "label": "Stripe: Get Invoice",
+      "description": "Fetch an invoice's details, total, and hosted payment URL by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "stripe invoice get retrieve find fetch bill lookup by id",
+      "config": [
+        { "key": "invoiceId", "label": "Invoice ID", "control": "text", "required": true, "placeholder": "in_…" }
+      ],
+      "outputs": ["id", "invoiceStatus", "total", "hostedInvoiceUrl", "status", "body"],
+      "credentials": [
+        { "key": "STRIPE_SECRET_KEY", "help": "Secret key (sk_live_… or sk_test_…) from the Stripe dashboard, Developers → API keys" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.stripe.com/v1/invoices/{{urlencode config.invoiceId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.STRIPE_SECRET_KEY}}"
+        },
+        "outputMap": { "id": "id", "invoiceStatus": "status", "total": "total", "hostedInvoiceUrl": "hosted_invoice_url" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "stripe", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

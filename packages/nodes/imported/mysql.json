@@ -1,0 +1,8 @@
+{
+  "cluster": "databases",
+  "label": "MySQL",
+  "description": "Run queries and manage rows in a MySQL database.",
+  "source": { "piece": "mysql", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "No nodes transpiled. Every action (select_rows/find-rows, insert_row, update_rows, delete_rows, get_tables, execute_query) opens a raw TCP connection via the promise-mysql driver in mysqlConnect() (src/lib/common/index.ts) — a DB SDK client, not an HTTP request — and additionally builds parameterized SQL with sqlstring escaping and typed args arrays. MySQL exposes no vendor HTTP API, so none of this is expressible in the http runtime. All 6 actions classified needsPieceRuntime; a native runtime already covers this space in Agently (TOOL_DB_URL-gated DB tooling). Auth is CustomAuth with host/port/user/password/database fields, which would map to MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE if a piece runtime adopts it.",
+  "nodes": []
+}

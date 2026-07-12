@@ -1,0 +1,337 @@
+{
+  "cluster": "productivity",
+  "label": "ClickUp",
+  "description": "Task and project management across ClickUp workspaces, spaces, and lists.",
+  "source": { "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "clickup.createTask SKIPPED: live catalog already has an equal-or-better node (template-safe transpile of AP create_task cannot add priority/assignees/due_date/custom_fields because they require typed JSON values). getTask drops the optional include_subtasks boolean query param (blank value not tolerated). updateTask keeps only name (required) and description; status/priority/assignees dropped — status rejects empty string, priority is a JSON number, assignees is {add,rem} number arrays. Per ClickUp docs an empty-string description on update is ignored (clearing requires a single space), so the optional key is safe. createTaskComment hardcodes notify_all:true (JSON literal, matching AP behavior) and drops the optional assignee (JSON number; AP falls back to a second /user request we cannot express). listTeamTasks keeps only workspaceId + page (required, default 0); assignees/tags/space_ids/list_ids/order_by/reverse/include_closed dropped because blank query values are not tolerated and arrays cannot be encoded. Auth is AP OAuth2 -> CLICKUP_ACCESS_TOKEN with Bearer prefix; the pre-existing catalog createTask node uses a personal CLICKUP_API_TOKEN without Bearer — both are valid ClickUp auth styles.",
+  "nodes": [
+    {
+      "id": "clickup.getTask",
+      "label": "ClickUp: Get Task",
+      "description": "Fetch a single ClickUp task by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup task get fetch read details ticket work item lookup",
+      "config": [
+        {
+          "key": "taskId",
+          "label": "Task ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "8669p1zvv",
+          "help": "The task ID (from the task URL or API)"
+        }
+      ],
+      "outputs": ["id", "name", "url", "taskStatus", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "url": "url",
+          "taskStatus": "status.status"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.updateTask",
+      "label": "ClickUp: Update Task",
+      "description": "Rename a ClickUp task and optionally replace its description.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup task update edit rename change description modify",
+      "config": [
+        {
+          "key": "taskId",
+          "label": "Task ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "8669p1zvv",
+          "help": "ID of the task to update"
+        },
+        {
+          "key": "name",
+          "label": "Task Name",
+          "control": "text",
+          "required": true,
+          "help": "New name for the task"
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "control": "textarea",
+          "required": false,
+          "help": "New description; leave blank to keep the current one"
+        }
+      ],
+      "outputs": ["id", "name", "url", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "PUT",
+        "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"name\": {{json config.name}}, \"description\": {{json config.description}}}",
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "url": "url"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.deleteTask",
+      "label": "ClickUp: Delete Task",
+      "description": "Permanently remove a task from ClickUp.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup task delete remove trash destroy",
+      "config": [
+        {
+          "key": "taskId",
+          "label": "Task ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "8669p1zvv",
+          "help": "ID of the task to delete"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Accept": "application/json"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.createTaskComment",
+      "label": "ClickUp: Create Task Comment",
+      "description": "Post a comment on a ClickUp task and notify its watchers.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup comment task post reply note discuss message",
+      "config": [
+        {
+          "key": "taskId",
+          "label": "Task ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "8669p1zvv",
+          "help": "ID of the task to comment on"
+        },
+        {
+          "key": "commentText",
+          "label": "Comment",
+          "control": "textarea",
+          "required": true
+        }
+      ],
+      "outputs": ["id", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}/comment",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"comment_text\": {{json config.commentText}}, \"notify_all\": true}",
+        "outputMap": {
+          "id": "id"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.getTaskComments",
+      "label": "ClickUp: Get Task Comments",
+      "description": "Retrieve the comments posted on a ClickUp task.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup comments task list read discussion thread fetch",
+      "config": [
+        {
+          "key": "taskId",
+          "label": "Task ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "8669p1zvv",
+          "help": "ID of the task whose comments to fetch"
+        }
+      ],
+      "outputs": ["comments", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}/comment",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "comments": "comments"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.createList",
+      "label": "ClickUp: Create List",
+      "description": "Create a folderless list inside a ClickUp space.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup list create folderless space new project board",
+      "config": [
+        {
+          "key": "spaceId",
+          "label": "Space ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "54650507",
+          "help": "ID of the space to create the list in"
+        },
+        {
+          "key": "name",
+          "label": "List Name",
+          "control": "text",
+          "required": true
+        }
+      ],
+      "outputs": ["id", "name", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.clickup.com/api/v2/space/{{urlencode config.spaceId}}/list",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"name\": {{json config.name}}}",
+        "outputMap": {
+          "id": "id",
+          "name": "name"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.listSpaces",
+      "label": "ClickUp: List Spaces",
+      "description": "List the spaces in a ClickUp workspace.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup spaces list workspace team get browse enumerate",
+      "config": [
+        {
+          "key": "workspaceId",
+          "label": "Workspace ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "36003581",
+          "help": "Workspace (team) ID, visible in ClickUp URLs"
+        }
+      ],
+      "outputs": ["spaces", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.clickup.com/api/v2/team/{{urlencode config.workspaceId}}/space",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "spaces": "spaces"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "clickup.listTeamTasks",
+      "label": "ClickUp: List Team Tasks",
+      "description": "Fetch a page of open tasks across a ClickUp workspace.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "clickup tasks list team workspace search browse filter page",
+      "config": [
+        {
+          "key": "workspaceId",
+          "label": "Workspace ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "36003581",
+          "help": "Workspace (team) ID, visible in ClickUp URLs"
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Page number to fetch, starting at 0 (100 tasks per page)"
+        }
+      ],
+      "outputs": ["tasks", "status", "body"],
+      "credentials": [
+        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.clickup.com/api/v2/team/{{urlencode config.workspaceId}}/task?page={{urlencode config.page}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "tasks": "tasks"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+{
+  "cluster": "crm-marketing",
+  "label": "Webflow",
+  "description": "Manage Webflow CMS collections, items, and e-commerce orders over the REST API.",
+  "source": { "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Piece source targets Webflow's legacy v1 API (no version prefix), which Webflow has sunset; nodes were upgraded to the current v2 endpoints (/v2/...) and v2 response paths using vendor API knowledge. Simplifications: find-collection-item's client-side field filtering cannot be templated, so it is exposed as listCollectionItems (fetch items, filter downstream); its optional limit/offset query params were dropped because empty query values are not tolerated (API defaults apply). fulfill-order's optional boolean sendOrderFulfilledEmail was dropped per typed-JSON rules (emails are not sent; body is {}). refund-order and unfulfill-order are transpilable single POSTs but were left out under the 8-action cap in favor of more generally useful CMS operations.",
+  "nodes": [
+    {
+      "id": "webflow.listSites",
+      "label": "Webflow: List Sites",
+      "description": "Retrieve all Webflow sites the token can access.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow sites list websites cms projects",
+      "config": [],
+      "outputs": ["sites", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs sites:read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.webflow.com/v2/sites",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" },
+        "outputMap": { "sites": "sites" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.listCollections",
+      "label": "Webflow: List Collections",
+      "description": "Retrieve all CMS collections belonging to a Webflow site.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow collections list cms site content types",
+      "config": [
+        { "key": "siteId", "label": "Site ID", "control": "text", "required": true, "placeholder": "580e63e98c9a982ac9b8b741", "help": "Webflow site ID (use List Sites to find it)" }
+      ],
+      "outputs": ["collections", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs cms:read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.webflow.com/v2/sites/{{urlencode config.siteId}}/collections",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" },
+        "outputMap": { "collections": "collections" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.listCollectionItems",
+      "label": "Webflow: List Collection Items",
+      "description": "Fetch the items of a CMS collection so they can be inspected or filtered downstream.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow cms items list collection find search entries content",
+      "config": [
+        { "key": "collectionId", "label": "Collection ID", "control": "text", "required": true, "placeholder": "580e63fc8c9a982ac9b8b745", "help": "CMS collection ID (use List Collections to find it)" }
+      ],
+      "outputs": ["items", "pagination", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs cms:read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.webflow.com/v2/collections/{{urlencode config.collectionId}}/items",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" },
+        "outputMap": { "items": "items", "pagination": "pagination" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.getCollectionItem",
+      "label": "Webflow: Get Collection Item",
+      "description": "Fetch a single CMS item from a collection by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow cms item get read fetch collection entry",
+      "config": [
+        { "key": "collectionId", "label": "Collection ID", "control": "text", "required": true, "help": "CMS collection ID (use List Collections to find it)" },
+        { "key": "itemId", "label": "Item ID", "control": "text", "required": true, "help": "CMS item ID" }
+      ],
+      "outputs": ["id", "fieldData", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs cms:read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.webflow.com/v2/collections/{{urlencode config.collectionId}}/items/{{urlencode config.itemId}}",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" },
+        "outputMap": { "id": "id", "fieldData": "fieldData" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.deleteCollectionItem",
+      "label": "Webflow: Delete Collection Item",
+      "description": "Remove a CMS item from a collection by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow cms item delete remove collection entry",
+      "config": [
+        { "key": "collectionId", "label": "Collection ID", "control": "text", "required": true, "help": "CMS collection ID (use List Collections to find it)" },
+        { "key": "itemId", "label": "Item ID", "control": "text", "required": true, "help": "CMS item ID to delete" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs cms:write scope" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.webflow.com/v2/collections/{{urlencode config.collectionId}}/items/{{urlencode config.itemId}}",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.publishCollectionItem",
+      "label": "Webflow: Publish Collection Item",
+      "description": "Push a staged CMS item live on the published site.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow cms item publish live push release collection",
+      "config": [
+        { "key": "collectionId", "label": "Collection ID", "control": "text", "required": true, "help": "CMS collection ID (use List Collections to find it)" },
+        { "key": "itemId", "label": "Item ID", "control": "text", "required": true, "help": "CMS item ID to publish" }
+      ],
+      "outputs": ["publishedItemIds", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs cms:write scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.webflow.com/v2/collections/{{urlencode config.collectionId}}/items/publish",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"itemIds\": [{{json config.itemId}}]}",
+        "outputMap": { "publishedItemIds": "publishedItemIds" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.getOrder",
+      "label": "Webflow: Get Order",
+      "description": "Fetch a single e-commerce order from a site by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow ecommerce order get find lookup purchase",
+      "config": [
+        { "key": "siteId", "label": "Site ID", "control": "text", "required": true, "help": "Webflow site ID (use List Sites to find it)" },
+        { "key": "orderId", "label": "Order ID", "control": "text", "required": true, "placeholder": "5e8518516e147040726cc415", "help": "E-commerce order ID" }
+      ],
+      "outputs": ["orderId", "orderStatus", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs ecommerce:read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.webflow.com/v2/sites/{{urlencode config.siteId}}/orders/{{urlencode config.orderId}}",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}" },
+        "outputMap": { "orderId": "orderId", "orderStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "webflow.fulfillOrder",
+      "label": "Webflow: Fulfill Order",
+      "description": "Mark an e-commerce order as fulfilled.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "webflow ecommerce order fulfill ship complete",
+      "config": [
+        { "key": "siteId", "label": "Site ID", "control": "text", "required": true, "help": "Webflow site ID (use List Sites to find it)" },
+        { "key": "orderId", "label": "Order ID", "control": "text", "required": true, "help": "E-commerce order ID to fulfill" }
+      ],
+      "outputs": ["orderId", "orderStatus", "status", "body"],
+      "credentials": [
+        { "key": "WEBFLOW_ACCESS_TOKEN", "help": "OAuth2 access token (a Webflow Site API token also works as a Bearer token); needs ecommerce:write scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.webflow.com/v2/sites/{{urlencode config.siteId}}/orders/{{urlencode config.orderId}}/fulfill",
+        "headers": { "Authorization": "Bearer {{credentials.WEBFLOW_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{}",
+        "outputMap": { "orderId": "orderId", "orderStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "webflow", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

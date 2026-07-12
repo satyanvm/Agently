@@ -1,0 +1,82 @@
+{
+  "cluster": "communication",
+  "label": "Zoom",
+  "description": "Schedule and look up Zoom meetings and register attendees.",
+  "source": { "piece": "zoom", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "createMeeting: hardcoded type=2 (scheduled) since 'type' is a JSON number templates cannot emit; startTime is required in ISO 8601 UTC ('Z' suffix) so no timezone field is needed; numeric/boolean fields (duration, settings.* toggles, auto_recording/audio enums) dropped — Zoom applies account defaults; agenda kept optional because Zoom accepts an empty agenda string. addMeetingRegistrant: kept first_name/last_name/email only; other optional profile fields (country, phone, no_of_employees, custom_questions object mapping) dropped because empty-string values risk rejection or need object transformation. getMeeting: dropped optional occurrence_id / show_previous_occurrences query params rather than emit empty query values. zoom_update_meeting classified needsPieceRuntime: its PATCH body is built conditionally per provided field and includes booleans — empty-string values would clear or corrupt meeting settings. The piece's generic custom-API-call action was skipped as framework boilerplate.",
+  "nodes": [
+    {
+      "id": "zoom.createMeeting",
+      "label": "Zoom: Create Meeting",
+      "description": "Schedule a new Zoom meeting and get back its join and start links.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "zoom create meeting schedule video call conference invite",
+      "config": [
+        { "key": "topic", "label": "Topic", "control": "text", "required": true, "placeholder": "Weekly sync", "help": "Title of the meeting" },
+        { "key": "startTime", "label": "Start Time", "control": "text", "required": true, "placeholder": "2026-07-15T14:00:00Z", "help": "ISO 8601 in UTC with a trailing Z" },
+        { "key": "agenda", "label": "Agenda", "control": "textarea", "required": false, "help": "Optional meeting agenda text" }
+      ],
+      "outputs": ["id", "joinUrl", "startUrl", "password", "status", "body"],
+      "credentials": [
+        { "key": "ZOOM_ACCESS_TOKEN", "help": "OAuth2 access token from a Zoom Marketplace app with the meeting:write:meeting scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.zoom.us/v2/users/me/meetings",
+        "headers": { "Authorization": "Bearer {{credentials.ZOOM_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"topic\": {{json config.topic}}, \"type\": 2, \"start_time\": {{json config.startTime}}, \"agenda\": {{json config.agenda}}}",
+        "outputMap": { "id": "id", "joinUrl": "join_url", "startUrl": "start_url", "password": "password" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "zoom", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "zoom.getMeeting",
+      "label": "Zoom: Get Meeting",
+      "description": "Fetch the details of a Zoom meeting by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "zoom get meeting find lookup details join url video call",
+      "config": [
+        { "key": "meetingId", "label": "Meeting ID", "control": "text", "required": true, "placeholder": "85746065123", "help": "Numeric meeting ID" }
+      ],
+      "outputs": ["id", "topic", "startTime", "duration", "joinUrl", "meetingStatus", "status", "body"],
+      "credentials": [
+        { "key": "ZOOM_ACCESS_TOKEN", "help": "OAuth2 access token from a Zoom Marketplace app with the meeting:read:meeting scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.zoom.us/v2/meetings/{{urlencode config.meetingId}}",
+        "headers": { "Authorization": "Bearer {{credentials.ZOOM_ACCESS_TOKEN}}" },
+        "outputMap": { "id": "id", "topic": "topic", "startTime": "start_time", "duration": "duration", "joinUrl": "join_url", "meetingStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "zoom", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "zoom.addMeetingRegistrant",
+      "label": "Zoom: Add Meeting Registrant",
+      "description": "Register a person for a Zoom meeting and return their personal join link.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "zoom registrant register attendee signup meeting invite participant",
+      "config": [
+        { "key": "meetingId", "label": "Meeting ID", "control": "text", "required": true, "placeholder": "85746065123", "help": "Numeric meeting ID (registration must be enabled on the meeting)" },
+        { "key": "firstName", "label": "First Name", "control": "text", "required": true },
+        { "key": "lastName", "label": "Last Name", "control": "text", "required": false },
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com" }
+      ],
+      "outputs": ["registrantId", "joinUrl", "status", "body"],
+      "credentials": [
+        { "key": "ZOOM_ACCESS_TOKEN", "help": "OAuth2 access token from a Zoom Marketplace app with the meeting:write:registrant scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.zoom.us/v2/meetings/{{urlencode config.meetingId}}/registrants",
+        "headers": { "Authorization": "Bearer {{credentials.ZOOM_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"first_name\": {{json config.firstName}}, \"last_name\": {{json config.lastName}}, \"email\": {{json config.email}}}",
+        "outputMap": { "registrantId": "registrant_id", "joinUrl": "join_url" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "zoom", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

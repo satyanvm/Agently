@@ -1,0 +1,184 @@
+{
+  "cluster": "communication",
+  "label": "Slack",
+  "description": "Team messaging: post and manage messages, channels, reactions, and users via the Slack Web API.",
+  "source": { "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "send_channel_message skipped: live catalog already has slack.sendMessage and a template-safe version could not be made strictly richer (optional thread_ts cannot be conditionally included). Emitted slack.replyInThread instead with required thread_ts. createChannel simplified to public-only: is_private is an optional JSON boolean, so it is omitted. inviteToChannel generalized from AP's single userId to comma-separated user IDs (Slack's documented string encoding for 'users'). Thin actions left out by the 8-node cap: get-message, set-channel-topic, find-user-by-id, set-user-status. Piece also exposes a generic custom-API-call action (not counted).",
+  "nodes": [
+    {
+      "id": "slack.replyInThread",
+      "label": "Slack: Reply in Thread",
+      "description": "Post a threaded reply to an existing Slack message.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack reply thread message respond conversation ts follow up chat post",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "C0123456789", "help": "Channel ID containing the parent message" },
+        { "key": "threadTs", "label": "Parent Timestamp", "control": "text", "required": true, "placeholder": "1710304378.475129", "help": "Raw ts value of the message to reply to" },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true, "help": "Reply text; Slack mrkdwn is supported" }
+      ],
+      "outputs": ["ok", "ts", "channel", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with chat:write scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.channel}}, \"thread_ts\": {{json config.threadTs}}, \"text\": {{json config.text}}}",
+        "outputMap": { "ok": "ok", "ts": "ts", "channel": "channel" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.sendDirectMessage",
+      "label": "Slack: Send Direct Message",
+      "description": "Send a direct message to a Slack user by their user ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack dm direct message user private im send notify",
+      "config": [
+        { "key": "userId", "label": "User ID", "control": "text", "required": true, "placeholder": "U0123456789", "help": "Slack user ID; use Find User by Email to look it up" },
+        { "key": "text", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["ok", "ts", "channel", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with chat:write and im:write scopes" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.userId}}, \"text\": {{json config.text}}}",
+        "outputMap": { "ok": "ok", "ts": "ts", "channel": "channel" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.updateMessage",
+      "label": "Slack: Update Message",
+      "description": "Replace the text of an existing message identified by channel and timestamp.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack update edit message change modify chat ts",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "C0123456789", "help": "Channel ID containing the message" },
+        { "key": "ts", "label": "Message Timestamp", "control": "text", "required": true, "placeholder": "1710304378.475129", "help": "Raw ts value of the message to update" },
+        { "key": "text", "label": "New Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["ok", "ts", "channel", "text", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with chat:write scope; the bot must be the author of the message" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.update",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.channel}}, \"ts\": {{json config.ts}}, \"text\": {{json config.text}}}",
+        "outputMap": { "ok": "ok", "ts": "ts", "channel": "channel", "text": "text" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.createChannel",
+      "label": "Slack: Create Channel",
+      "description": "Create a new public channel in the workspace.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack create channel new conversation public workspace",
+      "config": [
+        { "key": "name", "label": "Channel Name", "control": "text", "required": true, "placeholder": "project-updates", "help": "Lowercase, no spaces or periods, max 80 characters" }
+      ],
+      "outputs": ["ok", "channelId", "channelName", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with channels:manage scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/conversations.create",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"name\": {{json config.name}}}",
+        "outputMap": { "ok": "ok", "channelId": "channel.id", "channelName": "channel.name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.addReaction",
+      "label": "Slack: Add Reaction",
+      "description": "Add an emoji reaction to a message identified by channel and timestamp.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack reaction emoji react add thumbsup message acknowledge",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "C0123456789", "help": "Channel ID containing the message" },
+        { "key": "ts", "label": "Message Timestamp", "control": "text", "required": true, "placeholder": "1710304378.475129", "help": "Raw ts value of the message to react to" },
+        { "key": "emoji", "label": "Emoji Name", "control": "text", "required": true, "placeholder": "thumbsup", "help": "Emoji name without colons" }
+      ],
+      "outputs": ["ok", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with reactions:write scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/reactions.add",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.channel}}, \"timestamp\": {{json config.ts}}, \"name\": {{json config.emoji}}}",
+        "outputMap": { "ok": "ok" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.findUserByEmail",
+      "label": "Slack: Find User by Email",
+      "description": "Look up a workspace member's profile and user ID by email address.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack find user email lookup member id profile search",
+      "config": [
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com" }
+      ],
+      "outputs": ["ok", "userId", "userName", "realName", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with users:read.email scope" } ],
+      "http": {
+        "method": "GET",
+        "url": "https://slack.com/api/users.lookupByEmail?email={{urlencode config.email}}",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}" },
+        "outputMap": { "ok": "ok", "userId": "user.id", "userName": "user.name", "realName": "user.real_name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.getThreadMessages",
+      "label": "Slack: Get Thread Messages",
+      "description": "Fetch the replies of a message thread by channel and parent timestamp.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack thread replies messages conversation read fetch history",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "C0123456789", "help": "Channel ID containing the thread" },
+        { "key": "threadTs", "label": "Parent Timestamp", "control": "text", "required": true, "placeholder": "1710304378.475129", "help": "Raw ts value of the thread's parent message" }
+      ],
+      "outputs": ["ok", "messages", "hasMore", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with channels:history scope (groups:history / im:history for private channels and DMs)" } ],
+      "http": {
+        "method": "GET",
+        "url": "https://slack.com/api/conversations.replies?channel={{urlencode config.channel}}&ts={{urlencode config.threadTs}}",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}" },
+        "outputMap": { "ok": "ok", "messages": "messages", "hasMore": "has_more" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "slack.inviteToChannel",
+      "label": "Slack: Invite Users to Channel",
+      "description": "Add one or more existing workspace users to a channel.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "slack invite user channel add member join conversation",
+      "config": [
+        { "key": "channel", "label": "Channel", "control": "text", "required": true, "placeholder": "C0123456789", "help": "Channel ID to invite users into" },
+        { "key": "userIds", "label": "User IDs", "control": "text", "required": true, "placeholder": "U0123456789,U0987654321", "help": "Comma-separated Slack user IDs (up to 1000)" }
+      ],
+      "outputs": ["ok", "channelId", "status", "body"],
+      "credentials": [ { "key": "SLACK_BOT_TOKEN", "help": "Bot token (xoxb-…) with channels:manage or channels:write.invites scope; the bot must be in the channel" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://slack.com/api/conversations.invite",
+        "headers": { "Authorization": "Bearer {{credentials.SLACK_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"channel\": {{json config.channel}}, \"users\": {{json config.userIds}}}",
+        "outputMap": { "ok": "ok", "channelId": "channel.id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "slack", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

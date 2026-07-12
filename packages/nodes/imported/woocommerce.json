@@ -1,0 +1,169 @@
+{
+  "cluster": "commerce-finance",
+  "label": "WooCommerce",
+  "description": "Manage products, customers, and coupons in a WooCommerce store via its REST API.",
+  "source": { "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Auth: the piece uses HTTP Basic auth (base64 of consumerKey:consumerSecret), which templates cannot compute; switched to WooCommerce's officially supported consumer_key/consumer_secret query-string auth, which requires HTTPS. WOOCOMMERCE_BASE_URL must have no trailing slash (the piece trims it at runtime; templates cannot). createProduct: dropped the piece's categories and images fields — they require JSON arrays of objects built from comma-separated strings, which templates cannot emit; both are optional in the WooCommerce API. createCoupon: kept the piece's hardcoded individual_use=true and exclude_sale_items=true as JSON literals; dropped the piece's 'percent_product' discount type, which current WooCommerce no longer accepts (valid: percent, fixed_cart, fixed_product). WooCommerce encodes amount/price fields as JSON strings, so string-typed config values are correct for amount, minimum_amount, and regular_price. findCustomer returns a JSON array, so no fields are lifted via outputMap. The piece's generic custom-API-call action was skipped (generic passthrough, not a discrete operation).",
+  "nodes": [
+    {
+      "id": "woocommerce.createCustomer",
+      "label": "WooCommerce: Create Customer",
+      "description": "Add a new customer to a WooCommerce store with billing and shipping details.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce customer create add new shopper account ecommerce store wordpress",
+      "config": [
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com" },
+        { "key": "firstName", "label": "First Name", "control": "text", "required": true },
+        { "key": "lastName", "label": "Last Name", "control": "text", "required": true },
+        { "key": "username", "label": "Username", "control": "text", "required": true },
+        { "key": "password", "label": "Password", "control": "text", "required": true },
+        { "key": "streetAddress", "label": "Street Address", "control": "text", "required": true },
+        { "key": "city", "label": "City", "control": "text", "required": true },
+        { "key": "state", "label": "State", "control": "text", "required": true, "help": "State or province code" },
+        { "key": "postcode", "label": "Postcode", "control": "text", "required": true },
+        { "key": "country", "label": "Country", "control": "text", "required": true, "help": "ISO country code, e.g. US" },
+        { "key": "phone", "label": "Phone", "control": "text", "required": true }
+      ],
+      "outputs": ["id", "email", "status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/customers?consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"email\": {{json config.email}}, \"first_name\": {{json config.firstName}}, \"last_name\": {{json config.lastName}}, \"username\": {{json config.username}}, \"password\": {{json config.password}}, \"billing\": {\"first_name\": {{json config.firstName}}, \"last_name\": {{json config.lastName}}, \"address_1\": {{json config.streetAddress}}, \"city\": {{json config.city}}, \"state\": {{json config.state}}, \"postcode\": {{json config.postcode}}, \"country\": {{json config.country}}, \"email\": {{json config.email}}, \"phone\": {{json config.phone}}}, \"shipping\": {\"first_name\": {{json config.firstName}}, \"last_name\": {{json config.lastName}}, \"address_1\": {{json config.streetAddress}}, \"city\": {{json config.city}}, \"state\": {{json config.state}}, \"postcode\": {{json config.postcode}}, \"country\": {{json config.country}}, \"email\": {{json config.email}}, \"phone\": {{json config.phone}}}}",
+        "outputMap": { "id": "id", "email": "email" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "woocommerce.createCoupon",
+      "label": "WooCommerce: Create Coupon",
+      "description": "Create a discount coupon code in a WooCommerce store.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce coupon create discount code promo voucher percent fixed cart ecommerce",
+      "config": [
+        { "key": "code", "label": "Coupon Code", "control": "text", "required": true, "placeholder": "SUMMER10" },
+        { "key": "discountType", "label": "Discount Type", "control": "select", "required": true, "options": ["percent", "fixed_cart", "fixed_product"] },
+        { "key": "amount", "label": "Amount", "control": "text", "required": true, "placeholder": "10", "help": "Discount amount — percentage or fixed value depending on type" },
+        { "key": "minimumAmount", "label": "Minimum Spend", "control": "text", "required": true, "placeholder": "0", "help": "Minimum order amount required to use the coupon" }
+      ],
+      "outputs": ["id", "code", "status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/coupons?consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"code\": {{json config.code}}, \"discount_type\": {{json config.discountType}}, \"amount\": {{json config.amount}}, \"minimum_amount\": {{json config.minimumAmount}}, \"individual_use\": true, \"exclude_sale_items\": true}",
+        "outputMap": { "id": "id", "code": "code" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "woocommerce.createProduct",
+      "label": "WooCommerce: Create Product",
+      "description": "Add a new product to a WooCommerce store catalog.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce product create add new item listing catalog price ecommerce store",
+      "config": [
+        { "key": "name", "label": "Name", "control": "text", "required": true },
+        { "key": "type", "label": "Type", "control": "select", "required": true, "options": ["simple", "grouped", "external", "variable"] },
+        { "key": "regularPrice", "label": "Regular Price", "control": "text", "required": true, "placeholder": "19.99" },
+        { "key": "description", "label": "Description", "control": "textarea", "required": false, "help": "Full product description (HTML allowed)" },
+        { "key": "shortDescription", "label": "Short Description", "control": "textarea", "required": false }
+      ],
+      "outputs": ["id", "name", "permalink", "status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/products?consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"name\": {{json config.name}}, \"type\": {{json config.type}}, \"regular_price\": {{json config.regularPrice}}, \"description\": {{json config.description}}, \"short_description\": {{json config.shortDescription}}}",
+        "outputMap": { "id": "id", "name": "name", "permalink": "permalink" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "woocommerce.findCustomer",
+      "label": "WooCommerce: Find Customer",
+      "description": "Look up WooCommerce customers by email address.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce customer find search lookup email shopper account ecommerce",
+      "config": [
+        { "key": "email", "label": "Email", "control": "text", "required": true, "placeholder": "jane@example.com" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/customers?email={{urlencode config.email}}&consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}"
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "woocommerce.findProduct",
+      "label": "WooCommerce: Get Product",
+      "description": "Fetch a single WooCommerce product by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce product get find fetch lookup id price stock ecommerce",
+      "config": [
+        { "key": "productId", "label": "Product ID", "control": "text", "required": true, "placeholder": "42" }
+      ],
+      "outputs": ["id", "name", "price", "stockStatus", "permalink", "status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/products/{{urlencode config.productId}}?consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}",
+        "outputMap": { "id": "id", "name": "name", "price": "price", "stockStatus": "stock_status", "permalink": "permalink" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "woocommerce.findCoupon",
+      "label": "WooCommerce: Get Coupon",
+      "description": "Fetch a single WooCommerce coupon by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "woocommerce coupon get find fetch lookup discount code promo ecommerce",
+      "config": [
+        { "key": "couponId", "label": "Coupon ID", "control": "text", "required": true, "placeholder": "22" }
+      ],
+      "outputs": ["id", "code", "amount", "discountType", "status", "body"],
+      "credentials": [
+        { "key": "WOOCOMMERCE_BASE_URL", "help": "Store base URL, HTTPS only, no trailing slash (e.g. https://mystore.com)" },
+        { "key": "WOOCOMMERCE_CONSUMER_KEY", "help": "REST API consumer key (ck_…) with Read/Write permission — WooCommerce > Settings > Advanced > REST API" },
+        { "key": "WOOCOMMERCE_CONSUMER_SECRET", "help": "REST API consumer secret (cs_…) shown once when the key is generated" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.WOOCOMMERCE_BASE_URL}}/wp-json/wc/v3/coupons/{{urlencode config.couponId}}?consumer_key={{urlencode credentials.WOOCOMMERCE_CONSUMER_KEY}}&consumer_secret={{urlencode credentials.WOOCOMMERCE_CONSUMER_SECRET}}",
+        "outputMap": { "id": "id", "code": "code", "amount": "amount", "discountType": "discount_type" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "woocommerce", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

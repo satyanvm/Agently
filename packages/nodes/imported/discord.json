@@ -1,0 +1,196 @@
+{
+  "cluster": "communication",
+  "label": "Discord",
+  "description": "Chat platform for communities with servers, channels, roles, and bots.",
+  "source": { "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "sendChannelMessage: dropped optional multipart file attachments (executor is JSON-only); message therefore promoted to required. createGuildRole: dropped color (API wants integer), hoist and mentionable (API wants booleans) — all optional, omitted per typed-JSON rule; audit-log reason kept as an optional header (Discord tolerates it empty). AP's find_channel and list_guild_members do client-side filtering/reshaping we cannot express, so they are transpiled as plain list operations (listChannels, listGuildMembers); listGuildMembers requires the Server Members privileged intent and limit is made required because Discord defaults to 1. send_message_webhook skipped: live catalog already has discord.sendMessage (webhook-based) of equal fidelity once tts/embeds (typed JSON) are dropped. Standardized on API v10 (piece mixes v9/v10). Path IDs are Discord snowflakes, substituted raw.",
+  "nodes": [
+    {
+      "id": "discord.sendChannelMessage",
+      "label": "Discord: Send Channel Message",
+      "description": "Post a message to a Discord channel or thread as a bot.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord bot message send chat channel thread post notify server",
+      "config": [
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true, "placeholder": "1234567890123456789", "help": "Channel or thread ID (enable Developer Mode in Discord to copy IDs)" },
+        { "key": "message", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["id", "channelId", "status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal (Applications → Bot); the bot must be a member of the target server with permission to send messages" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{config.channelId}}/messages",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"content\": {{json config.message}}}",
+        "outputMap": { "id": "id", "channelId": "channel_id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.createChannel",
+      "label": "Discord: Create Channel",
+      "description": "Create a new text channel in a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord create channel new server guild text",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" },
+        { "key": "name", "label": "Channel Name", "control": "text", "required": true, "placeholder": "general" },
+        { "key": "topic", "label": "Topic", "control": "textarea", "required": false, "help": "Optional channel topic; leave blank for none" }
+      ],
+      "outputs": ["id", "name", "status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Manage Channels permission" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/channels",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"name\": {{json config.name}}, \"topic\": {{json config.topic}}}",
+        "outputMap": { "id": "id", "name": "name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.renameChannel",
+      "label": "Discord: Rename Channel",
+      "description": "Change the name of an existing Discord channel.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord rename channel update edit name modify",
+      "config": [
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true },
+        { "key": "name", "label": "New Name", "control": "text", "required": true }
+      ],
+      "outputs": ["id", "name", "status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Manage Channels permission" }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://discord.com/api/v10/channels/{{config.channelId}}",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"name\": {{json config.name}}}",
+        "outputMap": { "id": "id", "name": "name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.listChannels",
+      "label": "Discord: List Channels",
+      "description": "Fetch all channels in a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord list channels find search guild server lookup",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; the bot must be a member of the server" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/channels",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.listGuildMembers",
+      "label": "Discord: List Members",
+      "description": "Fetch members of a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord list members users guild server find search people",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" },
+        { "key": "limit", "label": "Limit", "control": "text", "required": true, "placeholder": "100", "help": "Max members to return (1–1000; Discord defaults to 1 if unset)" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Server Members privileged intent enabled for the bot" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/members?limit={{urlencode config.limit}}",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.addRoleToMember",
+      "label": "Discord: Add Role to Member",
+      "description": "Assign a role to a member of a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord add assign role member user permission grant guild",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" },
+        { "key": "userId", "label": "User ID", "control": "text", "required": true },
+        { "key": "roleId", "label": "Role ID", "control": "text", "required": true, "help": "Role ID (Server Settings → Roles, or via the roles API)" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Manage Roles permission and a bot role above the target role" }
+      ],
+      "http": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/members/{{config.userId}}/roles/{{config.roleId}}",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.removeRoleFromMember",
+      "label": "Discord: Remove Role from Member",
+      "description": "Remove a role from a member of a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord remove revoke role member user permission guild",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" },
+        { "key": "userId", "label": "User ID", "control": "text", "required": true },
+        { "key": "roleId", "label": "Role ID", "control": "text", "required": true }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Manage Roles permission and a bot role above the target role" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/members/{{config.userId}}/roles/{{config.roleId}}",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "discord.createGuildRole",
+      "label": "Discord: Create Role",
+      "description": "Create a new role in a Discord server.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "discord create role new guild server permission",
+      "config": [
+        { "key": "guildId", "label": "Server ID", "control": "text", "required": true, "help": "Guild (server) ID" },
+        { "key": "name", "label": "Role Name", "control": "text", "required": true },
+        { "key": "reason", "label": "Audit Log Reason", "control": "text", "required": false, "help": "Optional reason recorded in the server's audit log" }
+      ],
+      "outputs": ["id", "name", "status", "body"],
+      "credentials": [
+        { "key": "DISCORD_BOT_TOKEN", "help": "Bot token from the Discord Developer Portal; requires the Manage Roles permission" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/guilds/{{config.guildId}}/roles",
+        "headers": { "Authorization": "Bot {{credentials.DISCORD_BOT_TOKEN}}", "Content-Type": "application/json", "X-Audit-Log-Reason": "{{config.reason}}" },
+        "body": "{\"name\": {{json config.name}}}",
+        "outputMap": { "id": "id", "name": "name" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "discord", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

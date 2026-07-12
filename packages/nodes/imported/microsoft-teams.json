@@ -1,0 +1,191 @@
+{
+  "cluster": "communication",
+  "label": "Microsoft Teams",
+  "description": "Channels, chats, and messaging on Microsoft Teams via the Microsoft Graph API.",
+  "source": { "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Simplifications: (1) All nodes hardcode the commercial Graph endpoint (graph.microsoft.com); the AP piece's GCC High cloud selector (graph.microsoft.us) is dropped. (2) sendChannelMessage omits the piece's @mention resolution (which paginates /teams/{id}/members and rewrites content into <at> tags — multi-request); plain content is sent as-is. (3) getChannelMessage drops the optional replyId prop because templates cannot branch the URL path; it fetches the parent message only. (4) createChannel/createPrivateChannel keep the optional description key since Graph accepts an empty-string description. (5) deleteChatMessage is transpilable via POST /me/chats/{chatId}/messages/{id}/softDelete but was left out under the 8-action cap in favor of create/send/get/search ops. (6) findTeamMember needs a conditionally-constructed OData filter (search by email vs name) which templates cannot express — classified needsPieceRuntime. Other needsPieceRuntime actions: createChatAndSendMessage (resolves /me, builds typed member array with @odata.bind, then two POSTs), getMeetingTranscript and getMeetingRecording (meeting-ID resolution helper plus conditional list-vs-fetch paths), requestApprovalInChannel and requestApprovalDirectMessage (workflow waitpoints and adaptive-card attachments). Triggers skipped: newChannelMessage, newChannel, newChat, newChatMessage.",
+  "nodes": [
+    {
+      "id": "msteams.createChannel",
+      "label": "Microsoft Teams: Create Channel",
+      "description": "Add a standard channel to a Microsoft Teams team.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams create channel new team graph msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID), e.g. from the team link or Graph /me/joinedTeams" },
+        { "key": "displayName", "label": "Channel Name", "control": "text", "required": true, "placeholder": "project-updates" },
+        { "key": "description", "label": "Channel Description", "control": "textarea", "required": false, "help": "Optional description shown in the channel details" }
+      ],
+      "outputs": ["id", "displayName", "webUrl", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with Channel.Create scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/channels",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"displayName\": {{json config.displayName}}, \"description\": {{json config.description}}}",
+        "outputMap": { "id": "id", "displayName": "displayName", "webUrl": "webUrl" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.createPrivateChannel",
+      "label": "Microsoft Teams: Create Private Channel",
+      "description": "Add a private channel to a Microsoft Teams team.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams create private channel restricted membership msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID)" },
+        { "key": "displayName", "label": "Channel Name", "control": "text", "required": true, "placeholder": "leadership-only" },
+        { "key": "description", "label": "Channel Description", "control": "textarea", "required": false, "help": "Optional description shown in the channel details" }
+      ],
+      "outputs": ["id", "displayName", "webUrl", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with Channel.Create scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/channels",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"displayName\": {{json config.displayName}}, \"description\": {{json config.description}}, \"membershipType\": \"private\"}",
+        "outputMap": { "id": "id", "displayName": "displayName", "webUrl": "webUrl" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.sendChannelMessage",
+      "label": "Microsoft Teams: Send Channel Message",
+      "description": "Post a message to a channel in a Microsoft Teams team.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams send message channel post notify chat msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID)" },
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true, "placeholder": "19:...@thread.tacv2", "help": "Channel ID, e.g. from the channel link" },
+        { "key": "contentType", "label": "Content Type", "control": "select", "required": true, "options": ["text", "html"], "help": "How Teams should interpret the message body" },
+        { "key": "content", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["id", "webUrl", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with ChannelMessage.Send scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/channels/{{urlencode config.channelId}}/messages",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"body\": {\"content\": {{json config.content}}, \"contentType\": {{json config.contentType}}}}",
+        "outputMap": { "id": "id", "webUrl": "webUrl" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.sendChatMessage",
+      "label": "Microsoft Teams: Send Chat Message",
+      "description": "Post a message into an existing one-on-one or group chat.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams send chat message direct dm group msteams",
+      "config": [
+        { "key": "chatId", "label": "Chat ID", "control": "text", "required": true, "placeholder": "19:...@thread.v2", "help": "Chat ID, e.g. from Graph /me/chats" },
+        { "key": "contentType", "label": "Content Type", "control": "select", "required": true, "options": ["text", "html"], "help": "How Teams should interpret the message body" },
+        { "key": "content", "label": "Message", "control": "textarea", "required": true }
+      ],
+      "outputs": ["id", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with Chat.ReadWrite scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/chats/{{urlencode config.chatId}}/messages",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"body\": {\"content\": {{json config.content}}, \"contentType\": {{json config.contentType}}}}",
+        "outputMap": { "id": "id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.replyToChannelMessage",
+      "label": "Microsoft Teams: Reply to Channel Message",
+      "description": "Post a threaded reply under an existing channel message.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams reply thread channel message respond msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID)" },
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true, "placeholder": "19:...@thread.tacv2" },
+        { "key": "messageId", "label": "Parent Message ID", "control": "text", "required": true, "help": "ID of the channel message to reply under" },
+        { "key": "contentType", "label": "Content Type", "control": "select", "required": true, "options": ["text", "html"], "help": "How Teams should interpret the message body" },
+        { "key": "content", "label": "Reply", "control": "textarea", "required": true }
+      ],
+      "outputs": ["id", "webUrl", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with ChannelMessage.Send scope" } ],
+      "http": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/channels/{{urlencode config.channelId}}/messages/{{urlencode config.messageId}}/replies",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}", "Content-Type": "application/json" },
+        "body": "{\"body\": {\"content\": {{json config.content}}, \"contentType\": {{json config.contentType}}}}",
+        "outputMap": { "id": "id", "webUrl": "webUrl" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.getChatMessage",
+      "label": "Microsoft Teams: Get Chat Message",
+      "description": "Fetch a single message from a chat by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams get chat message read fetch retrieve msteams",
+      "config": [
+        { "key": "chatId", "label": "Chat ID", "control": "text", "required": true, "placeholder": "19:...@thread.v2" },
+        { "key": "messageId", "label": "Message ID", "control": "text", "required": true, "help": "ID of the message to retrieve" }
+      ],
+      "outputs": ["id", "content", "createdDateTime", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with Chat.ReadWrite scope" } ],
+      "http": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/chats/{{urlencode config.chatId}}/messages/{{urlencode config.messageId}}",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}" },
+        "outputMap": { "id": "id", "content": "body.content", "createdDateTime": "createdDateTime" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.getChannelMessage",
+      "label": "Microsoft Teams: Get Channel Message",
+      "description": "Fetch a single channel message by team, channel, and message ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams get channel message read fetch retrieve msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID)" },
+        { "key": "channelId", "label": "Channel ID", "control": "text", "required": true, "placeholder": "19:...@thread.tacv2" },
+        { "key": "messageId", "label": "Message ID", "control": "text", "required": true, "help": "ID of the channel message to retrieve" }
+      ],
+      "outputs": ["id", "content", "createdDateTime", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with ChannelMessage.Read.All scope" } ],
+      "http": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/channels/{{urlencode config.channelId}}/messages/{{urlencode config.messageId}}",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}" },
+        "outputMap": { "id": "id", "content": "body.content", "createdDateTime": "createdDateTime" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "msteams.findChannel",
+      "label": "Microsoft Teams: Find Channel",
+      "description": "Look up channels in a team by exact display name.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "microsoft teams find channel search lookup name msteams",
+      "config": [
+        { "key": "teamId", "label": "Team ID", "control": "text", "required": true, "help": "The team's group ID (GUID)" },
+        { "key": "channelName", "label": "Channel Name", "control": "text", "required": true, "help": "Exact channel display name to match" }
+      ],
+      "outputs": ["channels", "status", "body"],
+      "credentials": [ { "key": "MSTEAMS_ACCESS_TOKEN", "help": "OAuth2 access token for Microsoft Graph with Channel.ReadBasic.All scope" } ],
+      "http": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/teams/{{urlencode config.teamId}}/allChannels?$filter=displayName%20eq%20'{{urlencode config.channelName}}'",
+        "headers": { "Authorization": "Bearer {{credentials.MSTEAMS_ACCESS_TOKEN}}" },
+        "outputMap": { "channels": "value" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "microsoft-teams", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

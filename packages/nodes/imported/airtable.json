@@ -1,0 +1,130 @@
+{
+  "cluster": "productivity",
+  "label": "Airtable",
+  "description": "Airtable cloud database: search, fetch, delete, and comment on records, plus base schema lookup.",
+  "source": { "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Skipped airtable.createRecord: id already live in catalog/productivity.json and no strictly-richer template version is possible — the API requires 'fields' as a true JSON object, which templating cannot emit (note: the live node uses {{json config.fields}} for that object, the pattern rule 2 forbids; flagging for review). Update/Clean Record share the same typed-object body and schema-transform logic (createNewFields) → needsPieceRuntime. findRecord: dropped the optional 'view' filter config — an empty view query param is not reliably tolerated, and templates cannot conditionally omit params; the FIND() formula is percent-encoded literally in the URL with only user values urlencoded (a double quote in the search value will break the formula, same limitation as the source piece). addComment: dropped optional parentCommentId (threaded replies) — empty string would be rejected. All AP dynamic dropdowns (base, table, record, field) became plain text config fields with ID hints.",
+  "nodes": [
+    {
+      "id": "airtable.findRecord",
+      "label": "Airtable: Find Record",
+      "description": "Search a table for records whose field contains a given value.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable find search record row lookup filter query table base database",
+      "config": [
+        { "key": "baseId", "label": "Base ID", "control": "text", "required": true, "placeholder": "appXXXXXXXXXXXXXX", "help": "Found in the base URL or via the meta API" },
+        { "key": "tableId", "label": "Table name or ID", "control": "text", "required": true, "placeholder": "tblXXXXXXXXXXXXXX", "help": "Table ID (tbl…) or exact table name" },
+        { "key": "searchField", "label": "Search Field", "control": "text", "required": true, "placeholder": "Name", "help": "Name of the field to search in" },
+        { "key": "searchValue", "label": "Search Value", "control": "text", "required": true, "help": "Records whose field contains this text are returned" }
+      ],
+      "outputs": ["records", "status", "body"],
+      "credentials": [
+        { "key": "AIRTABLE_API_KEY", "help": "Personal access token (pat…) with data.records:read scope on the base — create at airtable.com/create/tokens" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.tableId}}?filterByFormula=FIND(%22{{urlencode config.searchValue}}%22%2C%7B{{urlencode config.searchField}}%7D)",
+        "headers": { "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}" },
+        "outputMap": { "records": "records" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "airtable.getRecord",
+      "label": "Airtable: Get Record",
+      "description": "Fetch one record from a table by its record ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable get record row fetch read by id table base database",
+      "config": [
+        { "key": "baseId", "label": "Base ID", "control": "text", "required": true, "placeholder": "appXXXXXXXXXXXXXX" },
+        { "key": "tableId", "label": "Table name or ID", "control": "text", "required": true, "placeholder": "tblXXXXXXXXXXXXXX", "help": "Table ID (tbl…) or exact table name" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "placeholder": "recXXXXXXXXXXXXXX" }
+      ],
+      "outputs": ["id", "createdTime", "fields", "status", "body"],
+      "credentials": [
+        { "key": "AIRTABLE_API_KEY", "help": "Personal access token (pat…) with data.records:read scope on the base — create at airtable.com/create/tokens" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.tableId}}/{{urlencode config.recordId}}",
+        "headers": { "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}" },
+        "outputMap": { "id": "id", "createdTime": "createdTime", "fields": "fields" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "airtable.deleteRecord",
+      "label": "Airtable: Delete Record",
+      "description": "Remove a record from a table by its record ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable delete record row remove destroy table base database",
+      "config": [
+        { "key": "baseId", "label": "Base ID", "control": "text", "required": true, "placeholder": "appXXXXXXXXXXXXXX" },
+        { "key": "tableId", "label": "Table name or ID", "control": "text", "required": true, "placeholder": "tblXXXXXXXXXXXXXX", "help": "Table ID (tbl…) or exact table name" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "placeholder": "recXXXXXXXXXXXXXX" }
+      ],
+      "outputs": ["id", "deleted", "status", "body"],
+      "credentials": [
+        { "key": "AIRTABLE_API_KEY", "help": "Personal access token (pat…) with data.records:write scope on the base — create at airtable.com/create/tokens" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.tableId}}/{{urlencode config.recordId}}",
+        "headers": { "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}" },
+        "outputMap": { "id": "id", "deleted": "deleted" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "airtable.addComment",
+      "label": "Airtable: Add Comment",
+      "description": "Post a comment on a record's activity feed.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable comment record note annotate reply activity feed mention",
+      "config": [
+        { "key": "baseId", "label": "Base ID", "control": "text", "required": true, "placeholder": "appXXXXXXXXXXXXXX" },
+        { "key": "tableId", "label": "Table name or ID", "control": "text", "required": true, "placeholder": "tblXXXXXXXXXXXXXX", "help": "Table ID (tbl…) or exact table name" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "placeholder": "recXXXXXXXXXXXXXX" },
+        { "key": "text", "label": "Comment Text", "control": "textarea", "required": true, "help": "Mention a collaborator with @[userId] or @[userEmail]" }
+      ],
+      "outputs": ["id", "text", "status", "body"],
+      "credentials": [
+        { "key": "AIRTABLE_API_KEY", "help": "Personal access token (pat…) with data.recordComments:write scope on the base — create at airtable.com/create/tokens" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{config.baseId}}/{{urlencode config.tableId}}/{{urlencode config.recordId}}/comments",
+        "headers": { "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"text\": {{json config.text}}}",
+        "outputMap": { "id": "id", "text": "text" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "airtable.getBaseSchema",
+      "label": "Airtable: Get Base Schema",
+      "description": "Retrieve every table and field definition in a base.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "airtable schema base tables fields structure metadata columns describe",
+      "config": [
+        { "key": "baseId", "label": "Base ID", "control": "text", "required": true, "placeholder": "appXXXXXXXXXXXXXX" }
+      ],
+      "outputs": ["tables", "status", "body"],
+      "credentials": [
+        { "key": "AIRTABLE_API_KEY", "help": "Personal access token (pat…) with schema.bases:read scope on the base — create at airtable.com/create/tokens" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/meta/bases/{{config.baseId}}/tables",
+        "headers": { "Authorization": "Bearer {{credentials.AIRTABLE_API_KEY}}" },
+        "outputMap": { "tables": "tables" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "airtable", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

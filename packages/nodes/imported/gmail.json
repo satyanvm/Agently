@@ -1,0 +1,173 @@
+{
+  "cluster": "communication",
+  "label": "Gmail",
+  "description": "Read, search, and inspect email threads in a Gmail mailbox via the Gmail REST API.",
+  "source": {
+    "piece": "gmail",
+    "license": "MIT",
+    "importedAt": "2026-07-11"
+  },
+  "notes": "Send/reply/draft/approval actions are not transpiled: Gmail's messages.send and drafts.create endpoints only accept a base64url-encoded RFC 822 MIME message, which the piece builds with MailComposer (plus attachment handling, thread lookups, and pause/resume for approvals) — not expressible in static HTTP templating. gmail.getEmail simplifies the piece's get-mail action: instead of fetching format=raw and MIME-parsing with mailparser, it requests the API's structured full/metadata/minimal formats. gmail.searchEmails is the underlying single messages.list call with a free-form query field replacing the piece's structured filter props (from/to/subject/label/dates map 1:1 onto Gmail query syntax); the boolean includeSpamTrash param was dropped since an always-present empty value is not tolerated, and the piece's per-result hydration (raw GET + MIME parse per message) needs the piece runtime. gmail.getThread comes from get-thread-action.ts, which is a pure single GET (present in the piece source though not registered in its index.ts). Service-account auth (JWT signing) is not expressible; nodes use a plain OAuth2 access token. The piece's generic custom-API-call action was skipped as non-specific.",
+  "nodes": [
+    {
+      "id": "gmail.getEmail",
+      "label": "Gmail: Get Email",
+      "description": "Fetch a single Gmail message by ID, returning its headers, labels, and snippet.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gmail google mail email message get read fetch inbox by id",
+      "config": [
+        {
+          "key": "messageId",
+          "label": "Message ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "18c2f6a9b3d4e5f6",
+          "help": "Gmail message ID, e.g. from a search node or trigger output"
+        },
+        {
+          "key": "format",
+          "label": "Format",
+          "control": "select",
+          "required": true,
+          "options": ["full", "metadata", "minimal"],
+          "help": "full returns the complete payload; metadata returns headers only; minimal returns IDs and labels"
+        }
+      ],
+      "outputs": ["id", "threadId", "snippet", "labelIds", "status", "body"],
+      "credentials": [
+        {
+          "key": "GMAIL_ACCESS_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/gmail.readonly scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{urlencode config.messageId}}?format={{urlencode config.format}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GMAIL_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "threadId": "threadId",
+          "snippet": "snippet",
+          "labelIds": "labelIds"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "gmail",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    },
+    {
+      "id": "gmail.getThread",
+      "label": "Gmail: Get Thread",
+      "description": "Retrieve a Gmail conversation thread by ID with all of its messages.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gmail google mail thread conversation get read messages history",
+      "config": [
+        {
+          "key": "threadId",
+          "label": "Thread ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "18c2f6a9b3d4e5f6",
+          "help": "Gmail thread ID, e.g. the threadId field of a message"
+        },
+        {
+          "key": "format",
+          "label": "Format",
+          "control": "select",
+          "required": true,
+          "options": ["full", "metadata", "minimal"],
+          "help": "full returns complete message payloads; metadata returns headers only; minimal returns IDs and labels"
+        }
+      ],
+      "outputs": ["id", "historyId", "messages", "status", "body"],
+      "credentials": [
+        {
+          "key": "GMAIL_ACCESS_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/gmail.readonly scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/threads/{{urlencode config.threadId}}?format={{urlencode config.format}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GMAIL_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "historyId": "historyId",
+          "messages": "messages"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "gmail",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    },
+    {
+      "id": "gmail.searchEmails",
+      "label": "Gmail: Search Emails",
+      "description": "List messages matching a Gmail search query, using the same syntax as the Gmail search box.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "gmail google mail search find emails query filter list inbox unread from subject",
+      "config": [
+        {
+          "key": "query",
+          "label": "Search Query",
+          "control": "text",
+          "required": false,
+          "placeholder": "from:alice@example.com is:unread newer_than:7d",
+          "help": "Gmail search syntax (from:, to:, subject:, label:, has:attachment, after:, before:). Leave blank for the latest messages"
+        },
+        {
+          "key": "maxResults",
+          "label": "Max Results",
+          "control": "text",
+          "required": true,
+          "placeholder": "10",
+          "help": "Maximum number of message IDs to return (1-500)"
+        }
+      ],
+      "outputs": ["messages", "resultSizeEstimate", "nextPageToken", "status", "body"],
+      "credentials": [
+        {
+          "key": "GMAIL_ACCESS_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/gmail.readonly scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages?q={{urlencode config.query}}&maxResults={{urlencode config.maxResults}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GMAIL_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "messages": "messages",
+          "resultSizeEstimate": "resultSizeEstimate",
+          "nextPageToken": "nextPageToken"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "gmail",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    }
+  ]
+}

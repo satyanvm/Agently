@@ -7,9 +7,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# The reasoner lives at apps/reasoner; the shared .env is two levels up at the repo
-# root. Load it best-effort so DATABASE_URL / keys are present without re-exporting.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+# This file lives at apps/reasoner/reasoner/config.py, so the shared repo-root
+# .env is THREE parents up (parents[2] is apps/ — an easy off-by-one). Load it
+# best-effort so DATABASE_URL / keys are present without re-exporting; real env
+# vars always win (load_dotenv never overwrites existing ones).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(_REPO_ROOT / ".env")
 
 
