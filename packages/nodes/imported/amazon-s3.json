@@ -1,0 +1,8 @@
+{
+  "cluster": "cloud-storage",
+  "label": "Amazon S3",
+  "description": "Object storage on AWS: upload, read, list, move, and delete files in S3 buckets.",
+  "source": { "piece": "amazon-s3", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "No actions transpiled: every S3 REST call requires AWS Signature V4 (per-request HMAC-SHA256 over a canonical request with timestamp and payload hash), which the generic HTTP runtime's static header templating cannot compute; S3 also returns XML, which outputMap (JSON dot-paths) cannot parse. The presigned-URL actions perform local SigV4 crypto with no HTTP request at all, upload/read handle binary file payloads, move-file is a two-request copy+delete, and decrypt-pgp-file orchestrates S3 + Secrets Manager + openpgp. All eight actions need the piece runtime or a SigV4-aware executor.",
+  "nodes": []
+}

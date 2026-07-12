@@ -1,0 +1,316 @@
+{
+  "cluster": "productivity",
+  "label": "Google Sheets",
+  "description": "Work with Google Sheets spreadsheets: create, organize, and edit worksheets and rows.",
+  "source": { "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Simplifications: (1) createSpreadsheet uses the native Sheets v4 POST /spreadsheets instead of AP's Drive files.create — the AP folder-picker prop was dropped, so new spreadsheets land in the Drive root. (2) createWorksheet drops AP's optional headers prop, which required a second append request. (3) deleteRows replaces AP's 1-based single-row delete_row: the executor cannot do arithmetic (rowNumber-1), so the node exposes the API's native 0-based startIndex/endIndex, which also covers multi-row deletes. (4) Numeric fields (sheetId, startIndex, endIndex) are sent as JSON strings; Google APIs use proto3 JSON mapping, which documentedly accepts string encodings for integer fields. (5) AP also offers a service-account auth variant (JWT signing) — not representable here; only the OAuth2 token credential is mapped. Skipped despite being simple-ish: find_spreadsheets (pagination loop), and insert/read row ops already covered by live gsheets.appendRow / gsheets.readRange.",
+  "nodes": [
+    {
+      "id": "gsheets.createSpreadsheet",
+      "label": "Google Sheets: Create Spreadsheet",
+      "description": "Create a new blank Google Sheets spreadsheet with the given title.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets spreadsheet create new blank workbook file make",
+      "config": [
+        {
+          "key": "title",
+          "label": "Title",
+          "control": "text",
+          "required": true,
+          "placeholder": "Q3 Budget",
+          "help": "Title of the new spreadsheet"
+        }
+      ],
+      "outputs": ["spreadsheetId", "spreadsheetUrl", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"properties\": {\"title\": {{json config.title}}}}",
+        "outputMap": {
+          "spreadsheetId": "spreadsheetId",
+          "spreadsheetUrl": "spreadsheetUrl"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.createWorksheet",
+      "label": "Google Sheets: Create Worksheet",
+      "description": "Add a new empty worksheet tab to an existing spreadsheet.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets worksheet tab create add sheet new page",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the spreadsheet URL"
+        },
+        {
+          "key": "title",
+          "label": "Worksheet Title",
+          "control": "text",
+          "required": true,
+          "placeholder": "Sheet2",
+          "help": "Title of the new worksheet tab"
+        }
+      ],
+      "outputs": ["spreadsheetId", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}:batchUpdate",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": {{json config.title}}}}}]}",
+        "outputMap": {
+          "spreadsheetId": "spreadsheetId"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.copyWorksheet",
+      "label": "Google Sheets: Copy Worksheet",
+      "description": "Copy a worksheet into another spreadsheet (or the same one).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets worksheet copy duplicate clone tab sheet",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Source Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the spreadsheet containing the worksheet to copy"
+        },
+        {
+          "key": "sheetId",
+          "label": "Worksheet ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Numeric sheet ID (the gid= value in the sheet URL)"
+        },
+        {
+          "key": "destinationSpreadsheetId",
+          "label": "Destination Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the spreadsheet to copy the worksheet into"
+        }
+      ],
+      "outputs": ["sheetId", "title", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}/sheets/{{urlencode config.sheetId}}:copyTo",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"destinationSpreadsheetId\": {{json config.destinationSpreadsheetId}}}",
+        "outputMap": {
+          "sheetId": "sheetId",
+          "title": "title"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.renameWorksheet",
+      "label": "Google Sheets: Rename Worksheet",
+      "description": "Change the title of an existing worksheet tab.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets worksheet rename title change tab sheet name",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the spreadsheet URL"
+        },
+        {
+          "key": "sheetId",
+          "label": "Worksheet ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Numeric sheet ID (the gid= value in the sheet URL)"
+        },
+        {
+          "key": "newTitle",
+          "label": "New Title",
+          "control": "text",
+          "required": true,
+          "help": "New title for the worksheet"
+        }
+      ],
+      "outputs": ["spreadsheetId", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}:batchUpdate",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"requests\": [{\"updateSheetProperties\": {\"properties\": {\"sheetId\": {{json config.sheetId}}, \"title\": {{json config.newTitle}}}, \"fields\": \"title\"}}]}",
+        "outputMap": {
+          "spreadsheetId": "spreadsheetId"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.deleteWorksheet",
+      "label": "Google Sheets: Delete Worksheet",
+      "description": "Permanently remove a worksheet tab from a spreadsheet.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets worksheet delete remove tab sheet drop",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the spreadsheet URL"
+        },
+        {
+          "key": "sheetId",
+          "label": "Worksheet ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Numeric sheet ID (the gid= value in the sheet URL)"
+        }
+      ],
+      "outputs": ["spreadsheetId", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}:batchUpdate",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"requests\": [{\"deleteSheet\": {\"sheetId\": {{json config.sheetId}}}}]}",
+        "outputMap": {
+          "spreadsheetId": "spreadsheetId"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.deleteRows",
+      "label": "Google Sheets: Delete Rows",
+      "description": "Delete one or more rows from a worksheet by index range.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets row delete remove rows range clear drop",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the spreadsheet URL"
+        },
+        {
+          "key": "sheetId",
+          "label": "Worksheet ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Numeric sheet ID (the gid= value in the sheet URL)"
+        },
+        {
+          "key": "startIndex",
+          "label": "Start Index",
+          "control": "text",
+          "required": true,
+          "placeholder": "4",
+          "help": "0-based index of the first row to delete (row 5 in the sheet = index 4)"
+        },
+        {
+          "key": "endIndex",
+          "label": "End Index",
+          "control": "text",
+          "required": true,
+          "placeholder": "5",
+          "help": "0-based exclusive end index; to delete only row 5, use start 4 and end 5"
+        }
+      ],
+      "outputs": ["spreadsheetId", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/spreadsheets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/{{config.spreadsheetId}}:batchUpdate",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"requests\": [{\"deleteDimension\": {\"range\": {\"sheetId\": {{json config.sheetId}}, \"dimension\": \"ROWS\", \"startIndex\": {{json config.startIndex}}, \"endIndex\": {{json config.endIndex}}}}}]}",
+        "outputMap": {
+          "spreadsheetId": "spreadsheetId"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,385 @@
+{
+  "cluster": "cloud-storage",
+  "label": "Google Drive",
+  "description": "Create, organize, share, and manage files and folders in Google Drive.",
+  "source": { "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Auth: piece offers OAuth2 and service-account (JWT) auth; only OAuth2 maps to the declarative runtime, reusing the existing GOOGLE_OAUTH_TOKEN credential from the live gdrive.* nodes for consistency (service-account JWT signing would need the piece runtime). All nodes hardcode supportsAllDrives=true (harmless superset of the AP include_team_drives checkbox, which is a boolean and cannot be templated). createFolder/createTextFile: AP's optional parent-folder dropdown became a required text field defaulting to 'root' (Drive's documented alias for My Drive), because optional keys cannot be conditionally omitted from JSON bodies. createTextFile builds the documented multipart/related upload body as a template string with a fixed boundary; AP's 'plain/text' option was corrected to the official 'text/plain' MIME type. copyFile drops AP's optional 'duplicate as' MIME conversion (optional JSON key). setPublicAccess drops AP's follow-up file-get/download enrichment (extra requests); the permission grant itself is the single transpiled request. gdrive.getFileMetadata replaces the live node: adds shared-drive support, an explicit fields projection, more lifted outputs, and urlencodes the path param. AP's search-folder-or-file and single-level list-files are already covered by the live gdrive.listFiles (arbitrary q parameter), so no duplicate was emitted; the recursive/download variants of list-files need the piece runtime.",
+  "nodes": [
+    {
+      "id": "gdrive.createFolder",
+      "label": "Google Drive: Create Folder",
+      "description": "Create an empty folder inside a Drive folder via the Drive v3 API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive create folder new directory mkdir organize storage",
+      "config": [
+        {
+          "key": "folderName",
+          "label": "Folder Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "Quarterly Reports"
+        },
+        {
+          "key": "parentFolder",
+          "label": "Parent Folder ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "root",
+          "help": "ID of the parent folder; use 'root' for the top level of My Drive. Found in the folder URL after /folders/"
+        }
+      ],
+      "outputs": ["id", "name", "mimeType", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"mimeType\": \"application/vnd.google-apps.folder\", \"name\": {{json config.folderName}}, \"parents\": [{{json config.parentFolder}}]}",
+        "outputMap": { "id": "id", "name": "name", "mimeType": "mimeType" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.createTextFile",
+      "label": "Google Drive: Create Text File",
+      "description": "Create a new text, CSV, or XML file in Drive from inline text content.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive create file text csv xml write save document upload content",
+      "config": [
+        {
+          "key": "fileName",
+          "label": "File Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "notes.txt"
+        },
+        {
+          "key": "text",
+          "label": "Content",
+          "control": "textarea",
+          "required": true,
+          "help": "Text content written into the new file"
+        },
+        {
+          "key": "fileType",
+          "label": "Content Type",
+          "control": "select",
+          "required": true,
+          "options": ["text/plain", "text/csv", "text/xml"],
+          "help": "MIME type of the file"
+        },
+        {
+          "key": "parentFolder",
+          "label": "Parent Folder ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "root",
+          "help": "ID of the destination folder; use 'root' for the top level of My Drive"
+        }
+      ],
+      "outputs": ["id", "name", "mimeType", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "multipart/related; boundary=agently-gdrive-upload"
+        },
+        "body": "--agently-gdrive-upload\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{\"name\": {{json config.fileName}}, \"mimeType\": {{json config.fileType}}, \"parents\": [{{json config.parentFolder}}]}\r\n--agently-gdrive-upload\r\nContent-Type: {{config.fileType}}\r\n\r\n{{config.text}}\r\n--agently-gdrive-upload--",
+        "outputMap": { "id": "id", "name": "name", "mimeType": "mimeType" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.getFileMetadata",
+      "label": "Google Drive: Get File Metadata",
+      "description": "Look up a file or folder by ID and return its core metadata fields.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive get file folder metadata info name mimetype size link id lookup",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File or Folder ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "1a2B3c4D5e…",
+          "help": "Found in the Drive URL of the file or folder"
+        }
+      ],
+      "outputs": ["id", "name", "mimeType", "size", "webViewLink", "modifiedTime", "trashed", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with a Drive scope (drive.readonly suffices), obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}?supportsAllDrives=true&fields=id,name,mimeType,size,parents,webViewLink,modifiedTime,trashed",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "mimeType": "mimeType",
+          "size": "size",
+          "webViewLink": "webViewLink",
+          "modifiedTime": "modifiedTime",
+          "trashed": "trashed"
+        }
+      },
+      "metadata": {
+        "replaces": "gdrive.getFileMetadata",
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.copyFile",
+      "label": "Google Drive: Copy File",
+      "description": "Duplicate an existing Drive file into a target folder under a new name.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive copy duplicate clone file template backup",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the file to copy"
+        },
+        {
+          "key": "name",
+          "label": "New File Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "Copy of report"
+        },
+        {
+          "key": "folderId",
+          "label": "Destination Folder ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "root",
+          "help": "ID of the folder to place the copy in; use 'root' for My Drive"
+        }
+      ],
+      "outputs": ["id", "name", "mimeType", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}/copy?supportsAllDrives=true",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"name\": {{json config.name}}, \"parents\": [{{json config.folderId}}]}",
+        "outputMap": { "id": "id", "name": "name", "mimeType": "mimeType" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.trashFile",
+      "label": "Google Drive: Move to Trash",
+      "description": "Send a Drive file or folder to the trash without deleting it permanently.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive trash file remove recycle bin soft delete archive",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the file or folder to trash"
+        }
+      ],
+      "outputs": ["id", "name", "trashed", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}?supportsAllDrives=true&fields=id,name,trashed",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"trashed\": true}",
+        "outputMap": { "id": "id", "name": "name", "trashed": "trashed" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.deleteFile",
+      "label": "Google Drive: Delete File",
+      "description": "Permanently delete a Drive file or folder, bypassing the trash.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive delete file remove permanent destroy erase",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the file or folder to delete permanently — this cannot be undone"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}?supportsAllDrives=true",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.addPermission",
+      "label": "Google Drive: Share With User",
+      "description": "Grant a user a role (reader, writer, etc.) on a Drive file or folder.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive share permission grant access user email role collaborate invite",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File or Folder ID",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "userEmail",
+          "label": "User Email",
+          "control": "text",
+          "required": true,
+          "placeholder": "person@example.com"
+        },
+        {
+          "key": "role",
+          "label": "Role",
+          "control": "select",
+          "required": true,
+          "options": ["reader", "commenter", "writer", "fileOrganizer", "organizer"],
+          "help": "See https://developers.google.com/drive/api/guides/ref-roles"
+        },
+        {
+          "key": "sendNotificationEmail",
+          "label": "Send Notification Email",
+          "control": "select",
+          "required": true,
+          "options": ["true", "false"],
+          "help": "Whether Google emails the user about the new access"
+        }
+      ],
+      "outputs": ["id", "role", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}/permissions?supportsAllDrives=true&sendNotificationEmail={{urlencode config.sendNotificationEmail}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"type\": \"user\", \"role\": {{json config.role}}, \"emailAddress\": {{json config.userEmail}}}",
+        "outputMap": { "id": "id", "role": "role" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gdrive.setPublicAccess",
+      "label": "Google Drive: Set Public Access",
+      "description": "Make a Drive file or folder accessible to anyone with the link at a chosen role.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google drive public access share anyone link permission open publish",
+      "config": [
+        {
+          "key": "fileId",
+          "label": "File or Folder ID",
+          "control": "text",
+          "required": true
+        },
+        {
+          "key": "role",
+          "label": "Role",
+          "control": "select",
+          "required": true,
+          "options": ["reader", "commenter", "writer"],
+          "help": "Access level granted to anyone with the link"
+        }
+      ],
+      "outputs": ["id", "role", "status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_OAUTH_TOKEN",
+          "help": "OAuth2 access token with the https://www.googleapis.com/auth/drive scope, obtained externally (e.g. Google OAuth 2.0 Playground)"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}/permissions?supportsAllDrives=true",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"type\": \"anyone\", \"role\": {{json config.role}}}",
+        "outputMap": { "id": "id", "role": "role" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

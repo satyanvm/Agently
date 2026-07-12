@@ -1,0 +1,391 @@
+{
+  "cluster": "crm-marketing",
+  "label": "HubSpot",
+  "description": "HubSpot CRM operations for contacts, companies, deals, tickets, lists and owners.",
+  "source": { "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Simplifications vs the AP piece: (1) AP create/update actions post properties then re-fetch the object with a curated property list in a second request; these nodes return the create response directly, which already contains id and properties. (2) AP find-* actions support an optional second search filter that cannot be conditionally included by the template engine, so find nodes use exactly one EQUALS filter and a fixed retrieved-property list with a literal limit of 100. (3) Dynamic property/dropdown props (pipelines, lists, object properties) became plain text config fields with help hints. (4) Optional free-text properties on create nodes render as empty strings when blank, which HubSpot accepts on creation. Update actions were NOT transpiled: blank optional keys would render as \"\" and clear existing CRM property values. addContactToList uses the legacy contacts/v1 lists endpoint, same as the AP piece. Existing catalog ids hubspot.createContact, hubspot.listContacts, hubspot.createDeal were left untouched (this batch's equivalents would not be strictly richer).",
+  "nodes": [
+    {
+      "id": "hubspot.getContact",
+      "label": "HubSpot: Get Contact",
+      "description": "Fetch a single HubSpot contact by ID including its standard CRM properties.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm contact get fetch read lookup person lead by id",
+      "config": [
+        {
+          "key": "contactId",
+          "label": "Contact ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "51",
+          "help": "Numeric HubSpot contact record ID"
+        }
+      ],
+      "outputs": ["id", "properties", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.contacts.read scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/{{urlencode config.contactId}}?properties=firstname,lastname,email,company,website,mobilephone,phone,address,city,state,zip,country,jobtitle,lifecyclestage,createdate,lastmodifieddate,numemployees,annualrevenue,industry",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "properties": "properties"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.findContact",
+      "label": "HubSpot: Find Contact",
+      "description": "Search HubSpot contacts where a chosen property equals a given value.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm contact find search filter query email lookup lead person",
+      "config": [
+        {
+          "key": "propertyName",
+          "label": "Search Property",
+          "control": "text",
+          "required": true,
+          "placeholder": "email",
+          "help": "Internal property name to match, e.g. email, lastname, phone"
+        },
+        {
+          "key": "propertyValue",
+          "label": "Search Value",
+          "control": "text",
+          "required": true,
+          "placeholder": "user@example.com"
+        }
+      ],
+      "outputs": ["total", "results", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.contacts.read scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"filterGroups\": [{\"filters\": [{\"propertyName\": {{json config.propertyName}}, \"operator\": \"EQ\", \"value\": {{json config.propertyValue}}}]}], \"properties\": [\"firstname\", \"lastname\", \"email\", \"phone\", \"company\", \"jobtitle\", \"lifecyclestage\", \"createdate\", \"lastmodifieddate\"], \"limit\": 100}",
+        "outputMap": {
+          "total": "total",
+          "results": "results"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.createCompany",
+      "label": "HubSpot: Create Company",
+      "description": "Create a company record in HubSpot CRM with name and basic details.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm company create organization account business add",
+      "config": [
+        {
+          "key": "name",
+          "label": "Company Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "Acme Inc."
+        },
+        {
+          "key": "domain",
+          "label": "Domain",
+          "control": "text",
+          "required": false,
+          "placeholder": "acme.com",
+          "help": "Company website domain, used by HubSpot for deduplication"
+        },
+        {
+          "key": "phone",
+          "label": "Phone",
+          "control": "text",
+          "required": false
+        },
+        {
+          "key": "city",
+          "label": "City",
+          "control": "text",
+          "required": false
+        }
+      ],
+      "outputs": ["id", "properties", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.companies.write scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/companies",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"properties\": {\"name\": {{json config.name}}, \"domain\": {{json config.domain}}, \"phone\": {{json config.phone}}, \"city\": {{json config.city}}}}",
+        "outputMap": {
+          "id": "id",
+          "properties": "properties"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.findCompany",
+      "label": "HubSpot: Find Company",
+      "description": "Search HubSpot companies where a chosen property equals a given value.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm company find search filter query domain organization account lookup",
+      "config": [
+        {
+          "key": "propertyName",
+          "label": "Search Property",
+          "control": "text",
+          "required": true,
+          "placeholder": "domain",
+          "help": "Internal property name to match, e.g. domain, name, city"
+        },
+        {
+          "key": "propertyValue",
+          "label": "Search Value",
+          "control": "text",
+          "required": true,
+          "placeholder": "acme.com"
+        }
+      ],
+      "outputs": ["total", "results", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.companies.read scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/companies/search",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"filterGroups\": [{\"filters\": [{\"propertyName\": {{json config.propertyName}}, \"operator\": \"EQ\", \"value\": {{json config.propertyValue}}}]}], \"properties\": [\"name\", \"domain\", \"industry\", \"phone\", \"city\", \"state\", \"country\", \"website\", \"numberofemployees\", \"annualrevenue\", \"lifecyclestage\", \"createdate\"], \"limit\": 100}",
+        "outputMap": {
+          "total": "total",
+          "results": "results"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.createTicket",
+      "label": "HubSpot: Create Ticket",
+      "description": "Open a support ticket in a HubSpot pipeline at a given stage.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm ticket create support helpdesk service issue case open",
+      "config": [
+        {
+          "key": "subject",
+          "label": "Ticket Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "Customer cannot log in"
+        },
+        {
+          "key": "pipelineId",
+          "label": "Pipeline ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Ticket pipeline ID; the default support pipeline is 0"
+        },
+        {
+          "key": "stageId",
+          "label": "Pipeline Stage ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "1",
+          "help": "Stage ID within the pipeline; stage 1 is 'New' in the default pipeline"
+        },
+        {
+          "key": "content",
+          "label": "Description",
+          "control": "textarea",
+          "required": false,
+          "help": "Ticket body text"
+        }
+      ],
+      "outputs": ["id", "properties", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with tickets scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/tickets",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"properties\": {\"subject\": {{json config.subject}}, \"hs_pipeline\": {{json config.pipelineId}}, \"hs_pipeline_stage\": {{json config.stageId}}, \"content\": {{json config.content}}}}",
+        "outputMap": {
+          "id": "id",
+          "properties": "properties"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.getDeal",
+      "label": "HubSpot: Get Deal",
+      "description": "Fetch a single HubSpot deal by ID including its standard CRM properties.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm deal get fetch read lookup opportunity sales by id",
+      "config": [
+        {
+          "key": "dealId",
+          "label": "Deal ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "931442",
+          "help": "Numeric HubSpot deal record ID"
+        }
+      ],
+      "outputs": ["id", "properties", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.deals.read scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals/{{urlencode config.dealId}}?properties=dealname,dealtype,amount,description,dealstage,pipeline,closedate,createdate,num_associated_contacts,hs_next_step,hs_lastmodifieddate,hubspot_owner_id,hubspot_team_id",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "id": "id",
+          "properties": "properties"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.addContactToList",
+      "label": "HubSpot: Add Contact to List",
+      "description": "Add a contact to a static HubSpot list by email address.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm list add contact email subscribe segment static membership",
+      "config": [
+        {
+          "key": "listId",
+          "label": "List ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "42",
+          "help": "ID of a static (not active) contact list"
+        },
+        {
+          "key": "email",
+          "label": "Contact Email",
+          "control": "text",
+          "required": true,
+          "placeholder": "user@example.com"
+        }
+      ],
+      "outputs": ["updated", "discarded", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.lists.write scope"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/contacts/v1/lists/{{urlencode config.listId}}/add",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"emails\": [{{json config.email}}]}",
+        "outputMap": {
+          "updated": "updated",
+          "discarded": "discarded"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "hubspot.getOwnerByEmail",
+      "label": "HubSpot: Get Owner by Email",
+      "description": "Look up a HubSpot owner record by the owner's email address.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "hubspot crm owner user rep salesperson lookup email assignee find",
+      "config": [
+        {
+          "key": "email",
+          "label": "Owner Email",
+          "control": "text",
+          "required": true,
+          "placeholder": "rep@yourcompany.com"
+        }
+      ],
+      "outputs": ["results", "status", "body"],
+      "credentials": [
+        {
+          "key": "HUBSPOT_ACCESS_TOKEN",
+          "help": "OAuth2 access token or private app token with crm.objects.owners.read scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.hubapi.com/crm/v3/owners?email={{urlencode config.email}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.HUBSPOT_ACCESS_TOKEN}}"
+        },
+        "outputMap": {
+          "results": "results"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "hubspot", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

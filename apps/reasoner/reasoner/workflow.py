@@ -35,7 +35,15 @@ from temporalio.contrib.langgraph import graph
 # sandbox. `plan` is IO-free; `activities` only supplies the activity references and
 # their (dataclass) payload types — the workflow never calls their bodies directly.
 with workflow.unsafe.imports_passed_through():
-    from . import activities, plan
+    # NB: use absolute `import reasoner.X`, NOT `from . import X`. The relative
+    # form resolves to importing the parent package `reasoner` (already in the
+    # sandbox's sys.modules), so the sandbox importer skips its passthrough check
+    # and instead *executes* the whole node stack (engine→nodes→catalog) inside
+    # the workflow sandbox — where catalog's import-time Path.resolve()/open()
+    # calls are restricted. The absolute form resolves to `reasoner.activities`
+    # (not yet in sys.modules), which correctly routes through passthrough.
+    import reasoner.activities as activities
+    import reasoner.plan as plan
 
 # Hardcoded (not imported from .graph) so the workflow sandbox never pulls in the
 # node modules' non-deterministic deps (psycopg, httpx, playwright). Must match

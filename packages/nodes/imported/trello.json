@@ -1,0 +1,192 @@
+{
+  "cluster": "productivity",
+  "label": "Trello",
+  "description": "Kanban-style project boards, lists, and cards.",
+  "source": { "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Auth: AP uses BasicAuth fields (API Key + Token) but sends them as key/token query params, not an Authorization header; mapped to the existing catalog credentials TRELLO_API_KEY + TRELLO_API_TOKEN for consistency. Skipped create_card: live catalog already has trello.createCard and the extra AP props (position, labels, board dropdown) are optional fields Trello rejects/misinterprets as empty strings, so a re-emit would not be strictly richer. Skipped update_card (needsPieceRuntime): run() conditionally includes body keys and 'closed' is a true JSON boolean — blank optionals would clear card fields. Skipped add_card_attachment (needsPieceRuntime): multipart FormData file upload. Dropdown props for boards/lists/labels became plain text ID fields.",
+  "nodes": [
+    {
+      "id": "trello.getCard",
+      "label": "Trello: Get Card",
+      "description": "Fetch a single Trello card by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card get fetch read details kanban ticket task lookup",
+      "config": [
+        {
+          "key": "cardId",
+          "label": "Card ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aBcDeFgH",
+          "help": "The card ID or short link (from the card URL)"
+        }
+      ],
+      "outputs": ["id", "name", "desc", "idList", "closed", "url", "status", "body"],
+      "credentials": [
+        { "key": "TRELLO_API_KEY", "help": "API key from trello.com/power-ups/admin" },
+        { "key": "TRELLO_API_TOKEN", "help": "Member token authorized for your API key" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.trello.com/1/cards/{{urlencode config.cardId}}?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "desc": "desc",
+          "idList": "idList",
+          "closed": "closed",
+          "url": "url"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "trello.deleteCard",
+      "label": "Trello: Delete Card",
+      "description": "Permanently remove a Trello card by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card delete remove destroy kanban ticket task",
+      "config": [
+        {
+          "key": "cardId",
+          "label": "Card ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aBcDeFgH",
+          "help": "The card ID or short link (from the card URL)"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "TRELLO_API_KEY", "help": "API key from trello.com/power-ups/admin" },
+        { "key": "TRELLO_API_TOKEN", "help": "Member token authorized for your API key" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.trello.com/1/cards/{{urlencode config.cardId}}?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": { "Accept": "application/json" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "trello.getCardAttachments",
+      "label": "Trello: Get Card Attachments",
+      "description": "List every attachment on a Trello card.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card attachments list files images links fetch",
+      "config": [
+        {
+          "key": "cardId",
+          "label": "Card ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aBcDeFgH",
+          "help": "The card ID or short link (from the card URL)"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "TRELLO_API_KEY", "help": "API key from trello.com/power-ups/admin" },
+        { "key": "TRELLO_API_TOKEN", "help": "Member token authorized for your API key" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.trello.com/1/cards/{{urlencode config.cardId}}/attachments?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": { "Accept": "application/json" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "trello.getCardAttachment",
+      "label": "Trello: Get Card Attachment",
+      "description": "Fetch one attachment on a Trello card by attachment ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card attachment get fetch file image link single",
+      "config": [
+        {
+          "key": "cardId",
+          "label": "Card ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aBcDeFgH",
+          "help": "The card ID or short link (from the card URL)"
+        },
+        {
+          "key": "attachmentId",
+          "label": "Attachment ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the attachment to retrieve"
+        }
+      ],
+      "outputs": ["id", "name", "url", "mimeType", "status", "body"],
+      "credentials": [
+        { "key": "TRELLO_API_KEY", "help": "API key from trello.com/power-ups/admin" },
+        { "key": "TRELLO_API_TOKEN", "help": "Member token authorized for your API key" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.trello.com/1/cards/{{urlencode config.cardId}}/attachments/{{urlencode config.attachmentId}}?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": { "Accept": "application/json" },
+        "outputMap": {
+          "id": "id",
+          "name": "name",
+          "url": "url",
+          "mimeType": "mimeType"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "trello.deleteCardAttachment",
+      "label": "Trello: Delete Card Attachment",
+      "description": "Remove an attachment from a Trello card.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "trello card attachment delete remove file detach",
+      "config": [
+        {
+          "key": "cardId",
+          "label": "Card ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "aBcDeFgH",
+          "help": "The card ID or short link (from the card URL)"
+        },
+        {
+          "key": "attachmentId",
+          "label": "Attachment ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the attachment to delete"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "TRELLO_API_KEY", "help": "API key from trello.com/power-ups/admin" },
+        { "key": "TRELLO_API_TOKEN", "help": "Member token authorized for your API key" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.trello.com/1/cards/{{urlencode config.cardId}}/attachments/{{urlencode config.attachmentId}}?key={{urlencode credentials.TRELLO_API_KEY}}&token={{urlencode credentials.TRELLO_API_TOKEN}}",
+        "headers": { "Accept": "application/json" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "trello", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

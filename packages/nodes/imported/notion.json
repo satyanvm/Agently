@@ -1,0 +1,277 @@
+{
+  "cluster": "productivity",
+  "label": "Notion",
+  "description": "Read and write Notion pages, databases, and comments over the public REST API.",
+  "source": { "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Credential unified to NOTION_API_KEY to match the three notion.* nodes already in the live catalog (AP piece offers OAuth2 or internal-token auth; both are bearer tokens against the same API). Simplifications: findPage returns the first page of raw search results (AP's client-side exact-match filtering, pagination loop, and result reshaping dropped); getBlockChildren returns one level of children, first 100 (AP's recursive depth and Markdown conversion dropped); getPageComments returns the first 100 comments unthreaded (AP's pagination and discussion-thread grouping dropped); getDatabase returns the raw database object (AP's formStructure reshaping dropped). Skipped as live-catalog collision: createPage (live notion.createPage is equal coverage; AP adds only an optional first-paragraph content field that cannot be conditionally included). needsPieceRuntime: create_database_item, update_database_item, notion-find-database-item (all retrieve the database schema first and build typed property objects via NotionFieldMapping), append_to_page (Markdown-to-blocks conversion via @tryfabric/martian; plain-paragraph case already covered by live notion.appendBlock). Triggers not transpiled: new-database-item, updated-database-item, new-comment, updated-page.",
+  "nodes": [
+    {
+      "id": "notion.findPage",
+      "label": "Notion: Find Page",
+      "description": "Search the workspace for pages matching a title query, newest edits first.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion search find page title lookup locate query workspace",
+      "config": [
+        {
+          "key": "query",
+          "label": "Search Query",
+          "control": "text",
+          "required": true,
+          "placeholder": "Meeting notes",
+          "help": "Full or partial page title to search for"
+        }
+      ],
+      "outputs": ["results", "has_more", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret (ntn_… / secret_…) from notion.so/my-integrations, or an OAuth2 access token; pages must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/search",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"query\": {{json config.query}}, \"filter\": {\"property\": \"object\", \"value\": \"page\"}, \"sort\": {\"direction\": \"descending\", \"timestamp\": \"last_edited_time\"}}",
+        "outputMap": { "results": "results", "has_more": "has_more" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.getBlockChildren",
+      "label": "Notion: Get Block Children",
+      "description": "List the content blocks directly inside a page or block (first 100).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion page content blocks children read fetch body text list",
+      "config": [
+        {
+          "key": "blockId",
+          "label": "Page or Block ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the page or parent block whose children to list"
+        }
+      ],
+      "outputs": ["results", "has_more", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret from notion.so/my-integrations; the page must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.notion.com/v1/blocks/{{config.blockId}}/children?page_size=100",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28"
+        },
+        "outputMap": { "results": "results", "has_more": "has_more" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.archiveDatabaseItem",
+      "label": "Notion: Archive Database Item",
+      "description": "Move a database item (page) to the trash so it can be restored later.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion archive delete trash remove database item page soft delete",
+      "config": [
+        {
+          "key": "pageId",
+          "label": "Item ID",
+          "control": "text",
+          "required": true,
+          "help": "Page ID of the database item to archive"
+        }
+      ],
+      "outputs": ["id", "archived", "url", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret with edit access to the item's database"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://api.notion.com/v1/pages/{{config.pageId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"archived\": true}",
+        "outputMap": { "id": "id", "archived": "archived", "url": "url" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.restoreDatabaseItem",
+      "label": "Notion: Restore Database Item",
+      "description": "Bring an archived database item (page) back to active status.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion restore unarchive undelete recover database item page",
+      "config": [
+        {
+          "key": "pageId",
+          "label": "Item ID",
+          "control": "text",
+          "required": true,
+          "help": "Page ID of the archived database item to restore"
+        }
+      ],
+      "outputs": ["id", "archived", "url", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret with edit access to the item's database"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://api.notion.com/v1/pages/{{config.pageId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"archived\": false}",
+        "outputMap": { "id": "id", "archived": "archived", "url": "url" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.addComment",
+      "label": "Notion: Add Comment",
+      "description": "Post a plain-text comment as a new thread on a page.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion comment add post note feedback discussion reply page",
+      "config": [
+        {
+          "key": "pageId",
+          "label": "Page ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the page to comment on"
+        },
+        {
+          "key": "commentText",
+          "label": "Comment",
+          "control": "textarea",
+          "required": true,
+          "help": "Plain text of the comment"
+        }
+      ],
+      "outputs": ["id", "discussion_id", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret with the 'Insert comments' capability enabled"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/comments",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"parent\": {\"page_id\": {{json config.pageId}}}, \"rich_text\": [{\"text\": {\"content\": {{json config.commentText}}}}]}",
+        "outputMap": { "id": "id", "discussion_id": "discussion_id" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.getPageComments",
+      "label": "Notion: Get Page Comments",
+      "description": "List the comments on a page or block (first 100).",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion comments list read fetch page discussion feedback threads",
+      "config": [
+        {
+          "key": "pageId",
+          "label": "Page or Block ID",
+          "control": "text",
+          "required": true,
+          "help": "ID of the page or block whose comments to list"
+        }
+      ],
+      "outputs": ["results", "has_more", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret with the 'Read comments' capability enabled"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.notion.com/v1/comments?block_id={{urlencode config.pageId}}&page_size=100",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28"
+        },
+        "outputMap": { "results": "results", "has_more": "has_more" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "notion.getDatabase",
+      "label": "Notion: Get Database",
+      "description": "Fetch a database's metadata and property schema.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "notion database schema structure properties retrieve fields columns metadata",
+      "config": [
+        {
+          "key": "databaseId",
+          "label": "Database ID",
+          "control": "text",
+          "required": true,
+          "help": "The 32-char database ID from the database URL"
+        }
+      ],
+      "outputs": ["id", "title", "properties", "status", "body"],
+      "credentials": [
+        {
+          "key": "NOTION_API_KEY",
+          "help": "Internal integration secret; the database must be shared with the integration"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.notion.com/v1/databases/{{config.databaseId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.NOTION_API_KEY}}",
+          "Notion-Version": "2022-06-28"
+        },
+        "outputMap": { "id": "id", "title": "title", "properties": "properties" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "notion", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}
