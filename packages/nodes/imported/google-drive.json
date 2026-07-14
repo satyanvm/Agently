@@ -111,51 +111,6 @@
       }
     },
     {
-      "id": "gdrive.getFileMetadata",
-      "label": "Google Drive: Get File Metadata",
-      "description": "Look up a file or folder by ID and return its core metadata fields.",
-      "kind": "action",
-      "runtime": "http",
-      "search": "google drive get file folder metadata info name mimetype size link id lookup",
-      "config": [
-        {
-          "key": "fileId",
-          "label": "File or Folder ID",
-          "control": "text",
-          "required": true,
-          "placeholder": "1a2B3c4D5e…",
-          "help": "Found in the Drive URL of the file or folder"
-        }
-      ],
-      "outputs": ["id", "name", "mimeType", "size", "webViewLink", "modifiedTime", "trashed", "status", "body"],
-      "credentials": [
-        {
-          "key": "GOOGLE_OAUTH_TOKEN",
-          "help": "OAuth2 access token with a Drive scope (drive.readonly suffices), obtained externally (e.g. Google OAuth 2.0 Playground)"
-        }
-      ],
-      "http": {
-        "method": "GET",
-        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}?supportsAllDrives=true&fields=id,name,mimeType,size,parents,webViewLink,modifiedTime,trashed",
-        "headers": {
-          "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
-        },
-        "outputMap": {
-          "id": "id",
-          "name": "name",
-          "mimeType": "mimeType",
-          "size": "size",
-          "webViewLink": "webViewLink",
-          "modifiedTime": "modifiedTime",
-          "trashed": "trashed"
-        }
-      },
-      "metadata": {
-        "replaces": "gdrive.getFileMetadata",
-        "provenance": { "source": "activepieces", "piece": "google-drive", "license": "MIT", "importedAt": "2026-07-11" }
-      }
-    },
-    {
       "id": "gdrive.copyFile",
       "label": "Google Drive: Copy File",
       "description": "Duplicate an existing Drive file into a target folder under a new name.",

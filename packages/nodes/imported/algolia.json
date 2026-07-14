@@ -1,0 +1,118 @@
+{
+  "cluster": "databases",
+  "label": "Algolia",
+  "description": "Hosted search: browse and manage records in Algolia indices.",
+  "source": { "piece": "algolia", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "browse-records simplified to a single first-page GET browse (the piece loops over cursors up to a limit; cursor is lifted so callers can paginate manually). delete-records simplified from a batch-delete-plus-task-poll to Algolia's official single-object DELETE endpoint. save-records not transpiled: it maps a user JSON array into a typed batch requests body and polls task status, which the HTTP template runtime cannot express. The piece's generic custom-api-call action also skipped (arbitrary body). AP dynamic index dropdown became a plain text field.",
+  "nodes": [
+    {
+      "id": "algolia.browseRecords",
+      "label": "Algolia: Browse Records",
+      "description": "Fetch the first page of records from an Algolia index, with a cursor for continuing.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "algolia browse records index objects list export search hits dump",
+      "config": [
+        {
+          "key": "indexName",
+          "label": "Index Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "products",
+          "help": "Name of the Algolia index to browse"
+        }
+      ],
+      "outputs": ["hits", "cursor", "nbHits", "status", "body"],
+      "credentials": [
+        {
+          "key": "ALGOLIA_APPLICATION_ID",
+          "help": "Application ID from the Algolia dashboard under Settings > API Keys"
+        },
+        {
+          "key": "ALGOLIA_API_KEY",
+          "help": "Algolia API key with the browse ACL (search-only keys will not work)"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://{{credentials.ALGOLIA_APPLICATION_ID}}.algolia.net/1/indexes/{{urlencode config.indexName}}/browse",
+        "headers": {
+          "x-algolia-application-id": "{{credentials.ALGOLIA_APPLICATION_ID}}",
+          "x-algolia-api-key": "{{credentials.ALGOLIA_API_KEY}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "hits": "hits",
+          "cursor": "cursor",
+          "nbHits": "nbHits"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "algolia",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    },
+    {
+      "id": "algolia.deleteRecord",
+      "label": "Algolia: Delete Record",
+      "description": "Remove a single record from an Algolia index by its objectID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "algolia delete record object remove index objectid cleanup",
+      "config": [
+        {
+          "key": "indexName",
+          "label": "Index Name",
+          "control": "text",
+          "required": true,
+          "placeholder": "products",
+          "help": "Name of the Algolia index containing the record"
+        },
+        {
+          "key": "objectId",
+          "label": "Object ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "record-123",
+          "help": "The objectID of the record to delete"
+        }
+      ],
+      "outputs": ["taskId", "deletedAt", "status", "body"],
+      "credentials": [
+        {
+          "key": "ALGOLIA_APPLICATION_ID",
+          "help": "Application ID from the Algolia dashboard under Settings > API Keys"
+        },
+        {
+          "key": "ALGOLIA_API_KEY",
+          "help": "Algolia API key with the deleteObject ACL (search-only keys will not work)"
+        }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://{{credentials.ALGOLIA_APPLICATION_ID}}.algolia.net/1/indexes/{{urlencode config.indexName}}/{{urlencode config.objectId}}",
+        "headers": {
+          "x-algolia-application-id": "{{credentials.ALGOLIA_APPLICATION_ID}}",
+          "x-algolia-api-key": "{{credentials.ALGOLIA_API_KEY}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "taskId": "taskID",
+          "deletedAt": "deletedAt"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "algolia",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    }
+  ]
+}

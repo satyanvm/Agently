@@ -1,0 +1,62 @@
+{
+  "cluster": "research-news",
+  "label": "Brave Search",
+  "description": "Privacy-focused web search via the Brave Search API.",
+  "source": { "piece": "brave-search", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Piece has one real action (web_search); the generic custom-API-call helper action was skipped since Agently has a generic HTTP node. The optional numeric 'count' prop was made a required text field (placeholder 10) because the executor cannot conditionally omit query params and Brave rejects an empty count value.",
+  "nodes": [
+    {
+      "id": "bravesearch.webSearch",
+      "label": "Brave Search: Web Search",
+      "description": "Run a web search on Brave and return the ranked results.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "brave search web query internet lookup results privacy engine serp",
+      "config": [
+        {
+          "key": "query",
+          "label": "Query",
+          "control": "text",
+          "required": true,
+          "placeholder": "latest AI news",
+          "help": "Search terms to send to Brave"
+        },
+        {
+          "key": "count",
+          "label": "Result Count",
+          "control": "text",
+          "required": true,
+          "placeholder": "10",
+          "help": "Number of results to return (1-20)"
+        }
+      ],
+      "outputs": ["results", "query", "status", "body"],
+      "credentials": [
+        {
+          "key": "BRAVE_SEARCH_API_KEY",
+          "help": "Brave Search API subscription token from https://brave.com/search/api/"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.search.brave.com/res/v1/web/search?q={{urlencode config.query}}&count={{urlencode config.count}}",
+        "headers": {
+          "X-Subscription-Token": "{{credentials.BRAVE_SEARCH_API_KEY}}",
+          "Accept": "application/json"
+        },
+        "outputMap": {
+          "results": "web.results",
+          "query": "query.original"
+        }
+      },
+      "metadata": {
+        "provenance": {
+          "source": "activepieces",
+          "piece": "brave-search",
+          "license": "MIT",
+          "importedAt": "2026-07-11"
+        }
+      }
+    }
+  ]
+}

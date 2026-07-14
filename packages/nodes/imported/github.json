@@ -19,13 +19,13 @@
       ],
       "outputs": ["title", "state", "htmlUrl", "authorLogin", "status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/issues/{{urlencode config.issueNumber}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28"
         },
@@ -45,13 +45,13 @@
       ],
       "outputs": ["totalCount", "items", "status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope for private repos" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope for private repos" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.github.com/search/issues?q={{urlencode config.query}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28"
         },
@@ -71,13 +71,13 @@
       ],
       "outputs": ["login", "id", "name", "htmlUrl", "type", "status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token; any scope works for public profiles" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token; any scope works for public profiles" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.github.com/users/{{urlencode config.username}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28"
         },
@@ -99,13 +99,13 @@
       ],
       "outputs": ["name", "commitSha", "protected", "status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/branches/{{urlencode config.branch}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28"
         },
@@ -128,13 +128,13 @@
       ],
       "outputs": ["ref", "sha", "url", "status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (contents write)" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (contents write)" }
       ],
       "http": {
         "method": "POST",
         "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/git/refs",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
           "Content-Type": "application/json"
@@ -158,13 +158,13 @@
       ],
       "outputs": ["status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (contents write)" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (contents write)" }
       ],
       "http": {
         "method": "DELETE",
         "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/git/refs/heads/{{urlencode config.branch}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28"
         }
@@ -186,13 +186,13 @@
       ],
       "outputs": ["status", "body"],
       "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (issues write)" }
+        { "key": "GITHUB_TOKEN", "help": "OAuth2 access token or personal access token with repo scope (issues write)" }
       ],
       "http": {
         "method": "POST",
         "url": "https://api.github.com/repos/{{urlencode config.owner}}/{{urlencode config.repo}}/issues/{{urlencode config.issueNumber}}/labels",
         "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
           "Content-Type": "application/json"
@@ -200,37 +200,6 @@
         "body": "{\"labels\": [{{json config.label}}]}"
       },
       "metadata": { "provenance": { "source": "activepieces", "piece": "github", "license": "MIT", "importedAt": "2026-07-11" } }
-    },
-    {
-      "id": "github.createGist",
-      "label": "GitHub: Create Gist",
-      "description": "Create a gist containing a single file, public or secret.",
-      "kind": "action",
-      "runtime": "http",
-      "search": "github gist create snippet share code paste file",
-      "config": [
-        { "key": "filename", "label": "Filename", "control": "text", "required": true, "placeholder": "notes.md" },
-        { "key": "content", "label": "File Content", "control": "textarea", "required": true },
-        { "key": "gistDescription", "label": "Description", "control": "text", "required": false },
-        { "key": "public", "label": "Public", "control": "select", "required": true, "options": ["true", "false"], "help": "true for a public gist, false for a secret one" }
-      ],
-      "outputs": ["id", "htmlUrl", "status", "body"],
-      "credentials": [
-        { "key": "GITHUB_ACCESS_TOKEN", "help": "User OAuth2 access token or personal access token with gist scope; GitHub App installation tokens cannot create gists" }
-      ],
-      "http": {
-        "method": "POST",
-        "url": "https://api.github.com/gists",
-        "headers": {
-          "Authorization": "Bearer {{credentials.GITHUB_ACCESS_TOKEN}}",
-          "Accept": "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "Content-Type": "application/json"
-        },
-        "body": "{\"description\": {{json config.gistDescription}}, \"public\": {{json config.public}}, \"files\": { {{json config.filename}}: {\"content\": {{json config.content}}} }}",
-        "outputMap": { "id": "id", "htmlUrl": "html_url" }
-      },
-      "metadata": { "replaces": "github.createGist", "provenance": { "source": "activepieces", "piece": "github", "license": "MIT", "importedAt": "2026-07-11" } }
     }
   ]
 }

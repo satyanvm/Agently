@@ -462,31 +462,25 @@
     {
       "id": "todoist.createTask",
       "label": "Todoist: Create Task",
-      "description": "Create a task in Todoist via the REST v2 API.",
+      "description": "Create a task in Todoist via the unified v1 API.",
       "kind": "action",
       "runtime": "http",
-      "search": "todoist task todo create add reminder due date checklist",
+      "search": "todoist task todo create add checklist",
       "config": [
         {
           "key": "content",
           "label": "Task",
           "control": "text",
           "required": true,
-          "placeholder": "Buy milk"
+          "placeholder": "Buy milk",
+          "help": "Task text; supports Todoist markdown and links"
         },
         {
           "key": "description",
           "label": "Description",
           "control": "textarea",
-          "required": false
-        },
-        {
-          "key": "dueString",
-          "label": "Due",
-          "control": "text",
           "required": false,
-          "placeholder": "tomorrow at 12:00",
-          "help": "Human-readable due date parsed by Todoist"
+          "help": "Longer notes for the task; supports markdown"
         }
       ],
       "outputs": [
@@ -503,12 +497,12 @@
       ],
       "http": {
         "method": "POST",
-        "url": "https://api.todoist.com/rest/v2/tasks",
+        "url": "https://api.todoist.com/api/v1/tasks",
         "headers": {
           "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}",
           "Content-Type": "application/json"
         },
-        "body": "{\"content\": {{json config.content}}, \"description\": {{json config.description}}, \"due_string\": {{json config.dueString}}}",
+        "body": "{\"content\": {{json config.content}}, \"description\": {{json config.description}}}",
         "outputMap": {
           "id": "id",
           "url": "url"
@@ -518,12 +512,13 @@
     {
       "id": "todoist.listTasks",
       "label": "Todoist: List Tasks",
-      "description": "List all active (uncompleted) tasks via the Todoist REST v2 API.",
+      "description": "List active (uncompleted) tasks via the Todoist unified v1 API. Returns the first page of results.",
       "kind": "action",
       "runtime": "http",
       "search": "todoist tasks list todo active fetch read open items",
       "config": [],
       "outputs": [
+        "results",
         "status",
         "body"
       ],
@@ -535,9 +530,12 @@
       ],
       "http": {
         "method": "GET",
-        "url": "https://api.todoist.com/rest/v2/tasks",
+        "url": "https://api.todoist.com/api/v1/tasks",
         "headers": {
           "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}"
+        },
+        "outputMap": {
+          "results": "results"
         }
       }
     },

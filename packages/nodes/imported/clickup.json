@@ -3,7 +3,7 @@
   "label": "ClickUp",
   "description": "Task and project management across ClickUp workspaces, spaces, and lists.",
   "source": { "piece": "clickup", "license": "MIT", "importedAt": "2026-07-11" },
-  "notes": "clickup.createTask SKIPPED: live catalog already has an equal-or-better node (template-safe transpile of AP create_task cannot add priority/assignees/due_date/custom_fields because they require typed JSON values). getTask drops the optional include_subtasks boolean query param (blank value not tolerated). updateTask keeps only name (required) and description; status/priority/assignees dropped — status rejects empty string, priority is a JSON number, assignees is {add,rem} number arrays. Per ClickUp docs an empty-string description on update is ignored (clearing requires a single space), so the optional key is safe. createTaskComment hardcodes notify_all:true (JSON literal, matching AP behavior) and drops the optional assignee (JSON number; AP falls back to a second /user request we cannot express). listTeamTasks keeps only workspaceId + page (required, default 0); assignees/tags/space_ids/list_ids/order_by/reverse/include_closed dropped because blank query values are not tolerated and arrays cannot be encoded. Auth is AP OAuth2 -> CLICKUP_ACCESS_TOKEN with Bearer prefix; the pre-existing catalog createTask node uses a personal CLICKUP_API_TOKEN without Bearer — both are valid ClickUp auth styles.",
+  "notes": "clickup.createTask SKIPPED: live catalog already has an equal-or-better node (template-safe transpile of AP create_task cannot add priority/assignees/due_date/custom_fields because they require typed JSON values). getTask drops the optional include_subtasks boolean query param (blank value not tolerated). updateTask keeps only name (required) and description; status/priority/assignees dropped — status rejects empty string, priority is a JSON number, assignees is {add,rem} number arrays. Per ClickUp docs an empty-string description on update is ignored (clearing requires a single space), so the optional key is safe. createTaskComment hardcodes notify_all:true (JSON literal, matching AP behavior) and drops the optional assignee (JSON number; AP falls back to a second /user request we cannot express). listTeamTasks keeps only workspaceId + page (required, default 0); assignees/tags/space_ids/list_ids/order_by/reverse/include_closed dropped because blank query values are not tolerated and arrays cannot be encoded. Auth is AP OAuth2 -> CLICKUP_API_TOKEN with Bearer prefix; the pre-existing catalog createTask node uses a personal CLICKUP_API_TOKEN without Bearer — both are valid ClickUp auth styles.",
   "nodes": [
     {
       "id": "clickup.getTask",
@@ -24,13 +24,13 @@
       ],
       "outputs": ["id", "name", "url", "taskStatus", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Accept": "application/json"
         },
         "outputMap": {
@@ -77,13 +77,13 @@
       ],
       "outputs": ["id", "name", "url", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "PUT",
         "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Content-Type": "application/json"
         },
         "body": "{\"name\": {{json config.name}}, \"description\": {{json config.description}}}",
@@ -116,13 +116,13 @@
       ],
       "outputs": ["status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "DELETE",
         "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Accept": "application/json"
         }
       },
@@ -155,13 +155,13 @@
       ],
       "outputs": ["id", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "POST",
         "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}/comment",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Content-Type": "application/json"
         },
         "body": "{\"comment_text\": {{json config.commentText}}, \"notify_all\": true}",
@@ -192,13 +192,13 @@
       ],
       "outputs": ["comments", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.clickup.com/api/v2/task/{{urlencode config.taskId}}/comment",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Accept": "application/json"
         },
         "outputMap": {
@@ -234,13 +234,13 @@
       ],
       "outputs": ["id", "name", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "POST",
         "url": "https://api.clickup.com/api/v2/space/{{urlencode config.spaceId}}/list",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Content-Type": "application/json"
         },
         "body": "{\"name\": {{json config.name}}}",
@@ -272,13 +272,13 @@
       ],
       "outputs": ["spaces", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.clickup.com/api/v2/team/{{urlencode config.workspaceId}}/space",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Accept": "application/json"
         },
         "outputMap": {
@@ -316,13 +316,13 @@
       ],
       "outputs": ["tasks", "status", "body"],
       "credentials": [
-        { "key": "CLICKUP_ACCESS_TOKEN", "help": "OAuth2 access token" }
+        { "key": "CLICKUP_API_TOKEN", "help": "Personal API token (pk_\u2026) or OAuth2 access token" }
       ],
       "http": {
         "method": "GET",
         "url": "https://api.clickup.com/api/v2/team/{{urlencode config.workspaceId}}/task?page={{urlencode config.page}}",
         "headers": {
-          "Authorization": "Bearer {{credentials.CLICKUP_ACCESS_TOKEN}}",
+          "Authorization": "Bearer {{credentials.CLICKUP_API_TOKEN}}",
           "Accept": "application/json"
         },
         "outputMap": {

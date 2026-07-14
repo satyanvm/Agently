@@ -1,0 +1,8 @@
+{
+  "cluster": "cloud-storage",
+  "label": "Box",
+  "description": "Cloud content management and file collaboration platform.",
+  "source": { "piece": "box", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "The vendored box piece defines no concrete actions (no src/lib/actions/ directory). Its only action is the auto-generated generic Custom API Call (createCustomApiCallAction over https://api.box.com/2.0 with OAuth2 Bearer auth), which is skipped per catalog convention because Agently's generic HTTP node already covers arbitrary authenticated requests and its dynamic method/headers/body cannot be expressed as a fixed declarative template. The piece's three webhook triggers (new_file, new_folder, new_comment) are out of scope for the HTTP action runtime. Auth mapping if Box nodes are added later: OAuth2 -> BOX_ACCESS_TOKEN.",
+  "nodes": []
+}

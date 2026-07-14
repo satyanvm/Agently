@@ -33,18 +33,20 @@
         {
           "key": "public",
           "label": "Public",
-          "control": "text",
+          "control": "select",
           "required": true,
-          "placeholder": "false",
-          "help": "Literal true or false (rendered as an unquoted JSON boolean)"
+          "options": [
+            "true",
+            "false"
+          ],
+          "help": "true for a public gist, false for a secret one"
         }
       ],
       "outputs": [
         "id",
         "htmlUrl",
         "status",
-        "body",
-        "html_url"
+        "body"
       ],
       "credentials": [
         {
@@ -58,12 +60,13 @@
         "headers": {
           "Authorization": "Bearer {{credentials.GITHUB_TOKEN}}",
           "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
           "Content-Type": "application/json"
         },
-        "body": "{\"description\": {{json config.description}}, \"public\": {{config.public}}, \"files\": { {{json config.filename}}: {\"content\": {{json config.content}}} }}",
+        "body": "{\"description\": {{json config.description}}, \"public\": {{json config.public}}, \"files\": { {{json config.filename}}: {\"content\": {{json config.content}}} }}",
         "outputMap": {
           "id": "id",
-          "html_url": "htmlUrl"
+          "htmlUrl": "html_url"
         }
       }
     },
@@ -288,23 +291,28 @@
     {
       "id": "gdrive.getFileMetadata",
       "label": "Google Drive: Get File Metadata",
-      "description": "Fetch metadata (id, name, mimeType) for a Drive file by ID via the Drive v3 API.",
+      "description": "Look up a file or folder by ID and return its core metadata fields.",
       "kind": "action",
       "runtime": "http",
-      "search": "google drive file metadata get info name mimetype id",
+      "search": "google drive get file folder metadata info name mimetype size link id lookup",
       "config": [
         {
           "key": "fileId",
-          "label": "File ID",
+          "label": "File or Folder ID",
           "control": "text",
           "required": true,
-          "placeholder": "1a2B3c4D5e…"
+          "placeholder": "1a2B3c4D5e…",
+          "help": "Found in the Drive URL of the file or folder"
         }
       ],
       "outputs": [
         "id",
         "name",
         "mimeType",
+        "size",
+        "webViewLink",
+        "modifiedTime",
+        "trashed",
         "status",
         "body"
       ],
@@ -316,14 +324,18 @@
       ],
       "http": {
         "method": "GET",
-        "url": "https://www.googleapis.com/drive/v3/files/{{config.fileId}}",
+        "url": "https://www.googleapis.com/drive/v3/files/{{urlencode config.fileId}}?supportsAllDrives=true&fields=id,name,mimeType,size,parents,webViewLink,modifiedTime,trashed",
         "headers": {
           "Authorization": "Bearer {{credentials.GOOGLE_OAUTH_TOKEN}}"
         },
         "outputMap": {
           "id": "id",
           "name": "name",
-          "mimeType": "mimeType"
+          "mimeType": "mimeType",
+          "size": "size",
+          "webViewLink": "webViewLink",
+          "modifiedTime": "modifiedTime",
+          "trashed": "trashed"
         }
       }
     },

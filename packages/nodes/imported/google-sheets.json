@@ -3,7 +3,7 @@
   "label": "Google Sheets",
   "description": "Work with Google Sheets spreadsheets: create, organize, and edit worksheets and rows.",
   "source": { "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" },
-  "notes": "Simplifications: (1) createSpreadsheet uses the native Sheets v4 POST /spreadsheets instead of AP's Drive files.create — the AP folder-picker prop was dropped, so new spreadsheets land in the Drive root. (2) createWorksheet drops AP's optional headers prop, which required a second append request. (3) deleteRows replaces AP's 1-based single-row delete_row: the executor cannot do arithmetic (rowNumber-1), so the node exposes the API's native 0-based startIndex/endIndex, which also covers multi-row deletes. (4) Numeric fields (sheetId, startIndex, endIndex) are sent as JSON strings; Google APIs use proto3 JSON mapping, which documentedly accepts string encodings for integer fields. (5) AP also offers a service-account auth variant (JWT signing) — not representable here; only the OAuth2 token credential is mapped. Skipped despite being simple-ish: find_spreadsheets (pagination loop), and insert/read row ops already covered by live gsheets.appendRow / gsheets.readRange.",
+  "notes": "Simplifications: (1) createSpreadsheet uses the native Sheets v4 POST /spreadsheets instead of AP's Drive files.create — the AP folder-picker prop was dropped, so new spreadsheets land in the Drive root. (2) createWorksheet drops AP's optional headers prop, which required a second append request; the new tab's numeric sheetId is lifted from replies.0. (3) deleteRows replaces AP's 1-based single-row delete_row: the executor cannot do arithmetic (rowNumber-1), so the node exposes the API's native 0-based startIndex/endIndex, which also covers multi-row deletes. (4) exportSheet always returns the CSV/TSV text in the body output — AP's file-object variant (context.files) was dropped; the response is plain text, so there is no outputMap. (5) Numeric fields (sheetId, startIndex, endIndex) are sent as JSON strings; Google APIs use proto3 JSON mapping, which documentedly accepts string encodings for integer fields. (6) AP also offers a service-account auth variant (JWT signing) — not representable here; only the OAuth2 token credential is mapped. Row read/write ops are already covered by live gsheets.appendRow / gsheets.readRange, so their AP equivalents were left to the piece runtime.",
   "nodes": [
     {
       "id": "gsheets.createSpreadsheet",
@@ -70,7 +70,7 @@
           "help": "Title of the new worksheet tab"
         }
       ],
-      "outputs": ["spreadsheetId", "status", "body"],
+      "outputs": ["spreadsheetId", "sheetId", "status", "body"],
       "credentials": [
         {
           "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
@@ -86,7 +86,8 @@
         },
         "body": "{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": {{json config.title}}}}}]}",
         "outputMap": {
-          "spreadsheetId": "spreadsheetId"
+          "spreadsheetId": "spreadsheetId",
+          "sheetId": "replies.0.addSheet.properties.sheetId"
         }
       },
       "metadata": {
@@ -306,6 +307,56 @@
         "body": "{\"requests\": [{\"deleteDimension\": {\"range\": {\"sheetId\": {{json config.sheetId}}, \"dimension\": \"ROWS\", \"startIndex\": {{json config.startIndex}}, \"endIndex\": {{json config.endIndex}}}}}]}",
         "outputMap": {
           "spreadsheetId": "spreadsheetId"
+        }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "google-sheets", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "gsheets.exportSheet",
+      "label": "Google Sheets: Export Worksheet",
+      "description": "Download a worksheet's contents as CSV or TSV text.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "google sheets export download csv tsv worksheet data dump extract",
+      "config": [
+        {
+          "key": "spreadsheetId",
+          "label": "Spreadsheet ID",
+          "control": "text",
+          "required": true,
+          "help": "The long ID from the spreadsheet URL"
+        },
+        {
+          "key": "sheetId",
+          "label": "Worksheet ID",
+          "control": "text",
+          "required": true,
+          "placeholder": "0",
+          "help": "Numeric sheet ID (the gid= value in the sheet URL)"
+        },
+        {
+          "key": "format",
+          "label": "Export Format",
+          "control": "select",
+          "required": true,
+          "options": ["csv", "tsv"],
+          "help": "File format for the exported data"
+        }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        {
+          "key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+          "help": "OAuth2 access token with https://www.googleapis.com/auth/drive.readonly (or drive) scope"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://docs.google.com/spreadsheets/d/{{config.spreadsheetId}}/export?format={{urlencode config.format}}&gid={{urlencode config.sheetId}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.GOOGLE_SHEETS_ACCESS_TOKEN}}"
         }
       },
       "metadata": {

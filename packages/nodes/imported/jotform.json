@@ -1,0 +1,117 @@
+{
+  "cluster": "productivity",
+  "label": "Jotform",
+  "description": "Online form builder — read forms, questions, and submissions via the Jotform API.",
+  "source": { "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "The AP piece ships no dedicated actions — only a generic custom-API-call action and a webhook trigger. Nodes below cover the HTTP surface demonstrated in the piece's common helpers (APIKEY header auth, GET /user/forms) plus the core documented read endpoints of Jotform's public API v1 (form, questions, submissions). AP auth includes a region selector (us/eu/hipaa) that switches the base host; simplified to the US endpoint api.jotform.com — EU (eu-api.jotform.com) and HIPAA (hipaa-api.jotform.com) accounts are not covered. Optional list query params (limit/offset/orderby/filter) were dropped because empty-string values are not documented as tolerated.",
+  "nodes": [
+    {
+      "id": "jotform.listForms",
+      "label": "Jotform: List Forms",
+      "description": "Fetch all forms owned by the authenticated Jotform account.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jotform forms list get my forms surveys form builder",
+      "config": [],
+      "outputs": ["forms", "responseCode", "status", "body"],
+      "credentials": [
+        { "key": "JOTFORM_API_KEY", "help": "Jotform API key from Settings → API → Create New Key (Full Access recommended)" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.jotform.com/user/forms",
+        "headers": { "APIKEY": "{{credentials.JOTFORM_API_KEY}}" },
+        "outputMap": { "forms": "content", "responseCode": "responseCode" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "jotform.getForm",
+      "label": "Jotform: Get Form",
+      "description": "Retrieve a single form's properties such as title, status, URL, and submission count.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jotform form get details properties title status url survey",
+      "config": [
+        { "key": "formId", "label": "Form ID", "control": "text", "required": true, "placeholder": "231234567890123", "help": "Numeric form ID (visible in the form URL or My Forms)" }
+      ],
+      "outputs": ["form", "responseCode", "status", "body"],
+      "credentials": [
+        { "key": "JOTFORM_API_KEY", "help": "Jotform API key from Settings → API → Create New Key (Full Access recommended)" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.jotform.com/form/{{urlencode config.formId}}",
+        "headers": { "APIKEY": "{{credentials.JOTFORM_API_KEY}}" },
+        "outputMap": { "form": "content", "responseCode": "responseCode" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "jotform.getFormQuestions",
+      "label": "Jotform: Get Form Questions",
+      "description": "List every question (field) defined on a Jotform form, keyed by question ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jotform form questions fields get list schema survey",
+      "config": [
+        { "key": "formId", "label": "Form ID", "control": "text", "required": true, "placeholder": "231234567890123", "help": "Numeric form ID (visible in the form URL or My Forms)" }
+      ],
+      "outputs": ["questions", "responseCode", "status", "body"],
+      "credentials": [
+        { "key": "JOTFORM_API_KEY", "help": "Jotform API key from Settings → API → Create New Key (Full Access recommended)" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.jotform.com/form/{{urlencode config.formId}}/questions",
+        "headers": { "APIKEY": "{{credentials.JOTFORM_API_KEY}}" },
+        "outputMap": { "questions": "content", "responseCode": "responseCode" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "jotform.getFormSubmissions",
+      "label": "Jotform: Get Form Submissions",
+      "description": "Fetch the submissions received by a specific Jotform form, including answers per question.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jotform submissions responses answers form entries list get",
+      "config": [
+        { "key": "formId", "label": "Form ID", "control": "text", "required": true, "placeholder": "231234567890123", "help": "Numeric form ID (visible in the form URL or My Forms)" }
+      ],
+      "outputs": ["submissions", "responseCode", "status", "body"],
+      "credentials": [
+        { "key": "JOTFORM_API_KEY", "help": "Jotform API key from Settings → API → Create New Key (Full Access recommended)" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.jotform.com/form/{{urlencode config.formId}}/submissions",
+        "headers": { "APIKEY": "{{credentials.JOTFORM_API_KEY}}" },
+        "outputMap": { "submissions": "content", "responseCode": "responseCode" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "jotform.getSubmission",
+      "label": "Jotform: Get Submission",
+      "description": "Retrieve a single form submission by its ID, with all answered fields.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "jotform submission get single response answers entry",
+      "config": [
+        { "key": "submissionId", "label": "Submission ID", "control": "text", "required": true, "placeholder": "5301234567890123456", "help": "Numeric submission ID (from a submissions list or webhook payload)" }
+      ],
+      "outputs": ["submission", "responseCode", "status", "body"],
+      "credentials": [
+        { "key": "JOTFORM_API_KEY", "help": "Jotform API key from Settings → API → Create New Key (Full Access recommended)" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.jotform.com/submission/{{urlencode config.submissionId}}",
+        "headers": { "APIKEY": "{{credentials.JOTFORM_API_KEY}}" },
+        "outputMap": { "submission": "content", "responseCode": "responseCode" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "jotform", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}
