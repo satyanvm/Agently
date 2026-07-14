@@ -1,0 +1,212 @@
+{
+  "cluster": "crm-marketing",
+  "label": "Bitly",
+  "description": "Link shortening service for creating, managing, and tracking branded short URLs.",
+  "source": { "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "All five piece actions transpiled in simplified form. createBitlink: dropped optional group_guid/domain (API defaults to the account's default group and bit.ly), title, tags (JSON array), force_new_link (JSON boolean), and deeplinks (nested array) — none can be conditionally included or typed by the template runtime; the API defaults cover the core use case. updateBitlink: reduced to title-only update — archived (boolean), tags (array), and deeplinks require typed JSON; archiving is covered by the dedicated archiveBitlink node whose body is the static literal {\"archived\": true}. createQrCode: kept the long_url destination variant with required group_guid; dropped the bitlink_id destination variant (AP DynamicProperties) and every render_customizations style option (deeply nested objects with numeric/boolean fields). Dynamic dropdowns (group, bitlink, domain) became plain text fields with help hints. Bitlink IDs are path segments containing a slash (bit.ly/abc123), so they are substituted raw into the URL, matching the piece's client. The piece's generic custom-API-call action was skipped as non-specific.",
+  "nodes": [
+    {
+      "id": "bitly.createBitlink",
+      "label": "Bitly: Create Bitlink",
+      "description": "Shorten a long URL into a new Bitly short link.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bitly shorten url link short bitlink create shortener",
+      "config": [
+        {
+          "key": "longUrl",
+          "label": "Long URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://example.com/some/very/long/path",
+          "help": "Destination URL to shorten; must start with http:// or https://"
+        }
+      ],
+      "outputs": ["link", "id", "longUrl", "status", "body"],
+      "credentials": [
+        {
+          "key": "BITLY_ACCESS_TOKEN",
+          "help": "Personal access token: Bitly Profile Settings > Developer settings > API > Generate token"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api-ssl.bitly.com/v4/bitlinks",
+        "headers": {
+          "Authorization": "Bearer {{credentials.BITLY_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"long_url\": {{json config.longUrl}}}",
+        "outputMap": { "link": "link", "id": "id", "longUrl": "long_url" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "bitly.getBitlink",
+      "label": "Bitly: Get Bitlink Details",
+      "description": "Fetch the stored details of a Bitly short link, including its destination and title.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bitly get bitlink details link info lookup expand short url",
+      "config": [
+        {
+          "key": "bitlink",
+          "label": "Bitlink",
+          "control": "text",
+          "required": true,
+          "placeholder": "bit.ly/abc123",
+          "help": "Bitlink ID: domain plus hash without protocol, e.g. bit.ly/abc123"
+        }
+      ],
+      "outputs": ["link", "longUrl", "title", "createdAt", "status", "body"],
+      "credentials": [
+        {
+          "key": "BITLY_ACCESS_TOKEN",
+          "help": "Personal access token: Bitly Profile Settings > Developer settings > API > Generate token"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api-ssl.bitly.com/v4/bitlinks/{{config.bitlink}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.BITLY_ACCESS_TOKEN}}"
+        },
+        "outputMap": { "link": "link", "longUrl": "long_url", "title": "title", "createdAt": "created_at" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "bitly.updateBitlink",
+      "label": "Bitly: Update Bitlink",
+      "description": "Change the title of an existing Bitly short link.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bitly update bitlink edit rename title link modify",
+      "config": [
+        {
+          "key": "bitlink",
+          "label": "Bitlink",
+          "control": "text",
+          "required": true,
+          "placeholder": "bit.ly/abc123",
+          "help": "Bitlink ID: domain plus hash without protocol, e.g. bit.ly/abc123"
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "control": "text",
+          "required": true,
+          "help": "New title for the Bitlink"
+        }
+      ],
+      "outputs": ["link", "title", "status", "body"],
+      "credentials": [
+        {
+          "key": "BITLY_ACCESS_TOKEN",
+          "help": "Personal access token: Bitly Profile Settings > Developer settings > API > Generate token"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://api-ssl.bitly.com/v4/bitlinks/{{config.bitlink}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.BITLY_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"title\": {{json config.title}}}",
+        "outputMap": { "link": "link", "title": "title" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "bitly.archiveBitlink",
+      "label": "Bitly: Archive Bitlink",
+      "description": "Archive a Bitly short link so it no longer appears in active link lists.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bitly archive bitlink disable retire remove link hide",
+      "config": [
+        {
+          "key": "bitlink",
+          "label": "Bitlink",
+          "control": "text",
+          "required": true,
+          "placeholder": "bit.ly/abc123",
+          "help": "Bitlink ID: domain plus hash without protocol, e.g. bit.ly/abc123"
+        }
+      ],
+      "outputs": ["link", "archived", "status", "body"],
+      "credentials": [
+        {
+          "key": "BITLY_ACCESS_TOKEN",
+          "help": "Personal access token: Bitly Profile Settings > Developer settings > API > Generate token"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "url": "https://api-ssl.bitly.com/v4/bitlinks/{{config.bitlink}}",
+        "headers": {
+          "Authorization": "Bearer {{credentials.BITLY_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"archived\": true}",
+        "outputMap": { "link": "link", "archived": "archived" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "bitly.createQrCode",
+      "label": "Bitly: Create QR Code",
+      "description": "Generate a QR code that points to a long URL through a Bitly link.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "bitly qr code generate create scan link image",
+      "config": [
+        {
+          "key": "groupGuid",
+          "label": "Group GUID",
+          "control": "text",
+          "required": true,
+          "placeholder": "Ba1bc23dE4F",
+          "help": "Bitly group GUID; list your groups via GET https://api-ssl.bitly.com/v4/groups"
+        },
+        {
+          "key": "longUrl",
+          "label": "Long URL",
+          "control": "text",
+          "required": true,
+          "placeholder": "https://example.com/landing",
+          "help": "Destination URL the QR code will resolve to"
+        }
+      ],
+      "outputs": ["qrcodeId", "status", "body"],
+      "credentials": [
+        {
+          "key": "BITLY_ACCESS_TOKEN",
+          "help": "Personal access token: Bitly Profile Settings > Developer settings > API > Generate token"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api-ssl.bitly.com/v4/qr-codes",
+        "headers": {
+          "Authorization": "Bearer {{credentials.BITLY_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"group_guid\": {{json config.groupGuid}}, \"destination\": {\"long_url\": {{json config.longUrl}}}}",
+        "outputMap": { "qrcodeId": "qrcode_id" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "bitly", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

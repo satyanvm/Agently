@@ -1,0 +1,193 @@
+{
+  "cluster": "crm-marketing",
+  "label": "Attio",
+  "description": "Customizable real-time CRM for tracking people, companies, deals, lists, notes, and tasks.",
+  "source": { "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Record/list-entry attribute writes and filtered searches need the piece runtime (attribute-type formatting into typed JSON objects, pagination, member normalization). getRecord returns raw attribute values without the piece's workspace-member normalization pass. createTask is simplified to content-only: deadline_at/is_completed/linked_records/assignees are hardcoded to null/false/[]/[] because the API requires typed JSON values templates cannot emit. listTasks fetches a single page (limit=500) with no filters since Attio rejects empty-string query filters. createListEntry sends entry_values as a hardcoded empty object; list attribute values require the piece runtime.",
+  "nodes": [
+    {
+      "id": "attio.getRecord",
+      "label": "Attio: Get Record",
+      "description": "Fetch a single Attio record by object type and record ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm get record fetch person company deal lookup retrieve",
+      "config": [
+        { "key": "objectTypeId", "label": "Object", "control": "text", "required": true, "placeholder": "people", "help": "Object API slug or ID (e.g. people, companies, deals)" },
+        { "key": "recordId", "label": "Record ID", "control": "text", "required": true, "help": "UUID of the record to retrieve" }
+      ],
+      "outputs": ["recordId", "webUrl", "values", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with record read scopes" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.attio.com/v2/objects/{{urlencode config.objectTypeId}}/records/{{urlencode config.recordId}}",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}" },
+        "outputMap": { "recordId": "data.id.record_id", "webUrl": "data.web_url", "values": "data.values" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.createNote",
+      "label": "Attio: Create Note",
+      "description": "Attach a plaintext or markdown note to an Attio record.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm note create add comment annotation record person company",
+      "config": [
+        { "key": "parentObject", "label": "Parent Object", "control": "text", "required": true, "placeholder": "people", "help": "Object API slug or ID of the record's type" },
+        { "key": "parentRecordId", "label": "Parent Record ID", "control": "text", "required": true, "help": "UUID of the record to attach the note to" },
+        { "key": "title", "label": "Title", "control": "text", "required": true },
+        { "key": "format", "label": "Format", "control": "select", "required": true, "options": ["plaintext", "markdown"], "help": "How the note content is interpreted" },
+        { "key": "content", "label": "Content", "control": "textarea", "required": true }
+      ],
+      "outputs": ["noteId", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with note write scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.attio.com/v2/notes",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"data\": {\"parent_object\": {{json config.parentObject}}, \"parent_record_id\": {{json config.parentRecordId}}, \"title\": {{json config.title}}, \"format\": {{json config.format}}, \"content\": {{json config.content}}}}",
+        "outputMap": { "noteId": "data.id.note_id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.createTask",
+      "label": "Attio: Create Task",
+      "description": "Create a plaintext task in the Attio workspace.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm task create todo reminder follow up",
+      "config": [
+        { "key": "content", "label": "Task Content", "control": "textarea", "required": true, "help": "Text content of the task" }
+      ],
+      "outputs": ["taskId", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with task write scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.attio.com/v2/tasks",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"data\": {\"content\": {{json config.content}}, \"format\": \"plaintext\", \"deadline_at\": null, \"is_completed\": false, \"linked_records\": [], \"assignees\": []}}",
+        "outputMap": { "taskId": "data.id.task_id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.listTasks",
+      "label": "Attio: List Tasks",
+      "description": "Retrieve tasks from the Attio workspace, up to 500 per call.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm tasks list get all todo fetch",
+      "config": [],
+      "outputs": ["tasks", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with task read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.attio.com/v2/tasks?limit=500&offset=0",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}" },
+        "outputMap": { "tasks": "data" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.getTask",
+      "label": "Attio: Get Task",
+      "description": "Fetch a single Attio task by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm task get fetch lookup todo by id",
+      "config": [
+        { "key": "taskId", "label": "Task ID", "control": "text", "required": true, "help": "UUID of the task to retrieve" }
+      ],
+      "outputs": ["taskId", "content", "isCompleted", "deadlineAt", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with task read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.attio.com/v2/tasks/{{urlencode config.taskId}}",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}" },
+        "outputMap": { "taskId": "data.id.task_id", "content": "data.content_plaintext", "isCompleted": "data.is_completed", "deadlineAt": "data.deadline_at" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.deleteTask",
+      "label": "Attio: Delete Task",
+      "description": "Permanently remove a task from the Attio workspace by its ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm task delete remove clear todo",
+      "config": [
+        { "key": "taskId", "label": "Task ID", "control": "text", "required": true, "help": "UUID of the task to delete" }
+      ],
+      "outputs": ["status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with task write scope" }
+      ],
+      "http": {
+        "method": "DELETE",
+        "url": "https://api.attio.com/v2/tasks/{{urlencode config.taskId}}",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.getCallTranscript",
+      "label": "Attio: Get Call Transcript",
+      "description": "Fetch the transcript of a call recording from an Attio meeting.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm call transcript recording meeting fetch conversation",
+      "config": [
+        { "key": "meetingId", "label": "Meeting ID", "control": "text", "required": true, "help": "UUID of the meeting containing the recording" },
+        { "key": "callRecordingId", "label": "Call Recording ID", "control": "text", "required": true, "help": "UUID of the call recording" }
+      ],
+      "outputs": ["transcript", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with call recording read scope" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.attio.com/v2/meetings/{{urlencode config.meetingId}}/call_recordings/{{urlencode config.callRecordingId}}/transcript",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}" },
+        "outputMap": { "transcript": "data" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "attio.createListEntry",
+      "label": "Attio: Add Record to List",
+      "description": "Add an existing record to an Attio list as a new entry.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "attio crm list entry add record create pipeline stage",
+      "config": [
+        { "key": "listId", "label": "List", "control": "text", "required": true, "help": "List API slug or ID" },
+        { "key": "parentObject", "label": "Parent Object", "control": "text", "required": true, "placeholder": "companies", "help": "Object API slug or ID of the record's type" },
+        { "key": "parentRecordId", "label": "Parent Record ID", "control": "text", "required": true, "help": "UUID of the record to add to the list" }
+      ],
+      "outputs": ["entryId", "status", "body"],
+      "credentials": [
+        { "key": "ATTIO_API_KEY", "help": "Workspace access token: Attio → Workspace settings → Developers → New Access Token, with list entry write scope" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.attio.com/v2/lists/{{urlencode config.listId}}/entries",
+        "headers": { "Authorization": "Bearer {{credentials.ATTIO_API_KEY}}", "Content-Type": "application/json" },
+        "body": "{\"data\": {\"parent_object\": {{json config.parentObject}}, \"parent_record_id\": {{json config.parentRecordId}}, \"entry_values\": {}}}",
+        "outputMap": { "entryId": "data.id.entry_id" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "attio", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}

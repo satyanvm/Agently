@@ -513,9 +513,12 @@
    {
     "key": "public",
     "label": "Public",
-    "control": "text",
-    "placeholder": "false",
-    "help": "Literal true or false (rendered as an unquoted JSON boolean)"
+    "control": "select",
+    "options": [
+     "true",
+     "false"
+    ],
+    "help": "true for a public gist, false for a secret one"
    }
   ],
   "credentials": [
@@ -634,7 +637,7 @@
  {
   "id": "gdrive.getFileMetadata",
   "label": "Google Drive: Get File Metadata",
-  "description": "Fetch metadata (id, name, mimeType) for a Drive file by ID via the Drive v3 API.",
+  "description": "Look up a file or folder by ID and return its core metadata fields.",
   "kind": "action",
   "runtime": "http",
   "cluster": "cloud-storage",
@@ -642,9 +645,10 @@
   "config": [
    {
     "key": "fileId",
-    "label": "File ID",
+    "label": "File or Folder ID",
     "control": "text",
-    "placeholder": "1a2B3c4D5e…"
+    "placeholder": "1a2B3c4D5e…",
+    "help": "Found in the Drive URL of the file or folder"
    }
   ],
   "credentials": [
@@ -3736,7 +3740,7 @@
  {
   "id": "todoist.createTask",
   "label": "Todoist: Create Task",
-  "description": "Create a task in Todoist via the REST v2 API.",
+  "description": "Create a task in Todoist via the unified v1 API.",
   "kind": "action",
   "runtime": "http",
   "cluster": "productivity",
@@ -3746,19 +3750,14 @@
     "key": "content",
     "label": "Task",
     "control": "text",
-    "placeholder": "Buy milk"
+    "placeholder": "Buy milk",
+    "help": "Task text; supports Todoist markdown and links"
    },
    {
     "key": "description",
     "label": "Description",
-    "control": "textarea"
-   },
-   {
-    "key": "dueString",
-    "label": "Due",
-    "control": "text",
-    "placeholder": "tomorrow at 12:00",
-    "help": "Human-readable due date parsed by Todoist"
+    "control": "textarea",
+    "help": "Longer notes for the task; supports markdown"
    }
   ],
   "credentials": [
@@ -3768,7 +3767,7 @@
  {
   "id": "todoist.listTasks",
   "label": "Todoist: List Tasks",
-  "description": "List all active (uncompleted) tasks via the Todoist REST v2 API.",
+  "description": "List active (uncompleted) tasks via the Todoist unified v1 API. Returns the first page of results.",
   "kind": "action",
   "runtime": "http",
   "cluster": "productivity",

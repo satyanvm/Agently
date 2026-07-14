@@ -145,57 +145,147 @@ func basePlan(prompt, email string) Plan {
 // cluster costs recall, never correctness. Returns selected ids, capped and
 // stable-sorted so the reduce prompt is reproducible.
 func mapPhase(ctx context.Context, cat *Catalog, prompt string) []string {
+
+	// Constant system prompt given to the LLM.
+	// This tells the model exactly what output format is expected.
 	const system = `You route a user's automation request to integration nodes.
 Given the request and a catalog cluster index (one node per line: "id — label — description"),
 return JSON: {"nodes": ["id", ...]} listing ONLY ids from this index that could plausibly be
 used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if none apply.`
 
+	// Maximum number of nodes we want to accept from a single cluster.
 	perCluster := 8
+
+	// Declare multiple variables together.
 	var (
-		mu       sync.Mutex
+
+		// Mutex protects shared data from being modified by
+		// multiple goroutines at the same time.
+		mu sync.Mutex
+
+		// Stores all selected node IDs from every cluster.
 		selected []string
-		wg       sync.WaitGroup
+
+		// WaitGroup waits until every goroutine has finished.
+		wg sync.WaitGroup
 	)
+
+	// Iterate through all cluster names in sorted order.
 	for _, key := range cat.sortedClusters() {
+
+		// Ignore the builtin cluster.
 		if key == "builtin" {
 			continue
 		}
+
+		// Get the catalog information for this cluster.
 		f := cat.Clusters[key]
+
+		// Tell the WaitGroup that one more goroutine is about to start.
 		wg.Add(1)
+
+		// Start a new goroutine.
+		// Every cluster runs independently and in parallel.
 		go func(f catalogFile) {
+
+			// This will automatically execute when the goroutine exits,
+			// even if we return early because of an error.
 			defer wg.Done()
-			user := "Request: " + prompt + "\n\nCluster \"" + f.Label + "\":\n" + clusterIndex(f)
-			raw, err := planLLMWith(ctx, mapModel(), 512, 12*time.Second, system, []llmMsg{{Role: "user", Content: user}})
+
+			// Build the user prompt that will be sent to the LLM.
+			user := "Request: " + prompt +
+				"\n\nCluster \"" + f.Label + "\":\n" +
+				clusterIndex(f) // is this sending the cluster? Because we do need send the whole cluster(with  id + label + description to the LLM)
+
+			// Ask the LLM to choose relevant node IDs.
+			raw, err := planLLMWith(
+				ctx,
+				mapModel(),
+				512,
+				12*time.Second,
+				system,
+				[]llmMsg{
+					{
+						Role:    "user",
+						Content: user,
+					},
+				},
+			)
+
+			// If the LLM call failed, stop this goroutine.
 			if err != nil {
 				return
 			}
+
+			// Anonymous struct used only for decoding JSON.
+			// Expected JSON:
+			//
+			// {
+			//     "nodes": ["id1", "id2"]
+			// }
 			var out struct {
 				Nodes []string `json:"nodes"`
 			}
-			if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
+
+			// Convert the JSON string into the Go struct.
+			if err := json.Unmarshal(
+				[]byte(extractJSON(raw)),
+				&out,
+			); err != nil {
 				return
 			}
+
+			// Create a slice to hold only valid node IDs.
 			valid := make([]string, 0, len(out.Nodes))
+
+			// Check every node returned by the LLM.
 			for _, id := range out.Nodes {
-				if n, ok := cat.ByID[id]; ok && n.Cluster == f.Cluster {
+
+				// Look up the node in the catalog.
+				n, ok := cat.ByID[id]
+
+				// Accept the node only if:
+				// 1. It actually exists.
+				// 2. It belongs to the current cluster.
+				if ok && n.Cluster == f.Cluster {
 					valid = append(valid, id)
 				}
+
+				// Stop after collecting enough nodes.
 				if len(valid) == perCluster {
 					break
 				}
 			}
+
+			// Lock before modifying shared data.
 			mu.Lock()
+
+			// Append every valid node into the global result slice.
+			// The ... expands the slice so every element is appended.
 			selected = append(selected, valid...)
+
+			// Unlock so other goroutines can access selected.
 			mu.Unlock()
-		}(f)
+
+		}(f) // Immediately call the anonymous function with f.
+
 	}
+
+	// Wait until every goroutine has called wg.Done().
 	wg.Wait()
 
+	// Sort the final list alphabetically.
 	sort.Strings(selected)
+
+	// Maximum total number of selected nodes.
 	const totalCap = 32
+
+	// Trim the slice if it is too large.
 	if len(selected) > totalCap {
 		selected = selected[:totalCap]
 	}
+
+	// Return the final list of node IDs.
 	return selected
 }
 

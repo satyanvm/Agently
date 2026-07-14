@@ -1,0 +1,8 @@
+{
+  "cluster": "productivity",
+  "label": "Cal.com",
+  "description": "Open-source scheduling platform for booking meetings and managing availability.",
+  "source": { "piece": "cal-com", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "The vendored cal-com piece defines zero actions (actions: [] in src/index.ts); it ships only three webhook triggers (BOOKING_CREATED, BOOKING_RESCHEDULED, BOOKING_CANCELLED), which are out of scope for the HTTP node runtime (webhook registration + context.store). Nothing to transpile. Auth would map to CALCOM_API_KEY (SecretText passed as apiKey query param against https://api.cal.com/v1) if actions are added later.",
+  "nodes": []
+}

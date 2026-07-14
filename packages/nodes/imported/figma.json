@@ -1,0 +1,123 @@
+{
+  "cluster": "productivity",
+  "label": "Figma",
+  "description": "Read Figma design files and manage file comments through the Figma REST API.",
+  "source": { "piece": "figma", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "All three piece actions are thin single-request wrappers and transpiled 1:1. The piece's generic custom-API-call action was skipped (covered by Agently's generic HTTP node). The new_comment webhook trigger was skipped per rules (webhook registration lifecycle + context.store). AP OAuth2 auth mapped to FIGMA_ACCESS_TOKEN; Figma also accepts personal access tokens as Bearer tokens on these endpoints.",
+  "nodes": [
+    {
+      "id": "figma.getFile",
+      "label": "Figma: Get File",
+      "description": "Fetch a Figma file's document tree, components, and metadata by file key.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "figma file get design document fetch read canvas frames",
+      "config": [
+        {
+          "key": "fileKey",
+          "label": "File Key",
+          "control": "text",
+          "required": true,
+          "placeholder": "abcDEF123",
+          "help": "Key from the Figma file URL: figma.com/file/<file_key>/..."
+        }
+      ],
+      "outputs": ["name", "lastModified", "version", "status", "body"],
+      "credentials": [
+        {
+          "key": "FIGMA_ACCESS_TOKEN",
+          "help": "OAuth2 access token with file_content:read scope; a Figma personal access token also works as a Bearer token"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.figma.com/v1/files/{{urlencode config.fileKey}}",
+        "headers": { "Authorization": "Bearer {{credentials.FIGMA_ACCESS_TOKEN}}" },
+        "outputMap": { "name": "name", "lastModified": "lastModified", "version": "version" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "figma", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "figma.getComments",
+      "label": "Figma: Get File Comments",
+      "description": "List all comments left on a Figma file.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "figma comments list get file feedback annotations read",
+      "config": [
+        {
+          "key": "fileKey",
+          "label": "File Key",
+          "control": "text",
+          "required": true,
+          "placeholder": "abcDEF123",
+          "help": "Key from the Figma file URL: figma.com/file/<file_key>/..."
+        }
+      ],
+      "outputs": ["comments", "status", "body"],
+      "credentials": [
+        {
+          "key": "FIGMA_ACCESS_TOKEN",
+          "help": "OAuth2 access token with file_comments:read scope; a Figma personal access token also works as a Bearer token"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "https://api.figma.com/v1/files/{{urlencode config.fileKey}}/comments",
+        "headers": { "Authorization": "Bearer {{credentials.FIGMA_ACCESS_TOKEN}}" },
+        "outputMap": { "comments": "comments" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "figma", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    },
+    {
+      "id": "figma.postComment",
+      "label": "Figma: Post File Comment",
+      "description": "Add a new comment to a Figma file.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "figma comment post add create file feedback annotate write",
+      "config": [
+        {
+          "key": "fileKey",
+          "label": "File Key",
+          "control": "text",
+          "required": true,
+          "placeholder": "abcDEF123",
+          "help": "Key from the Figma file URL: figma.com/file/<file_key>/..."
+        },
+        {
+          "key": "message",
+          "label": "Comment",
+          "control": "textarea",
+          "required": true,
+          "placeholder": "Looks great, ship it!",
+          "help": "Comment text to post on the file"
+        }
+      ],
+      "outputs": ["id", "message", "createdAt", "status", "body"],
+      "credentials": [
+        {
+          "key": "FIGMA_ACCESS_TOKEN",
+          "help": "OAuth2 access token with file_comments:write scope; a Figma personal access token also works as a Bearer token"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "https://api.figma.com/v1/files/{{urlencode config.fileKey}}/comments",
+        "headers": {
+          "Authorization": "Bearer {{credentials.FIGMA_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"message\": {{json config.message}}}",
+        "outputMap": { "id": "id", "message": "message", "createdAt": "created_at" }
+      },
+      "metadata": {
+        "provenance": { "source": "activepieces", "piece": "figma", "license": "MIT", "importedAt": "2026-07-11" }
+      }
+    }
+  ]
+}

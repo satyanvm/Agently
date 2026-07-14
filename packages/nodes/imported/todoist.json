@@ -6,52 +6,6 @@
   "notes": "Endpoints use the unified API (api.todoist.com/api/v1) that the piece itself targets; the two replaced live nodes were on the deprecated rest/v2 base URL, and the live createTask always sent \"due_string\": \"\" when the due field was blank, which Todoist rejects. Credential kept as TODOIST_API_TOKEN (not TODOIST_ACCESS_TOKEN per the OAuth2 mapping rule) to preserve continuity with the existing live Todoist nodes' credential wiring; both personal API tokens and OAuth2 access tokens work as the Bearer value. Simplifications: create/update drop optional labels (JSON array), priority (JSON integer), project_id/section_id (API rejects empty strings), and the piece's due_string/due_date/due_datetime branching logic — templates cannot emit typed values or conditionally include keys; a separate createTaskInProject node restores project targeting by making project_id required. updateTask is reduced to rewriting content only, since sending other optional keys as empty strings would wipe them. find_task's paginated fetch-all + exact-name match is needsPieceRuntime; searchTasks covers the use case in one request via the filter endpoint (first page only). listTasks and searchTasks return the first result page only (no cursor pagination).",
   "nodes": [
     {
-      "id": "todoist.createTask",
-      "label": "Todoist: Create Task",
-      "description": "Add a new task to your Todoist Inbox.",
-      "kind": "action",
-      "runtime": "http",
-      "search": "todoist task todo create add new item inbox reminder",
-      "config": [
-        {
-          "key": "content",
-          "label": "Task",
-          "control": "text",
-          "required": true,
-          "placeholder": "Buy milk",
-          "help": "Task text; supports Todoist markdown and links"
-        },
-        {
-          "key": "description",
-          "label": "Description",
-          "control": "textarea",
-          "required": false,
-          "help": "Longer notes for the task; supports markdown"
-        }
-      ],
-      "outputs": ["id", "url", "status", "body"],
-      "credentials": [
-        {
-          "key": "TODOIST_API_TOKEN",
-          "help": "Personal API token from Todoist Settings → Integrations → Developer, or an OAuth2 access token with data:read_write scope"
-        }
-      ],
-      "http": {
-        "method": "POST",
-        "url": "https://api.todoist.com/api/v1/tasks",
-        "headers": {
-          "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}",
-          "Content-Type": "application/json"
-        },
-        "body": "{\"content\": {{json config.content}}, \"description\": {{json config.description}}}",
-        "outputMap": { "id": "id", "url": "url" }
-      },
-      "metadata": {
-        "replaces": "todoist.createTask",
-        "provenance": { "source": "activepieces", "piece": "todoist", "license": "MIT", "importedAt": "2026-07-11" }
-      }
-    },
-    {
       "id": "todoist.createTaskInProject",
       "label": "Todoist: Create Task in Project",
       "description": "Add a new task to a specific Todoist project.",
@@ -178,34 +132,6 @@
         }
       },
       "metadata": {
-        "provenance": { "source": "activepieces", "piece": "todoist", "license": "MIT", "importedAt": "2026-07-11" }
-      }
-    },
-    {
-      "id": "todoist.listTasks",
-      "label": "Todoist: List Tasks",
-      "description": "Fetch the first page of your active Todoist tasks.",
-      "kind": "action",
-      "runtime": "http",
-      "search": "todoist tasks list todo active open fetch read items",
-      "config": [],
-      "outputs": ["results", "status", "body"],
-      "credentials": [
-        {
-          "key": "TODOIST_API_TOKEN",
-          "help": "Personal API token from Todoist Settings → Integrations → Developer, or an OAuth2 access token with data:read_write scope"
-        }
-      ],
-      "http": {
-        "method": "GET",
-        "url": "https://api.todoist.com/api/v1/tasks",
-        "headers": {
-          "Authorization": "Bearer {{credentials.TODOIST_API_TOKEN}}"
-        },
-        "outputMap": { "results": "results" }
-      },
-      "metadata": {
-        "replaces": "todoist.listTasks",
         "provenance": { "source": "activepieces", "piece": "todoist", "license": "MIT", "importedAt": "2026-07-11" }
       }
     },

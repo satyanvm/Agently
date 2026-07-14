@@ -1,0 +1,122 @@
+{
+  "cluster": "crm-marketing",
+  "label": "WordPress",
+  "description": "Publish and manage posts and pages on a WordPress site through its REST API.",
+  "source": { "piece": "wordpress", "license": "MIT", "importedAt": "2026-07-11" },
+  "notes": "Auth: the piece uses CustomAuth (username, password, website_url) and sends HTTP Basic auth; mapped to WORDPRESS_USERNAME/WORDPRESS_PASSWORD via the runtime's native http.auth basic support, with the site URL as a WORDPRESS_BASE-style env credential WORDPRESS_WEBSITE_URL (must have no trailing slash — templates cannot trim). Dropped optional piece props templates cannot express: tags/categories (JSON integer arrays), featured_media (integer id), featured_media_file (separate multipart media-upload request), acfFields (free-form object), comment_status/ping_status (boolean mapped to open/closed with conditional inclusion), and date (empty string fails the REST API's date-time format validation). slug and excerpt stay optional because WordPress tolerates empty strings (slug auto-generates from title, empty excerpt is a no-op on create). status is a required select everywhere since an empty string fails enum validation. updatePost is simplified from the piece's partial update to a full overwrite — title, content, and status are required because templates cannot conditionally omit keys and empty strings would blank existing fields. Post status is lifted as postStatus on getPost to avoid clobbering the built-in HTTP status output. The piece's generic custom-API-call action was skipped (generic passthrough, not a discrete operation).",
+  "nodes": [
+    {
+      "id": "wordpress.createPost",
+      "label": "WordPress: Create Post",
+      "description": "Publish or draft a new blog post through the WordPress REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wordpress create post publish blog article write cms content draft",
+      "config": [
+        { "key": "title", "label": "Title", "control": "text", "required": true, "help": "Post title" },
+        { "key": "content", "label": "Content", "control": "textarea", "required": true, "help": "Post body; HTML is supported" },
+        { "key": "status", "label": "Status", "control": "select", "required": true, "options": ["publish", "future", "draft", "pending", "private", "trash"], "help": "Publication status for the new post" },
+        { "key": "slug", "label": "Slug", "control": "text", "required": false, "placeholder": "my-post-slug", "help": "URL slug; leave blank to auto-generate from the title" },
+        { "key": "excerpt", "label": "Excerpt", "control": "textarea", "required": false, "help": "Short summary; HTML is supported" }
+      ],
+      "outputs": ["id", "link", "slug", "status", "body"],
+      "credentials": [
+        { "key": "WORDPRESS_WEBSITE_URL", "help": "Site base URL with no path or trailing slash (e.g. https://example.com); REST API must be reachable at <url>/wp-json" },
+        { "key": "WORDPRESS_USERNAME", "help": "WordPress username with permission to publish posts (basic auth is supported)" },
+        { "key": "WORDPRESS_PASSWORD", "help": "Application Password (Users > Profile > Application Passwords) or Basic-Auth plugin password" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WORDPRESS_WEBSITE_URL}}/wp-json/wp/v2/posts",
+        "headers": { "Content-Type": "application/json" },
+        "auth": { "type": "basic", "username": "{{credentials.WORDPRESS_USERNAME}}", "password": "{{credentials.WORDPRESS_PASSWORD}}" },
+        "body": "{\"title\": {{json config.title}}, \"content\": {{json config.content}}, \"status\": {{json config.status}}, \"slug\": {{json config.slug}}, \"excerpt\": {{json config.excerpt}}}",
+        "outputMap": { "id": "id", "link": "link", "slug": "slug" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "wordpress", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "wordpress.createPage",
+      "label": "WordPress: Create Page",
+      "description": "Add a new page to a WordPress site via the REST API.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wordpress create page site cms content publish landing static",
+      "config": [
+        { "key": "title", "label": "Title", "control": "text", "required": true, "help": "Page title" },
+        { "key": "content", "label": "Content", "control": "textarea", "required": true, "help": "Page body; HTML is supported" },
+        { "key": "status", "label": "Status", "control": "select", "required": true, "options": ["publish", "future", "draft", "pending", "private"], "help": "Publication status for the new page" },
+        { "key": "slug", "label": "Slug", "control": "text", "required": false, "placeholder": "my-page-slug", "help": "URL slug; leave blank to auto-generate from the title" },
+        { "key": "excerpt", "label": "Excerpt", "control": "textarea", "required": false, "help": "Short summary; HTML is supported" }
+      ],
+      "outputs": ["id", "link", "slug", "status", "body"],
+      "credentials": [
+        { "key": "WORDPRESS_WEBSITE_URL", "help": "Site base URL with no path or trailing slash (e.g. https://example.com); REST API must be reachable at <url>/wp-json" },
+        { "key": "WORDPRESS_USERNAME", "help": "WordPress username with permission to publish pages (basic auth is supported)" },
+        { "key": "WORDPRESS_PASSWORD", "help": "Application Password (Users > Profile > Application Passwords) or Basic-Auth plugin password" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WORDPRESS_WEBSITE_URL}}/wp-json/wp/v2/pages",
+        "headers": { "Content-Type": "application/json" },
+        "auth": { "type": "basic", "username": "{{credentials.WORDPRESS_USERNAME}}", "password": "{{credentials.WORDPRESS_PASSWORD}}" },
+        "body": "{\"title\": {{json config.title}}, \"content\": {{json config.content}}, \"status\": {{json config.status}}, \"slug\": {{json config.slug}}, \"excerpt\": {{json config.excerpt}}}",
+        "outputMap": { "id": "id", "link": "link", "slug": "slug" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "wordpress", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "wordpress.updatePost",
+      "label": "WordPress: Update Post",
+      "description": "Overwrite the title, content, and status of an existing WordPress post.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wordpress update post edit modify change publish draft cms blog",
+      "config": [
+        { "key": "postId", "label": "Post ID", "control": "text", "required": true, "placeholder": "42", "help": "Numeric ID of the post to update" },
+        { "key": "title", "label": "Title", "control": "text", "required": true, "help": "New post title (replaces the current one)" },
+        { "key": "content", "label": "Content", "control": "textarea", "required": true, "help": "New post body; HTML is supported (replaces the current one)" },
+        { "key": "status", "label": "Status", "control": "select", "required": true, "options": ["publish", "future", "draft", "pending", "private", "trash"], "help": "Status to set; pick the current status to leave it unchanged" }
+      ],
+      "outputs": ["id", "link", "slug", "status", "body"],
+      "credentials": [
+        { "key": "WORDPRESS_WEBSITE_URL", "help": "Site base URL with no path or trailing slash (e.g. https://example.com); REST API must be reachable at <url>/wp-json" },
+        { "key": "WORDPRESS_USERNAME", "help": "WordPress username with permission to edit posts (basic auth is supported)" },
+        { "key": "WORDPRESS_PASSWORD", "help": "Application Password (Users > Profile > Application Passwords) or Basic-Auth plugin password" }
+      ],
+      "http": {
+        "method": "POST",
+        "url": "{{credentials.WORDPRESS_WEBSITE_URL}}/wp-json/wp/v2/posts/{{urlencode config.postId}}",
+        "headers": { "Content-Type": "application/json" },
+        "auth": { "type": "basic", "username": "{{credentials.WORDPRESS_USERNAME}}", "password": "{{credentials.WORDPRESS_PASSWORD}}" },
+        "body": "{\"title\": {{json config.title}}, \"content\": {{json config.content}}, \"status\": {{json config.status}}}",
+        "outputMap": { "id": "id", "link": "link", "slug": "slug" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "wordpress", "license": "MIT", "importedAt": "2026-07-11" } }
+    },
+    {
+      "id": "wordpress.getPost",
+      "label": "WordPress: Get Post",
+      "description": "Fetch a single WordPress post by its numeric ID.",
+      "kind": "action",
+      "runtime": "http",
+      "search": "wordpress get post read fetch retrieve details blog article cms",
+      "config": [
+        { "key": "postId", "label": "Post ID", "control": "text", "required": true, "placeholder": "42", "help": "Numeric ID of the post to fetch" }
+      ],
+      "outputs": ["id", "title", "content", "link", "postStatus", "status", "body"],
+      "credentials": [
+        { "key": "WORDPRESS_WEBSITE_URL", "help": "Site base URL with no path or trailing slash (e.g. https://example.com); REST API must be reachable at <url>/wp-json" },
+        { "key": "WORDPRESS_USERNAME", "help": "WordPress username with permission to read posts (basic auth is supported)" },
+        { "key": "WORDPRESS_PASSWORD", "help": "Application Password (Users > Profile > Application Passwords) or Basic-Auth plugin password" }
+      ],
+      "http": {
+        "method": "GET",
+        "url": "{{credentials.WORDPRESS_WEBSITE_URL}}/wp-json/wp/v2/posts/{{urlencode config.postId}}",
+        "auth": { "type": "basic", "username": "{{credentials.WORDPRESS_USERNAME}}", "password": "{{credentials.WORDPRESS_PASSWORD}}" },
+        "outputMap": { "id": "id", "title": "title.rendered", "content": "content.rendered", "link": "link", "postStatus": "status" }
+      },
+      "metadata": { "provenance": { "source": "activepieces", "piece": "wordpress", "license": "MIT", "importedAt": "2026-07-11" } }
+    }
+  ]
+}
