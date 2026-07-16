@@ -12,6 +12,7 @@
     "agently:api": "bash scripts/agently.sh restart api",
     "agently:worker": "bash scripts/agently.sh restart worker",
     "agently:reasoner": "bash scripts/agently.sh restart reasoner",
+    "agently:pieces": "bash scripts/agently.sh restart pieces",
     "agently:web": "bash scripts/agently.sh restart web",
     "dev:web": "pnpm --filter @agently/web dev",
     "dev:api": "cd apps/api && go run ./cmd/server",

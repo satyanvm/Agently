@@ -393,6 +393,10 @@ DESIGN GUIDANCE:
 - Integration nodes declaring credentials run only where the operator configured those
   env vars; otherwise they record intent without failing the run. Still use them when
   they fit — but when a keyless route exists (public API via tool.http), prefer it.
+- Node types prefixed "pieces." are Activepieces-backed actions (full-fidelity vendor
+  integrations). When a hand-written node and a pieces.* node cover the same capability,
+  prefer the hand-written one; reach for pieces.* when it's the only coverage or when
+  its action fits the request more precisely.
 - Keep graphs as small as the request allows. Parallel branches that later join are good.
 
 NODE TYPES AVAILABLE:
@@ -498,13 +502,17 @@ func fallbackGraph(p Plan) []domain.GraphNode {
 /* ------------------------------- small helpers ------------------------------ */
 
 // servicesOf lists the distinct integration services a graph touches ("slack",
-// "github", …) for the UI preview chip row. Built-in kinds are skipped.
+// "github", …) for the UI preview chip row. Built-in kinds are skipped; a
+// pieces.<slug>.<action> node counts as its slug.
 func servicesOf(nodes []domain.GraphNode) []string {
 	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true}
 	seen := map[string]bool{}
 	var out []string
 	for _, n := range nodes {
 		svc := strings.SplitN(n.Type, ".", 2)[0]
+		if svc == "pieces" {
+			svc = pieceSlugOf(n.Type)
+		}
 		if svc == "" || builtin[svc] || seen[svc] {
 			continue
 		}

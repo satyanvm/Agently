@@ -26,7 +26,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import browser, catalog, db, llm, sandbox
+from . import browser, catalog, db, llm, pieces, sandbox
 from .config import CONFIG
 
 
@@ -70,12 +70,15 @@ def handler_for(node_type: str) -> Handler:
 
     Resolution order: code-backed built-ins (this registry) → the shared
     integration catalog (generic executor, hundreds of types as data) →
-    passthrough for genuinely unknown types.
+    Activepieces piece actions (record-intent here; see note on _piece_fallback)
+    → passthrough for genuinely unknown types.
     """
     if node_type in _REGISTRY:
         return _REGISTRY[node_type]
     if catalog.spec_for(node_type) is not None:
         return _integration
+    if pieces.is_piece_type(node_type):
+        return _piece_fallback
     return _passthrough
 
 
@@ -562,6 +565,26 @@ async def _integration(ctx: NodeContext) -> NodeResult:
                     output[field_name] = cur
     await db.append_log(ctx.run_id, "info", "tool", key, f"{method} {url} → {resp.status_code}")
     return NodeResult(output=output, summary=f"{method} {_clip(url, 80)} → {resp.status_code}")
+
+
+async def _piece_fallback(ctx: NodeContext) -> NodeResult:
+    """pieces.* node reached run_node instead of the pieces queue.
+
+    The real execution path for piece nodes is workflow-side (DynamicWorkflow
+    routes them to the Node pieces worker via execute_piece — see workflow.py
+    _run_piece_node). This handler only fires on the single-activity fallback
+    orchestrator (engine.execute_graph), which cannot make cross-queue calls;
+    there we record intent rather than half-execute.
+    """
+    await db.append_log(
+        ctx.run_id, "warn", "system", ctx.node["key"],
+        f"{ctx.node.get('type')} recorded — piece nodes execute on the pieces "
+        "worker via the per-node orchestrator, not the single-activity fallback",
+    )
+    return NodeResult(
+        output={"recorded": True, "executed": False, "reason": "fallback-orchestrator"},
+        summary="Recorded (pieces run on the pieces worker)",
+    )
 
 
 async def _passthrough(ctx: NodeContext) -> NodeResult:

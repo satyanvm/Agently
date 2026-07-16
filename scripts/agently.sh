@@ -27,6 +27,7 @@ API_PORT="${API_ADDR##*:}"
 export API_PROXY_TARGET="${API_PROXY_TARGET:-http://localhost:${API_PORT}}"
 export TEMPORAL_HOSTPORT="${TEMPORAL_HOSTPORT:-localhost:7233}"
 export TEMPORAL_TASK_QUEUE="${TEMPORAL_TASK_QUEUE:-agently-reasoner}"
+export PIECES_TASK_QUEUE="${PIECES_TASK_QUEUE:-agently-pieces}"
 WORKER_ID="${WORKER_ID:-worker-A}"
 
 # LLM/browser creds pass through from your shell if present (real Claude + Browserbase).
@@ -57,6 +58,7 @@ stop_one() {
     api)      pkill -f agently-api 2>/dev/null ;;
     worker)   pkill -f agently-worker 2>/dev/null ;;
     reasoner) pkill -f "reasoner.worker" 2>/dev/null ;;
+    pieces)   pkill -f "pieces-worker/dist/worker.js" 2>/dev/null ;;
     web)      pkill -f "next dev" 2>/dev/null ;;
   esac
   return 0
@@ -87,6 +89,10 @@ ensure_reasoner_venv() {
   }
 }
 
+# The pieces worker is OPTIONAL: without it, pieces.* nodes record intent and the
+# rest of the platform is unaffected. We start it only when it has been built.
+pieces_built() { [ -f "$ROOT/apps/pieces-worker/dist/worker.js" ]; }
+
 # ---------- infra ----------
 start_infra() {
   say "Starting Docker infra (Postgres + Temporal)…"
@@ -112,9 +118,20 @@ start_worker() {
 start_reasoner() {
   ( cd "$ROOT/apps/reasoner" && \
     DATABASE_URL="$DATABASE_URL" TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" TEMPORAL_TASK_QUEUE="$TEMPORAL_TASK_QUEUE" \
+    PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
     ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
     exec ./.venv/bin/python -m reasoner.worker ) >"$LOGS/reasoner.log" 2>&1 & echo $! >"$(pidfile reasoner)"
   ok "reasoner → temporal engine          (pid $!)"
+}
+start_pieces() {
+  pieces_built || {
+    say "  ${c_dim}pieces-worker not built (apps/pieces-worker: npm install && npm run build) — pieces.* nodes will record intent${c_rst}"
+    return 0
+  }
+  ( cd "$ROOT/apps/pieces-worker" && \
+    TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
+    exec node dist/worker.js ) >"$LOGS/pieces.log" 2>&1 & echo $! >"$(pidfile pieces)"
+  ok "pieces   → activepieces runtime     (pid $!)"
 }
 start_web() {
   API_PROXY_TARGET="$API_PROXY_TARGET" \
@@ -129,9 +146,9 @@ cmd_start() {
   ensure_reasoner_venv || return 1
   build_go || return 1
   say "Stopping any previous app processes…"
-  for n in web reasoner worker api; do stop_one "$n"; done
+  for n in web pieces reasoner worker api; do stop_one "$n"; done
   say "Starting services…"
-  start_api; start_worker; start_reasoner; start_web
+  start_api; start_worker; start_reasoner; start_pieces; start_web
   printf "  waiting for API health"
   if wait_http "http://localhost:${API_PORT}/api/workflows" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
   [ -z "$ANTHROPIC_API_KEY" ] && say "  ${c_dim}note: ANTHROPIC_API_KEY not in env → worker/reasoner use OpenAI(.env) or mock${c_rst}"
@@ -140,7 +157,7 @@ cmd_start() {
   say "  logs: pnpm agently:logs   status: pnpm agently:status   stop: pnpm agently:stop"
 }
 
-cmd_stop() { say "Stopping app processes…"; for n in web reasoner worker api; do stop_one "$n" && ok "$n stopped"; done; }
+cmd_stop() { say "Stopping app processes…"; for n in web pieces reasoner worker api; do stop_one "$n" && ok "$n stopped"; done; }
 cmd_down() { cmd_stop; say "Stopping Docker…"; docker compose down >/dev/null 2>&1 && ok "docker down"; }
 
 cmd_restart() { # svc
@@ -149,15 +166,16 @@ cmd_restart() { # svc
     api)      build_go || return 1; stop_one api;      start_api ;;
     worker)   build_go || return 1; stop_one worker;   start_worker ;;
     reasoner) ensure_reasoner_venv || return 1; stop_one reasoner; start_reasoner ;;
+    pieces)   stop_one pieces; start_pieces ;;
     web)      stop_one web; start_web ;;
     all)      cmd_start ;;
-    *)        bad "unknown service '$svc' (api|worker|reasoner|web|all)"; return 1 ;;
+    *)        bad "unknown service '$svc' (api|worker|reasoner|pieces|web|all)"; return 1 ;;
   esac
 }
 
 cmd_status() {
   say "Services:"
-  for n in api worker reasoner web; do
+  for n in api worker reasoner pieces web; do
     if is_up "$n"; then ok "$(printf '%-9s up   (pid %s)' "$n" "$(cat "$(pidfile "$n")")")"; else bad "$(printf '%-9s down' "$n")"; fi
   done
   say "Docker:"; docker compose ps --format '  {{.Name}}  {{.Status}}' 2>/dev/null || bad "docker not reachable"
