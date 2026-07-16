@@ -28,6 +28,9 @@ class Config:
     temporal_hostport: str
     temporal_namespace: str
     temporal_task_queue: str
+    # Task queue the Node pieces worker (apps/pieces-worker) polls for the
+    # cross-queue execute_piece activity (docs/pieces-runtime-contract.md §3).
+    pieces_task_queue: str
     # Langfuse (optional — tracing degrades gracefully if unset).
     langfuse_host: str
     langfuse_public_key: str
@@ -80,6 +83,7 @@ def load() -> Config:
         temporal_hostport=os.getenv("TEMPORAL_HOSTPORT", "localhost:7233"),
         temporal_namespace=os.getenv("TEMPORAL_NAMESPACE", "default"),
         temporal_task_queue=os.getenv("TEMPORAL_TASK_QUEUE", "agently-reasoner"),
+        pieces_task_queue=os.getenv("PIECES_TASK_QUEUE", "agently-pieces"),
         langfuse_host=os.getenv("LANGFUSE_HOST", "http://localhost:3001"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),

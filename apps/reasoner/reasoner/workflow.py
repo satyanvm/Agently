@@ -29,6 +29,7 @@ from typing import Any
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.contrib.langgraph import graph
+from temporalio.exceptions import ActivityError
 
 # Pure logic (reasoner.plan) and the activity definitions are imported under the
 # sandbox pass-through: they must not be re-validated/instrumented by the workflow
@@ -56,6 +57,15 @@ _NODE_TIMEOUT = timedelta(seconds=600)
 _NODE_RETRY = RetryPolicy(maximum_attempts=3)
 _IO_TIMEOUT = timedelta(seconds=60)
 
+# Cross-queue `execute_piece` call (docs/pieces-runtime-contract.md §3): a tight
+# schedule_to_start catches "no pieces worker is polling" quickly so the run can
+# degrade to record-intent instead of hanging for the full node timeout.
+_PIECE_PREFIX = "pieces."
+_PIECE_SCHEDULE_TO_START = timedelta(seconds=30)
+_PIECE_TIMEOUT = timedelta(seconds=180)
+_PIECE_RETRY = RetryPolicy(maximum_attempts=3)
+_DEFAULT_PIECES_QUEUE = "agently-pieces"
+
 
 @workflow.defn
 class ReasoningWorkflow:
@@ -75,6 +85,10 @@ class DynamicWorkflow:
     async def run(self, params: dict[str, Any]) -> dict[str, Any]:
         run_id = params["run_id"]
         run_input = params.get("input", {})
+        # Which task queue the Node pieces worker polls (contract §3). Part of the
+        # workflow INPUT (threaded by the dispatcher from config) — never an env
+        # read here, so replays stay deterministic.
+        self._pieces_queue: str = params.get("pieces_task_queue") or _DEFAULT_PIECES_QUEUE
 
         # 1) Resolve the graph + seed agents OUTSIDE the workflow (one activity).
         loaded = await workflow.execute_activity(
@@ -135,14 +149,8 @@ class DynamicWorkflow:
                 continue
 
             upstream = {dep: outputs.get(dep, {}) for dep in deps}
-            result = await workflow.execute_activity(
-                activities.run_node,
-                activities.RunNodeInput(
-                    run_id=run_id, node=node, agent_id=agent_id,
-                    upstream=upstream, run_input=run_input,
-                ),
-                start_to_close_timeout=_NODE_TIMEOUT,
-                retry_policy=_NODE_RETRY,
+            result = await self._run_one(
+                run_id, node, agent_id, upstream, run_input, extra=None,
             )
 
             if result.failed:
@@ -180,14 +188,8 @@ class DynamicWorkflow:
                             dep: (iter_outputs.get(dep) if dep in iter_outputs else outputs.get(dep, {}))
                             for dep in bdeps
                         }
-                        bresult = await workflow.execute_activity(
-                            activities.run_node,
-                            activities.RunNodeInput(
-                                run_id=run_id, node=bnode, agent_id=agent_ids[bkey],
-                                upstream=bupstream, run_input=run_input, extra=extra,
-                            ),
-                            start_to_close_timeout=_NODE_TIMEOUT,
-                            retry_policy=_NODE_RETRY,
+                        bresult = await self._run_one(
+                            run_id, bnode, agent_ids[bkey], bupstream, run_input, extra=extra,
                         )
                         if bresult.failed:
                             await workflow.execute_activity(
@@ -249,6 +251,92 @@ class DynamicWorkflow:
             retry_policy=_NODE_RETRY,
         )
         return {"run_id": run_id, "done": True, "skipped": sorted(skipped)}
+
+    async def _run_one(
+        self,
+        run_id: str,
+        node: dict[str, Any],
+        agent_id: str,
+        upstream: dict[str, dict[str, Any]],
+        run_input: dict[str, Any],
+        extra: dict[str, Any] | None,
+    ):
+        """Execute one node as its durable activity unit.
+
+        Two backends, one orchestrator: `pieces.*` types run on the Node pieces
+        worker via the cross-queue `execute_piece` activity (bracketed by the
+        prepare/record activities on our own queue); everything else runs the
+        local `run_node` activity. Both return the same RunNodeResult shape, so
+        the loop/gate/skip logic above is backend-agnostic.
+        """
+        if str(node.get("type", "")).startswith(_PIECE_PREFIX):
+            return await self._run_piece_node(run_id, node, agent_id, upstream, run_input, extra)
+        return await workflow.execute_activity(
+            activities.run_node,
+            activities.RunNodeInput(
+                run_id=run_id, node=node, agent_id=agent_id,
+                upstream=upstream, run_input=run_input, extra=extra or {},
+            ),
+            start_to_close_timeout=_NODE_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
+
+    async def _run_piece_node(
+        self,
+        run_id: str,
+        node: dict[str, Any],
+        agent_id: str,
+        upstream: dict[str, dict[str, Any]],
+        run_input: dict[str, Any],
+        extra: dict[str, Any] | None,
+    ):
+        """prepare (our queue) → execute_piece (pieces queue) → record (our queue).
+
+        The pieces worker being down is an OPERATIONAL state, not a run failure:
+        a schedule_to_start timeout (nobody polling the pieces queue) or exhausted
+        retries degrade to the record-intent shape, mirroring how catalog nodes
+        behave with missing credentials. The run always completes.
+        """
+        prep = await workflow.execute_activity(
+            activities.prepare_piece_node,
+            activities.PreparePieceInput(
+                run_id=run_id, node=node, agent_id=agent_id,
+                upstream=upstream, run_input=run_input, extra=extra or {},
+            ),
+            start_to_close_timeout=_IO_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
+
+        if prep.mode == "execute":
+            try:
+                result = await workflow.execute_activity(
+                    "execute_piece",           # by name: implemented by the Node worker
+                    prep.payload,
+                    task_queue=self._pieces_queue,
+                    schedule_to_start_timeout=_PIECE_SCHEDULE_TO_START,
+                    start_to_close_timeout=_PIECE_TIMEOUT,
+                    retry_policy=_PIECE_RETRY,
+                )
+                mode = "execute"
+            except ActivityError:
+                # Timed out unscheduled (worker down) or failed terminally after
+                # retries (piece not installed, worker bug). Record, don't fail.
+                result = {
+                    "recorded": True, "executed": False,
+                    "reason": "pieces-worker-unavailable",
+                }
+                mode = "record"
+        else:
+            result, mode = prep.result, "record"
+
+        return await workflow.execute_activity(
+            activities.record_piece_result,
+            activities.RecordPieceInput(
+                run_id=run_id, node=node, agent_id=agent_id, result=result, mode=mode,
+            ),
+            start_to_close_timeout=_IO_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
 
     async def _progress(self, run_id: str, done: int, total: int, step: str) -> None:
         await workflow.execute_activity(

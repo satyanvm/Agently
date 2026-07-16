@@ -1,0 +1,36 @@
+{
+  "name": "agently-pieces-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Temporal activity worker that executes Activepieces piece actions as a library (docs/pieces-runtime-contract.md).",
+  "main": "dist/worker.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/worker.js",
+    "gen:index": "node dist/gen-index.js",
+    "test": "node --test dist/test/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@activepieces/piece-airtable": "*",
+    "@activepieces/piece-discord": "*",
+    "@activepieces/piece-github": "*",
+    "@activepieces/piece-google-sheets": "*",
+    "@activepieces/piece-hubspot": "*",
+    "@activepieces/piece-notion": "*",
+    "@activepieces/piece-slack": "*",
+    "@activepieces/piece-stripe": "*",
+    "@activepieces/piece-todoist": "*",
+    "@activepieces/piece-trello": "*",
+    "@activepieces/pieces-common": "^0.12.5",
+    "@activepieces/pieces-framework": "^0.32.0",
+    "@temporalio/activity": "^1.20.3",
+    "@temporalio/worker": "^1.20.3"
+  }
+}

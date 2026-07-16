@@ -14,12 +14,15 @@ identically.
 """
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from temporalio import activity
 
-from . import db, engine, obs
+from . import db, engine, obs, pieces
+from .nodes import NodeContext, render_tpl
 
 
 # ─────────────────────────── activity payloads ───────────────────────────
@@ -98,6 +101,36 @@ class FinishInput:
     error: str = ""
 
 
+@dataclass
+class PreparePieceInput:
+    """Same shape as RunNodeInput — a piece node is just another node; only the
+    execution backend (the Node pieces worker) differs."""
+    run_id: str
+    node: dict[str, Any]
+    agent_id: str
+    upstream: dict[str, dict]
+    run_input: dict[str, Any]
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PreparePieceResult:
+    """mode='execute' → payload is the execute_piece argument (contract §4).
+    mode='record' → result is the record-intent output; no cross-queue call."""
+    mode: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RecordPieceInput:
+    run_id: str
+    node: dict[str, Any]
+    agent_id: str
+    result: dict[str, Any]
+    mode: str  # "execute" (result is the execute_piece return) | "record"
+
+
 # ─────────────────────────── activities ───────────────────────────
 
 @activity.defn
@@ -170,5 +203,135 @@ async def finish_run(inp: FinishInput) -> None:
     obs.flush()
 
 
+# ─────────────────────── Activepieces piece nodes ───────────────────────
+# A `pieces.<slug>.<action>` node executes on the Node pieces worker (its own
+# task queue) via the `execute_piece` activity — docs/pieces-runtime-contract.md.
+# The Python side brackets that call with two activities: `prepare_piece_node`
+# (render props, check credentials, mark the agent running) and
+# `record_piece_result` (persist the outcome exactly like run_node does).
+
+def _clip_summary(s: str, n: int = 280) -> str:
+    s = (s or "").strip().replace("\n", " ")
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+@activity.defn
+async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
+    """Resolve a piece node into an execute_piece payload — or a record-intent.
+
+    Mirrors the head of engine.execute_one_node (status → running, log line) so
+    the UI shows the node live while the Node worker runs it. Prop values are
+    rendered with the same template engine `_integration` uses; the credential
+    env var is checked for PRESENCE only — the secret itself stays out of
+    Temporal payloads (the Node worker resolves it by name, contract §4-5).
+    """
+    node = inp.node
+    key = node["key"]
+    node_type = str(node.get("type", ""))
+    await db.set_agent_status(inp.agent_id, "running")
+    await db.append_log(inp.run_id, "info", "agent", key, f"Running {node_type}")
+
+    spec = pieces.piece_spec_for(node_type)
+    if spec is None:
+        await db.append_log(
+            inp.run_id, "warn", "system", key,
+            f"{node_type} recorded — not in the pieces index (regenerate with apps/pieces-worker gen:index)",
+        )
+        return PreparePieceResult(
+            mode="record",
+            result={"recorded": True, "executed": False, "reason": "unknown-piece"},
+        )
+
+    cred_key = pieces.credential_key_for(spec)
+    if pieces.auth_required(spec) and not os.getenv(cred_key or "", ""):
+        await db.append_log(
+            inp.run_id, "warn", "system", key,
+            f"{node_type} recorded — missing credential env var: {cred_key}",
+        )
+        return PreparePieceResult(
+            mode="record",
+            result={"recorded": True, "executed": False, "missingCredentials": [cred_key]},
+        )
+
+    # Render each configured prop with the shared template engine (same roots the
+    # catalog executor uses: input/outputs/config/credentials + loop extras).
+    ctx = NodeContext(
+        run_id=inp.run_id, agent_id=inp.agent_id, node=node,
+        upstream=inp.upstream, run_input=inp.run_input, extra=inp.extra,
+    )
+    cfg = node.get("config", {}) or {}
+    roots = {"config": cfg, "credentials": {}}
+    known_props = {p.get("key") for p in spec.get("props") or []}
+    props: dict[str, Any] = {}
+    for prop_key, raw in cfg.items():
+        if known_props and prop_key not in known_props:
+            continue  # config keys the action doesn't declare (e.g. "model") stay out
+        if isinstance(raw, str):
+            rendered = render_tpl(raw, ctx, roots)
+            # When templating actually resolved something ({{outputs.x.rows}} →
+            # a JSON list/number), recover the structure so the piece receives
+            # typed props. A literal the user typed ("123", "#general") is kept
+            # verbatim — only template-produced values are decoded.
+            if rendered != raw:
+                try:
+                    props[prop_key] = json.loads(rendered)
+                except (ValueError, TypeError):
+                    props[prop_key] = rendered
+            else:
+                props[prop_key] = rendered
+        else:
+            props[prop_key] = raw  # already-typed values (numbers, lists, objects)
+
+    return PreparePieceResult(
+        mode="execute",
+        payload={
+            "piece": spec["piece"],
+            "pieceVersion": spec.get("pieceVersion", ""),
+            "action": spec["action"],
+            "props": props,
+            "authEnvKey": cred_key,
+        },
+    )
+
+
+@activity.defn
+async def record_piece_result(inp: RecordPieceInput) -> RunNodeResult:
+    """Persist a piece node's outcome the way run_node persists a handler's.
+
+    Never fails the run: piece-level errors ({ok:false}) and record-intents both
+    land as node output with a succeeded agent row — matching how record-intent
+    catalog nodes behave — so one unavailable integration can't kill the graph.
+    """
+    key = inp.node["key"]
+    res = inp.result or {}
+
+    if inp.mode == "record":
+        output = dict(res)
+        summary = "Recorded (needs " + ", ".join(res.get("missingCredentials", [])) + ")" \
+            if res.get("missingCredentials") else f"Recorded ({res.get('reason', 'intent')})"
+    elif res.get("ok"):
+        raw = res.get("output")
+        output = raw if isinstance(raw, dict) else {"value": raw}
+        output.setdefault("executed", True)
+        summary = _clip_summary(json.dumps(raw)) if raw is not None else "Ran"
+    else:
+        output = {
+            "error": res.get("error", "piece execution failed"),
+            "errorType": res.get("errorType", "PieceExecutionError"),
+            "executed": True,
+        }
+        summary = f"Failed: {_clip_summary(str(res.get('error', '')), 120)}"
+        await db.append_log(
+            inp.run_id, "error", "tool", key,
+            f"{inp.node.get('type')} failed: {res.get('error', '')}",
+        )
+
+    await db.set_agent_status(inp.agent_id, "succeeded", summary=summary)
+    return RunNodeResult(output=output, gate_open=True)
+
+
 # Exported so the worker can register every activity in one place.
-ALL_ACTIVITIES = [load_graph, run_node, skip_node, add_edge, set_progress, finish_run]
+ALL_ACTIVITIES = [
+    load_graph, run_node, skip_node, add_edge, set_progress, finish_run,
+    prepare_piece_node, record_piece_result,
+]

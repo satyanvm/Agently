@@ -44,6 +44,9 @@ async def _dispatch_once(client: Client) -> None:
             "run_id": run_id,
             "slug": run.get("slug", ""),
             "input": run.get("input") or {},
+            # Deterministic workflow input (never read env in workflow code):
+            # where the Node pieces worker listens for execute_piece.
+            "pieces_task_queue": CONFIG.pieces_task_queue,
         }
         # Route composed (user-built) runs to the per-node DynamicWorkflow so each
         # node is its own durable Temporal unit; everything else runs the static

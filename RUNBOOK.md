@@ -16,7 +16,7 @@ Open the UI at **http://localhost:3000**. Temporal UI at **http://localhost:8080
 
 ---
 
-## The 6 processes
+## The 7 processes
 
 | Process | Type | Port | Role |
 |---|---|---|---|
@@ -25,6 +25,7 @@ Open the UI at **http://localhost:3000**. Temporal UI at **http://localhost:8080
 | API | Go | **8090** | control plane — the UI talks to this |
 | Worker | Go | — | **native** execution engine |
 | Reasoner | Python | — | **temporal** execution engine (dynamic graphs, real browser) |
+| Pieces | Node | — | Activepieces runtime — `pieces.*` nodes via the `agently-pieces` task queue (optional; see apps/pieces-worker) |
 | Web | Next.js | **3000** | the UI |
 
 > **Port note:** Temporal UI owns `:8080`, so the API runs on **`:8090`** and the web
@@ -45,6 +46,7 @@ that read it.
 | `apps/api/**.go` | ❌ | `pnpm agently:api` (rebuilds + restarts) |
 | `apps/worker/**.go` | ❌ | `pnpm agently:worker` (rebuilds + restarts) |
 | `apps/reasoner/**.py` | ❌ | `pnpm agently:reasoner` |
+| `apps/pieces-worker/**.ts` or piece packages | ❌ | `cd apps/pieces-worker && npm run build && npm run gen:index`, then `pnpm agently:pieces` (index changes also need `pnpm agently:api`) |
 | **`.env`** value (e.g. `BROWSERBASE_PROJECT_ID`) | ❌ | restart the reader(s): `agently:worker` and/or `agently:reasoner` (and `agently:api` if it reads it) |
 | `docker-compose.yml` | ❌ | `docker compose up -d` |
 | new file in `packages/db/migrations/` | ❌ (fresh-DB only) | apply manually — see below |
@@ -61,10 +63,11 @@ Rule of thumb: **Web = automatic. Go/Python = restart. `.env` = restart the read
 | `pnpm agently:stop` | stop the 4 app processes; leave Docker running |
 | `pnpm agently:down` | stop app processes **and** `docker compose down` |
 | `pnpm agently:status` | per-service up/down + Docker container status |
-| `pnpm agently:logs [svc]` | tail logs; `svc` = `api`\|`worker`\|`reasoner`\|`web` (default: all) |
+| `pnpm agently:logs [svc]` | tail logs; `svc` = `api`\|`worker`\|`reasoner`\|`pieces`\|`web` (default: all) |
 | `pnpm agently:api` | rebuild + restart just the API |
 | `pnpm agently:worker` | rebuild + restart just the Worker |
 | `pnpm agently:reasoner` | restart just the Reasoner |
+| `pnpm agently:pieces` | restart just the Pieces worker (skipped if apps/pieces-worker isn't built) |
 | `pnpm agently:web` | restart just the Web |
 
 Logs live in `.agently/logs/*.log`; PIDs in `.agently/*.pid` (git-ignored).

@@ -82,8 +82,13 @@ var (
 
 // LoadCatalog loads packages/nodes/catalog once per process. Never fails: with no
 // catalog on disk it returns the built-in fallback so compilation always works.
+// Activepieces piece actions (packages/nodes/pieces/index.json) merge in as their
+// own `pieces.<slug>` clusters — same planning surface, different executor.
 func LoadCatalog() *Catalog {
-	catalogOnce.Do(func() { catalogVal = loadCatalogFrom(catalogDir()) })
+	catalogOnce.Do(func() {
+		catalogVal = loadCatalogFrom(catalogDir())
+		mergePiecesIndex(catalogVal, piecesIndexPath())
+	})
 	return catalogVal
 }
 
