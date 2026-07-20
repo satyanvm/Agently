@@ -26,6 +26,7 @@ with durability, not with the UI.
 | Migrations | `packages/db/migrations` | **Wired (0001,0003,0005,0006)** | Local Postgres via Docker. `0002_rls`/`0004_realtime` are Supabase-only, skipped locally. |
 | Worker | `apps/worker` | **Full real engine (chunks 2–15 ✓)** | Separate Go module. Claims runs (lease+heartbeat, crash-safe), runs multi-agent **DAGs** in parallel, **fetches real content** (arXiv/HN/Reddit/web), drives **browser** sessions (sim + Browserbase CDP), and **emails the result** (SMTP). Three+ swappable seams: LLM, browser, notify, sources. |
 | Reasoner | `apps/reasoner` | **Second execution plane (v1-6 ✓)** | Separate Python service. LangGraph graphs run as **Temporal activities** (durability via Temporal event history instead of the Go lease/heartbeat), traced in **Langfuse**, browsing via **Browserbase**, writing the SAME Postgres rows the UI renders. Dispatches `engine='temporal'` runs. Now executes **user-composed graphs dynamically** (§20), not just the static plan→browse→synthesize→deliver flow. |
+| Pieces worker | `apps/pieces-worker` | **Node Temporal activity worker (v1-9 ✓)** | Standalone npm package (outside the pnpm workspace). Loads real `@activepieces/piece-*` npm packages **as a library** and serves ONE activity, `execute_piece`, on queue `agently-pieces`. Every `pieces.*` node runs here, orchestrated by the reasoner's `DynamicWorkflow`. Optional at runtime — no worker ⇒ record-intent, never a failed run (§21). |
 
 **Where it stands now:** the AI Digest workflow runs for real end-to-end — fetches live
 arXiv papers + HN news, synthesizes a digest, emails it (SMTP), all durably resumable. With
@@ -918,7 +919,7 @@ workflow that compiles + invokes the graph) → `graph.py` (the LangGraph itself
 provider-seam discipline as the Go worker: real Anthropic/Browserbase/Langfuse when
 keys are set, deterministic/simulated fallback otherwise, so it runs keyless).
 
-### 20.2 The visual builder — draw a graph, run it
+### 20.2 The visual builder — draw a graph, run it  
 
 Chunk 17 (§18) compiled a *sentence* into a graph. This adds the other front door:
 compose the graph **directly** on a React Flow canvas. The full seam, five parts:
@@ -1046,7 +1047,243 @@ resumes at the in-flight node without re-running completed ones.
 
 ---
 
+## 21. v1-9 — Activepieces pieces as Temporal activities (DONE)
+
+**The one sentence:** every `pieces.*` node is a real Activepieces integration (the actual
+MIT-licensed npm package, e.g. `@activepieces/piece-slack`) executed by a dedicated **Node
+Temporal activity worker** — while the Python `DynamicWorkflow` stays the **single
+orchestrator**. Activepieces contributes *integrations as a library*; it contributes zero
+orchestration, zero servers, zero infrastructure.
+
+**Why this design (and not the alternatives we rejected):**
+- **Not transpilation.** Converting AP piece code to our own node handlers was tried
+  conceptually and rejected: hand-porting covers ~4% of surface and is lossy (auth
+  refresh, pagination, file handling all live in piece code). Running the *real* package
+  gets full fidelity for free.
+- **Not the AP orchestrator/sidecar.** Running Activepieces' own flow engine next to
+  Temporal would mean two competing durability stories, two run states, two retry
+  policies. Instead Temporal owns *every* node — pieces are just one more activity —
+  so a run that mixes `agent.llm`, `tool.browser`, and `pieces.slack.send_channel_message`
+  has ONE event history, ONE resume story, ONE place to look when it crashes.
+- **The vendored tree (`external/activepieces/`) stays reference-only.** Nothing imports
+  it. Pieces install from npm like any dependency; the vendor tree is for reading
+  framework internals (that's how the ActionContext shape in `execute.ts` was derived).
+
+### 21.1 The flow, end to end (trace this)
+
+```
+Prompt / builder canvas
+   │  planner sees pieces.* nodes in the merged catalog
+   ▼
+apps/api  services/nodecatalog.go LoadCatalog()
+   ├─ loads the hand-written catalog (packages/nodes/catalog/*.json)
+   └─ mergePiecesIndex() folds in packages/nodes/pieces/index.json
+        → each piece action becomes a CatalogNode {ID:"pieces.slack.send_channel_message",
+          Runtime:"piece", Cluster:"pieces.slack", Credentials:[AP_SLACK_AUTH], Config:props}
+   ▼
+services/planner.go  map-reduce compiler may emit pieces.* nodes
+   (reduce prompt: prefer hand-written nodes on overlap; use pieces.* when it's the
+    only coverage or a more precise fit) → validateGraph accepts pieces types + checks
+    required props via the same cat.ByID path as every other node
+   ▼
+Run launched with engine='temporal'  →  reasoner dispatcher
+   (dispatcher.py passes params.pieces_task_queue = PIECES_TASK_QUEUE, default "agently-pieces")
+   ▼
+apps/reasoner  DynamicWorkflow.run  — the SINGLE orchestrator
+   topo loop → _run_one(node):
+      type.startswith("pieces.")?   ← deterministic string check, no file I/O in workflow code
+      ├─ no  → run_node activity (unchanged §20 path: agent.llm, tool.http, …)
+      └─ yes → _run_piece_node:
+           1. prepare_piece_node activity (Python, reasoner queue)
+              • looks up the piece spec in the index (pieces.py)
+              • unknown piece → mode=record {"reason":"unknown-piece"}          ┐
+              • auth required + env var absent → mode=record                     │ degrade,
+                {"missingCredentials":["AP_SLACK_AUTH"]}                         │ never fail
+              • else renders every {{…}} template against config/input/outputs,  ┘
+                filters to the action's declared props, returns mode=execute
+                payload {piece, pieceVersion, action, props, authEnvKey}
+                (authEnvKey is the env var NAME — the secret never enters the payload)
+           2. if mode=execute:
+              workflow.execute_activity("execute_piece", payload,
+                  task_queue=self._pieces_queue,          ← CROSS-QUEUE, by string name
+                  schedule_to_start_timeout=30s,          ← catches "no worker polling" fast
+                  start_to_close_timeout=180s, retry max 3)
+              ActivityError (worker down / timed out) → substitute
+                {"recorded":true, "executed":false, "reason":"pieces-worker-unavailable"}
+           3. record_piece_result activity (Python)
+              • ok:true  → output persisted, agent succeeded
+              • ok:false → {"error","errorType"} persisted, agent STILL succeeded
+                (piece failure is data, not a run failure)
+   ▼
+apps/pieces-worker  (Node, polls ONLY agently-pieces)
+   worker.ts registers {execute_piece: makeExecutePiece(registry)}
+   pieces.ts loaded every installed @activepieces/piece-* at boot (duck-typed:
+     the export with a string displayName + actions() method is the Piece)
+   execute.ts:
+     • unknown piece/action → THROW ("not installed") — infra error, Temporal retries
+     • resolve process.env[authEnvKey]; missing → return {ok:false,
+       errorType:"MissingCredential"} — business error, NOT retried
+     • normalizeAuth per auth type (oauth2 bare string → {access_token,…};
+       secret_text → dual-access string; basic user:pass; custom_auth JSON)
+     • build a minimal ActionContext (Map store, tmpdir files, BEGIN execution,
+       unsupported() throwing UnsupportedPieceFeature for pause/waitpoints/flows)
+     • await action.run(ctx) under a 150s internal cap (PieceTimeout)
+     • success → {ok:true, output:jsonSafe(...)}; any throw → {ok:false, error, errorType}
+   ▼
+UI renders the run — same runs/run_agents/run_logs rows as every other node.
+```
+
+**The three degradation shapes** (all mean "the run continued; here's why the piece
+didn't fire") — grep for them when debugging:
+`"unknown-piece"` (index doesn't know the type — regenerate the index),
+`"missingCredentials"` (set `AP_<SLUG>_AUTH` in `.env`),
+`"pieces-worker-unavailable"` (start the worker: `npm run agently:pieces`).
+A fourth, `"fallback-orchestrator"`, appears only when a piece node lands in the
+single-activity fallback engine (`engine.execute_graph` can't cross task queues).
+
+### 21.2 The architecture — the ideas that make it sound
+
+- **One orchestrator, polyglot activities.** Temporal activities are invoked *by string
+  name* with an explicit `task_queue` — the Python workflow never imports Node code. The
+  language boundary is exactly one activity call. This is the standard Temporal polyglot
+  pattern, and it's why adding a third runtime later (e.g. a Rust worker) is the same
+  one-liner.
+- **Secrets never ride the payload.** Temporal persists every activity payload in the
+  workflow event history — putting a token in the payload writes it to disk on the
+  Temporal server, forever. So the payload carries `authEnvKey` (the *name*
+  `AP_SLACK_AUTH`); the Python side checks only *presence* (inside an activity, never in
+  workflow code); the Node side resolves the *value* from its own env at execution time.
+- **Returned vs thrown is the retry policy.** A piece that runs and fails (bad channel
+  id, API 403) *returns* `{ok:false,…}` — retrying it would spam the external service
+  with the same doomed call. A piece that can't run at all (not installed, worker bug)
+  *throws* — that's infra, and Temporal's retry (max 3) is exactly right. The error
+  taxonomy: `PieceExecutionError`, `MissingCredential`, `UnsupportedPieceFeature`,
+  `PieceTimeout`.
+- **Record-intent everywhere.** The same graceful-degradation principle as sources/
+  browser/LLM (§17), applied to pieces: a missing credential, an absent worker, or an
+  unknown piece produces `{"recorded":true, "executed":false, "reason":…}` and the run
+  *succeeds*. The user sees precisely what would have fired and what to configure —
+  never a dead run because Slack wasn't hooked up yet.
+- **The index is generated, not hand-written.** `npm run gen:index` imports every
+  installed piece package and emits `packages/nodes/pieces/index.json`
+  (`{id, piece, pieceVersion, action, label, auth:{type, credentialKey, required},
+  props:[…]}`). Three consumers, one artifact: the Go planner (merged into the catalog),
+  the Python prepare activity (spec + credential lookup), and — implicitly — the UI via
+  the catalog API. Install a new piece → `gen:index` → restart api + pieces worker →
+  it's plannable and runnable. No code changes.
+- **Deterministic workflow code.** The routing check is `type.startswith("pieces.")` —
+  a pure string test. The index file is read only inside *activities* (prepare/record),
+  never in workflow code, keeping Temporal's replay determinism intact. The pieces queue
+  name arrives via workflow *params* (from the dispatcher), not env reads.
+- **The contract doc is load-bearing.** `docs/pieces-runtime-contract.md` §1–6 is the
+  agreement all three components were built against (type convention, index schema,
+  topology, payload/result shapes, credential convention, component boundaries). When
+  extending pieces support, change the contract first, then the components.
+
+**Ops reality:** the pieces worker is process #7 (`scripts/agently.sh` /
+`RUNBOOK.md`), and it's *optional* — `agently.sh start` skips it with a hint if
+unbuilt. Ten pilot pieces are declared in `apps/pieces-worker/package.json` (slack,
+github, notion, stripe, google-sheets, airtable, discord, todoist, hubspot, trello).
+`bash scripts/pieces-integration.sh` = install + build + test + gen:index + all suites,
+logging to `.agently/pieces-integration.log`.
+
+**Scope honesty:** actions only — triggers are explicitly out of scope this phase.
+OAuth2 tokens are consumed as-provided (no refresh flow yet). Dynamic/dropdown props
+are planned as literal values (no options-resolution round-trip). Each of these is a
+recorded follow-up, not a hidden gap.
+
+### 21.3 Files to read (in this order)
+
+**Pass 1 — the contract (read this first, everything else implements it):**
+1. `docs/pieces-runtime-contract.md` — §1 type convention `pieces.<slug>.<action>`,
+   §2 index schema, §3 queue/timeouts, §4 payload+result shapes, §5 credentials +
+   record-intent, §6 who-writes-what. ~140 lines; the whole system in one page.
+
+**Pass 2 — the orchestrator side (Python, `apps/reasoner/reasoner/`):**
+2. `pieces.py` — the index loader (mirrors `catalog.py`): `is_piece_type`,
+   `piece_spec_for`, `credential_key_for`, `auth_required`. Metadata only — execution
+   never happens here.
+3. `workflow.py` — find `_run_one` and `_run_piece_node` in `DynamicWorkflow`: the
+   routing check, the cross-queue `execute_activity("execute_piece", …,
+   task_queue=self._pieces_queue)` call with its timeouts, and the `ActivityError` →
+   worker-unavailable substitution. This is the single-orchestrator principle in ~40 lines.
+4. `activities.py` — `prepare_piece_node` (spec lookup → credential presence check →
+   template rendering → payload assembly; note the secret never appears) and
+   `record_piece_result` (ok/error persistence; note `ok:false` still marks the agent
+   succeeded). The dataclasses `PreparePieceInput/Result`, `RecordPieceInput`.
+5. `nodes.py` — the resolution order gaining a pieces step: registry → catalog →
+   `pieces.is_piece_type` → `_piece_fallback` → passthrough. `_piece_fallback` is why
+   the single-activity engine records instead of executing (can't cross queues).
+6. `config.py` + `dispatcher.py` — how `PIECES_TASK_QUEUE` flows: env → CONFIG →
+   workflow params. (Workflow code never reads env — replay determinism.)
+
+**Pass 3 — the execution side (Node, `apps/pieces-worker/src/`):**
+7. `worker.ts` — ~60 lines: connect to Temporal, load the registry, register
+   `execute_piece` on `agently-pieces`. The entire deployment surface.
+8. `pieces.ts` — the duck-typed registry: scans `node_modules/@activepieces/piece-*`,
+   `looksLikePiece` (string `displayName` + `actions()` fn), per-package failure
+   tolerance. How "installed npm packages" becomes "callable actions."
+9. `execute.ts` — **the heart of the worker.** `makeExecutePiece`: throw-vs-return
+   discipline, `normalizeAuth` per auth type, the minimal `ActionContext` (what a piece
+   actually needs to run: propsValue/auth/store/files + unsupported() stubs), prop
+   defaults, `jsonSafe`, the 150s timeout. Derived from the vendored framework source.
+10. `gen-index.ts` — `buildIndex()`: how a piece package becomes index entries
+    (id/credentialKey conventions, prop type lower-casing, `dynamic:true` marking).
+
+**Pass 4 — the planner side (Go, `apps/api/internal/services/`):**
+11. `piecesindex.go` — `mergePiecesIndex`: index entries → `CatalogNode`s
+    (Runtime:"piece", one cluster per slug, props → config fields, auth →
+    Credentials). Nil-safe, silent when the index is absent.
+12. `nodecatalog.go` — the two-line integration point in `LoadCatalog()`.
+13. `planner.go` — the reduce-prompt paragraph teaching the LLM when to prefer
+    hand-written vs pieces nodes; `servicesOf` mapping `pieces.*` → slug.
+
+**Pass 5 — the proof (tests + ops):**
+14. `apps/reasoner/tests/test_pieces.py` — 14 tests; the fixture-index pattern
+    (PIECES_INDEX_PATH + reload) and the assertion that the secret value never
+    appears in a payload.
+15. `apps/pieces-worker/src/test/execute.test.ts` — 13 node:test tests against fake
+    pieces (no npm installs needed): auth normalization matrix, store round-trip,
+    error taxonomy, index-contract validation.
+16. `apps/api/internal/services/piecesindex_test.go` — merge/validate/servicesOf; the
+    proof pieces types flow through the same validateGraph as everything else.
+17. `scripts/agently.sh` (pieces stanzas), `RUNBOOK.md` (7-process table),
+    `.env.example` (AP_<SLUG>_AUTH conventions), `scripts/pieces-integration.sh`.
+
+**Concepts to internalize:**
+- **Integrations-as-library, orchestration-as-platform.** The whole n8n/Zapier surface
+  area problem splits cleanly: someone else maintains 700+ API clients (Activepieces,
+  MIT); we own the durable execution substrate (Temporal). The seam between them is one
+  activity with a five-field payload.
+- **A cross-queue activity call is the polyglot primitive.** By-name invocation +
+  explicit task queue = language-independent contract. Everything else (payload shape,
+  error semantics) is convention, which is why the contract doc matters more than any
+  single implementation file.
+- **Degrade at the cheapest point.** Credential presence is checked in *Python* (one
+  env lookup inside prepare) before paying a cross-queue round-trip; unknown pieces are
+  caught before that at index-lookup; only genuinely runnable work reaches the Node
+  worker. Each guard sits at the earliest place it can be decided.
+
+---
+
 ## Changelog
+
+- **v1-9 (DONE) — §21 added** — Activepieces pieces as Temporal activities. New
+  `apps/pieces-worker` (Node activity worker on queue `agently-pieces`) loads
+  `@activepieces/piece-*` npm packages as a library and serves ONE activity
+  (`execute_piece`) invoking the real `action.run(ctx)`. Reasoner's `DynamicWorkflow`
+  routes `pieces.*` nodes cross-queue (prepare → execute_piece → record), stays the
+  single orchestrator. Secrets never in payloads (`authEnvKey` = env var name; value
+  resolved worker-side). Piece failures returned-not-thrown (no business-error
+  retries); missing credential / absent worker / unknown piece degrade to
+  record-intent, never fail the run. Generated index
+  (`packages/nodes/pieces/index.json`, `npm run gen:index`) feeds the Go planner
+  (`piecesindex.go` merges into the catalog; reduce prompt prefers hand-written nodes
+  on overlap). Contract: `docs/pieces-runtime-contract.md`. 10 pilot pieces declared;
+  ops as optional process #7 (`agently:pieces`); `scripts/pieces-integration.sh` =
+  full install+build+test+gen sweep. Verified: Go build+tests green; 14 Python + 13
+  Node tests in-tree (run via the integration script). Out of scope this phase:
+  triggers, OAuth refresh, dynamic-prop resolution.
 
 - **v1-6 (DONE) — §20 added** — second execution plane + visual builder. (1) `apps/reasoner`:
   LangGraph graphs as Temporal activities (durability via Temporal event history), Langfuse
