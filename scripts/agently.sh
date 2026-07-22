@@ -6,9 +6,8 @@
 #   pnpm agently:stop       # stop the app processes (leave Docker running)
 #   pnpm agently:down       # stop app processes AND Docker
 #   pnpm agently:status     # what's up / down
-#   pnpm agently:logs [svc] # tail logs (svc = api|worker|reasoner|web; default all)
+#   pnpm agently:logs [svc] # tail logs (svc = api|reasoner|pieces|web; default all)
 #   pnpm agently:api        # rebuild+restart just the API   (after apps/api/**.go change)
-#   pnpm agently:worker     # rebuild+restart just the Worker(after apps/worker/**.go change)
 #   pnpm agently:reasoner   # restart just the Reasoner       (after apps/reasoner/**.py change)
 #   pnpm agently:web        # restart just the Web            (after next.config/env change)
 #
@@ -28,15 +27,12 @@ export API_PROXY_TARGET="${API_PROXY_TARGET:-http://localhost:${API_PORT}}"
 export TEMPORAL_HOSTPORT="${TEMPORAL_HOSTPORT:-localhost:7233}"
 export TEMPORAL_TASK_QUEUE="${TEMPORAL_TASK_QUEUE:-agently-reasoner}"
 export PIECES_TASK_QUEUE="${PIECES_TASK_QUEUE:-agently-pieces}"
-WORKER_ID="${WORKER_ID:-worker-A}"
 
-# LLM/browser creds pass through from your shell if present (real Claude + Browserbase).
-# BROWSERBASE_* / OPENAI_* / SMTP_* are auto-loaded from .env by the services themselves.
-ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
-ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-}"
+# LLM/browser creds are auto-loaded from .env by the services themselves:
+# GEMINI_API_KEY (run-time synthesis + planner), BROWSERBASE_* / OPENAI_* / SMTP_*.
+# No proxy base URL — the Gemini SDK talks straight to Google.
 
 API_BIN=/tmp/agently-api
-WORKER_BIN=/tmp/agently-worker
 RUNDIR="$ROOT/.agently"
 LOGS="$RUNDIR/logs"
 mkdir -p "$LOGS"
@@ -56,7 +52,6 @@ stop_one() {
   rm -f "$f"
   case "$n" in
     api)      pkill -f agently-api 2>/dev/null ;;
-    worker)   pkill -f agently-worker 2>/dev/null ;;
     reasoner) pkill -f "reasoner.worker" 2>/dev/null ;;
     pieces)   pkill -f "pieces-worker/dist/worker.js" 2>/dev/null ;;
     web)      pkill -f "next dev" 2>/dev/null ;;
@@ -74,7 +69,6 @@ wait_http() { # url tries
 build_go() {
   say "Building Go binaries…"
   ( cd apps/api    && go build -o "$API_BIN"    ./cmd/server ) && ok "api built"    || { bad "api build failed";    return 1; }
-  ( cd apps/worker && go build -o "$WORKER_BIN" ./cmd/worker ) && ok "worker built" || { bad "worker build failed"; return 1; }
 }
 
 ensure_web_deps() {
@@ -109,17 +103,10 @@ start_api() {
     nohup "$API_BIN" >"$LOGS/api.log" 2>&1 & echo $! >"$(pidfile api)"
   ok "api      → http://localhost:${API_PORT}   (pid $!)"
 }
-start_worker() {
-  DATABASE_URL="$DATABASE_URL" WORKER_ID="$WORKER_ID" \
-  ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
-    nohup "$WORKER_BIN" >"$LOGS/worker.log" 2>&1 & echo $! >"$(pidfile worker)"
-  ok "worker   → native engine            (pid $!)"
-}
 start_reasoner() {
   ( cd "$ROOT/apps/reasoner" && \
     DATABASE_URL="$DATABASE_URL" TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" TEMPORAL_TASK_QUEUE="$TEMPORAL_TASK_QUEUE" \
     PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
-    ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
     exec ./.venv/bin/python -m reasoner.worker ) >"$LOGS/reasoner.log" 2>&1 & echo $! >"$(pidfile reasoner)"
   ok "reasoner → temporal engine          (pid $!)"
 }
@@ -146,36 +133,35 @@ cmd_start() {
   ensure_reasoner_venv || return 1
   build_go || return 1
   say "Stopping any previous app processes…"
-  for n in web pieces reasoner worker api; do stop_one "$n"; done
+  for n in web pieces reasoner api; do stop_one "$n"; done
   say "Starting services…"
-  start_api; start_worker; start_reasoner; start_pieces; start_web
+  start_api; start_reasoner; start_pieces; start_web
   printf "  waiting for API health"
   if wait_http "http://localhost:${API_PORT}/api/workflows" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
-  [ -z "$ANTHROPIC_API_KEY" ] && say "  ${c_dim}note: ANTHROPIC_API_KEY not in env → worker/reasoner use OpenAI(.env) or mock${c_rst}"
+  grep -qE '^GEMINI_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: GEMINI_API_KEY not set in .env → reasoner/planner fall back to OpenAI(.env) or mock${c_rst}"
   echo
   say "${c_grn}Agently is up.${c_rst}  UI: http://localhost:3000   Temporal UI: http://localhost:8080"
   say "  logs: pnpm agently:logs   status: pnpm agently:status   stop: pnpm agently:stop"
 }
 
-cmd_stop() { say "Stopping app processes…"; for n in web pieces reasoner worker api; do stop_one "$n" && ok "$n stopped"; done; }
+cmd_stop() { say "Stopping app processes…"; for n in web pieces reasoner api; do stop_one "$n" && ok "$n stopped"; done; }
 cmd_down() { cmd_stop; say "Stopping Docker…"; docker compose down >/dev/null 2>&1 && ok "docker down"; }
 
 cmd_restart() { # svc
   local svc="${1:-all}"
   case "$svc" in
     api)      build_go || return 1; stop_one api;      start_api ;;
-    worker)   build_go || return 1; stop_one worker;   start_worker ;;
     reasoner) ensure_reasoner_venv || return 1; stop_one reasoner; start_reasoner ;;
     pieces)   stop_one pieces; start_pieces ;;
     web)      stop_one web; start_web ;;
     all)      cmd_start ;;
-    *)        bad "unknown service '$svc' (api|worker|reasoner|pieces|web|all)"; return 1 ;;
+    *)        bad "unknown service '$svc' (api|reasoner|pieces|web|all)"; return 1 ;;
   esac
 }
 
 cmd_status() {
   say "Services:"
-  for n in api worker reasoner pieces web; do
+  for n in api reasoner pieces web; do
     if is_up "$n"; then ok "$(printf '%-9s up   (pid %s)' "$n" "$(cat "$(pidfile "$n")")")"; else bad "$(printf '%-9s down' "$n")"; fi
   done
   say "Docker:"; docker compose ps --format '  {{.Name}}  {{.Status}}' 2>/dev/null || bad "docker not reachable"

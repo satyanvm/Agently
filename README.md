@@ -40,8 +40,9 @@ Differentiation vs. adjacent tools:
    them (workers). The control plane stays up even when agents crash.
 2. **The database is the source of truth, not worker memory** — every meaningful step is persisted.
    Workers are cattle, not pets; the run survives any worker dying.
-3. **Durable queue over Postgres first** — `claim_next_run()` + `FOR UPDATE SKIP LOCKED`. No
-   Kafka/Temporal until usage earns the need.
+3. **Durable execution over Temporal** — every run executes as a Temporal workflow; each node is
+   an activity checkpointed in Temporal's event history. (The original Postgres-queue engine —
+   `claim_next_run()` + `FOR UPDATE SKIP LOCKED` — is retired, archived in `archive/worker`.)
 4. **Append-only logs, streamed** — written once, never mutated, tailed live.
 5. **The browser is an external, isolated service** — never in-process with the orchestrator.
 6. **Treat the agent as semi-untrusted** — it acts on hostile web content (prompt injection), so
@@ -70,14 +71,15 @@ Differentiation vs. adjacent tools:
 │                      │  Secrets vault (KMS)       │                              │
 │                      └─────────────┬─────────────┘                              │
 └────────────────────────────────────┼────────────────────────────────────────────┘
-                                      │  durable queue (runs table, SKIP LOCKED)
-                                      ▼  poll / claim / lease / heartbeat
+                                      │  runs table (queued) → reasoner dispatcher
+                                      ▼  → Temporal workflow (id = run id, idempotent)
 ┌──────────────────────────────── DATA PLANE ─────────────────────────────────────┐
 │   ┌──────────────────────────────────────────────────────────────────────┐      │
-│   │  WORKER POOL (apps/worker)                                             │      │
-│   │   Orchestrator   → claim/lease/retry/cancel/heartbeat                  │      │
-│   │   Workflow Engine→ DAG: what runs next + checkpoint to Postgres        │      │
-│   │   Agent Runtime  → prompt→LLM→tool loop (sandboxed); framework adapter │      │
+│   │  TEMPORAL REASONER (apps/reasoner) + PIECES WORKER (apps/pieces-worker)│      │
+│   │   Dispatcher      → polls queued runs, starts workflows (idempotent)   │      │
+│   │   Workflow Engine → DAG in deterministic workflow code; one activity   │      │
+│   │                     per node, checkpointed in Temporal event history   │      │
+│   │   Agent Runtime   → LangGraph nodes (LLM/browse/pieces), Langfuse trace│      │
 │   └───────────────────────────────┬──────────────────────────────────────┘      │
 │                                    │ CDP / API                                    │
 │                                    ▼                                              │
@@ -96,12 +98,15 @@ Differentiation vs. adjacent tools:
   reasoning timeline, embedded browser live-view, artifacts). Stateless; talks only to the API.
 - **API / Backend** — auth, workflow CRUD, run lifecycle, log/artifact serving, live-event fan-out.
   Manages state and brokers streams; **does not execute agents**.
-- **Task Orchestrator** (worker) — claims runs via `claim_next_run()`, owns lease/heartbeat/retry/
-  timeout/cancel. The *"is this run alive and who owns it"* layer.
-- **Workflow Engine** (worker) — interprets the workflow DAG, decides what runs next, checkpoints to
-  Postgres, passes outputs between agents. The *"what happens next"* durable state machine.
-- **Agent Runtime** (sandboxed, worker) — executes one agent step: prompt → LLM → tool → repeat,
-  captures the reasoning trace. Framework adapter (native / LangGraph / CrewAI) lives here.
+- **Task Orchestrator** (Temporal) — the reasoner's dispatcher starts one Temporal workflow per
+  queued run (workflow id = run id, so dispatch is idempotent); Temporal owns retry/timeout/cancel
+  and crash recovery via event-history replay. The *"is this run alive and who owns it"* layer.
+- **Workflow Engine** (reasoner) — deterministic workflow code walks the DAG, one activity per
+  node; completed activities are served from event history on replay, so a crash resumes at the
+  in-flight node. The *"what happens next"* durable state machine.
+- **Agent Runtime** (reasoner activities) — executes one agent step: prompt → LLM → tool → repeat,
+  captures the reasoning trace (Langfuse). LangGraph-native; `pieces.*` nodes are forwarded to the
+  Node pieces worker (`apps/pieces-worker`) on its own task queue.
 - **Browser Layer** (external) — one isolated session per browser-using agent-run, with live view and
   replay. Browserbase in MVP, behind a `BrowserProvider` interface.
 - **Logging Layer** — append-only structured events; metadata/index in Postgres, large blobs in object
@@ -117,8 +122,8 @@ Differentiation vs. adjacent tools:
 User defines workflow ─► API persists (versioned) ─► User clicks Run
    └► API creates workflow_runs row (status=queued) ─► returns run_id immediately
       (user can close laptop NOW)  ◄── the core promise
-   └► Worker calls claim_next_run() (FOR UPDATE SKIP LOCKED) ─► lease + heartbeat
-      (worker dies → lease expires → another worker RESUMES FROM CHECKPOINT)
+   └► Reasoner dispatcher polls queued runs ─► starts Temporal workflow (id = run id)
+      (worker dies → Temporal replays the workflow, completed nodes served from event history)
    └► Workflow Engine walks the DAG, checkpointing each node to Postgres
       └► Agent Runtime runs each step (LLM + tools), logging every reasoning/tool/LLM event
          └► Browser tool → isolated session via CDP; actions + screenshots logged; live-view + replay
@@ -135,7 +140,7 @@ keys for external side effects); any worker can be killed at any time without lo
 | Area | Decision | Why |
 |---|---|---|
 | **Orchestration** | Thin **custom orchestrator** + framework **adapters** (native first, LangGraph then CrewAI as guest executors) | Durability is the moat and can't be outsourced; frameworks plug in at the step boundary, keeping us framework-neutral. |
-| **Durable queue** | **Postgres `FOR UPDATE SKIP LOCKED`** (`claim_next_run()`), not Kafka/Temporal | Simple, debuggable, right-sized for 100–1k users; migrate when concurrency demands it. |
+| **Durable queue** | **Temporal** (event-history replay, per-node activities). Originally Postgres `FOR UPDATE SKIP LOCKED` (`claim_next_run()`) — retired to `archive/worker` once the platform re-based on Temporal + LangGraph. | Postgres-as-queue was simple and debuggable for the MVP; Temporal gives per-node checkpointing, retries, and replay without hand-rolled lease machinery. |
 | **Browser** | **Browserbase** behind a `BrowserProvider` interface | Live-view + replay are core and hard to build; a solo dev shouldn't run a Chromium fleet in MVP. Swap to self-hosted when it becomes the #1 cost driver (~1k users). |
 | **Cloud model** | **Managed cloud** for MVP; architect the `ComputeProvider` seam for future **BYOC** | Primary persona wants "click Run," not cross-account IAM. BYOC is a Phase-4 enterprise feature, enabled by the control/data-plane split. |
 | **LLM cost** | **Bring-your-own-LLM-key** by default, even in Managed | Removes the largest variable cost from our books and from runaway-loop risk. |
@@ -194,14 +199,15 @@ mostly-waiting runs, log/artifact cold-tiering, and the browser-provider swap.
 
 ## Glossary
 
-**Lease** — a time-limited claim a worker takes on a run, recorded as `lease_expires_at` on
+**Lease** — *(historical: the retired native engine, `archive/worker`)* a time-limited claim a
+worker takes on a run, recorded as `lease_expires_at` on
 the `workflow_runs` row. It answers *"is this run still owned?"* When a worker claims a run it
 sets `claimed_by` and an expiry (e.g. `now + 30s`). The worker is responsible for the run only
 until that expiry — it rents the run, it doesn't own it forever. If the lease lapses, another
 worker may reclaim the run and resume it from the last checkpoint. This is what makes a crashed
 worker recoverable instead of leaving a run stuck in `running` forever.
 
-**Heartbeat** — the worker periodically renewing its lease while it is alive and working
+**Heartbeat** — *(historical, same engine)* the worker periodically renewing its lease while it is alive and working
 (e.g. every 10s push `lease_expires_at` forward). It answers *"is the owner still alive?"* The
 heartbeat is what distinguishes a *crashed* worker from one that is merely taking a long time on
 a legitimate hours- or days-long step.

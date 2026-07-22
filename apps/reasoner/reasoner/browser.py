@@ -3,7 +3,8 @@
 Drives a real Browserbase session over CDP (Playwright) when BROWSERBASE_* is set;
 otherwise falls back to a lightweight simulated browse so the slice still runs end
 to end. Either way it writes the browser_* rows the Go UI already renders (sessions,
-actions, shots, console), exactly like apps/worker/internal/browser/*.
+actions, shots, console), exactly like the retired Go worker did
+(archive/worker/internal/browser/*).
 """
 from __future__ import annotations
 

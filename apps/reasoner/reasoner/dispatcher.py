@@ -1,7 +1,6 @@
 """Dispatcher: bridge from the Go control plane to Temporal.
 
-The Go API creates a run row with engine='temporal', status='queued' (and never
-hands it to the native worker, because claim_next_run is scoped to engine='native').
+The Go API creates a run row with engine='temporal', status='queued'.
 This loop polls those rows and starts a Temporal workflow for each, using the run id
 as the workflow id so dispatch is idempotent — a duplicate start (e.g. two reasoner
 instances, or a retry) is rejected by Temporal rather than double-executing. Once a

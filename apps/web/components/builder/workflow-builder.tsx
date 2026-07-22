@@ -93,9 +93,9 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
       // Persist the current graph before launching so the run executes what's on canvas.
       const saved = await saveWorkflow();
       if (!saved) return;
-      // Temporal engine executes the composed graph literally (each node runs its
-      // handler — a browser node actually visits its URL), so the drawn graph runs
-      // exactly as wired rather than being name-dispatched by the native worker.
+      // The Temporal engine executes the composed graph literally (each node runs
+      // its handler — a browser node actually visits its URL), so the drawn graph
+      // runs exactly as wired.
       const runId = await launchRun(workflowSlug, undefined, "temporal");
       router.push(`/runs/${runId}`);
     } catch (err) {

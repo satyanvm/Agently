@@ -1,9 +1,9 @@
 """Write-back into the shared Agently Postgres.
 
-This is the linchpin of the slice: by writing the SAME rows the Go worker writes
-(runs / run_logs / run_agents / artifacts / browser_*), the existing Go API and
+This is the linchpin of the slice: by writing the SAME rows the retired Go worker
+wrote (runs / run_logs / run_agents / artifacts / browser_*), the existing Go API and
 Next.js UI render Temporal-backed runs unchanged. Semantics deliberately mirror
-apps/worker/internal/queue/{store,browser,graph}.go.
+archive/worker/internal/queue/{store,browser,graph}.go.
 
 All functions are async (psycopg3) so they don't block the activity event loop.
 Each call uses a short-lived autocommit connection — simple and robust for the
