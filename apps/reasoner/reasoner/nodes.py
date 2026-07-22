@@ -339,7 +339,7 @@ async def _loop(ctx: NodeContext) -> NodeResult:
 async def _email(ctx: NodeContext) -> NodeResult:
     """Deliver a run digest by email over SMTP; fall back to record-intent.
 
-    Mirrors the Go worker's SMTP seam (apps/worker/internal/notifier): SMTP_HOST /
+    Mirrors the retired Go worker's SMTP seam (archive/worker/internal/notifier): SMTP_HOST /
     SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM. When SMTP is unconfigured (or the
     send fails, or there is no recipient) we degrade to recording the intent — a log
     line plus an artifact — so the run never fails and the UI still shows something.

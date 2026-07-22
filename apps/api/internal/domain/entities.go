@@ -176,8 +176,9 @@ type Run struct {
 	Usage             Usage              `json:"usage"`
 	Error             *string            `json:"error"`
 	BrowserSessionID  *BrowserSessionId  `json:"browserSessionId"`
-	// Engine names the execution plane that owns this run: "native" (the in-house
-	// Go worker, default) or "temporal" (the Temporal + LangGraph reasoner).
+	// Engine names the execution plane that owns this run. Always "temporal"
+	// (the Temporal + LangGraph reasoner) for new runs; historical rows may still
+	// read "native" (the retired in-house Go worker, archived under archive/worker).
 	Engine string `json:"engine"`
 	// LangfuseTraceID deep-links the run to its trace in self-hosted Langfuse.
 	// Set by the reasoner for temporal runs; nil otherwise.

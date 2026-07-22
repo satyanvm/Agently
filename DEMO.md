@@ -1,5 +1,12 @@
 # Agently — Demo Runbook
 
+> **⚠️ HISTORICAL (native engine, retired 2026-07-21).** This demo exercises the
+> native Go worker, which is archived under `archive/worker` — every run now
+> executes on the Temporal + LangGraph reasoner, where crash recovery is
+> event-history replay instead of lease/reaper requeue. Kept as documentation of
+> the Postgres-only durability design. To run it, first resurrect the worker
+> (see `archive/worker/ARCHIVED.md`).
+
 The end-to-end demo that proves the product's core promise: **durable autonomous
 execution**. A run is created, executed by a worker, streamed live to the UI, and —
 the money shot — **survives a worker crash and resumes from its checkpoint**.

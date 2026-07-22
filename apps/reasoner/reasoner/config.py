@@ -35,15 +35,15 @@ class Config:
     langfuse_host: str
     langfuse_public_key: str
     langfuse_secret_key: str
-    # Models.
+    # Models. Run-time synthesis runs on Google Gemini; unset key ⇒ deterministic mock.
     model: str
     synthesis_model: str
-    anthropic_api_key: str
+    gemini_api_key: str
     # Browserbase (optional — falls back to a simulated browse if unset).
     browserbase_api_key: str
     browserbase_project_id: str
     # SMTP (optional — output.email falls back to record-intent if unset). Env var
-    # names mirror the Go worker's notifier (apps/worker/internal/notifier).
+    # names mirror the retired Go worker's notifier (archive/worker/internal/notifier).
     smtp_host: str
     smtp_port: str
     smtp_user: str
@@ -57,6 +57,10 @@ class Config:
     tool_db_url: str
     # How often the dispatcher polls Postgres for queued temporal runs (seconds).
     dispatch_interval_s: float
+
+    @property
+    def gemini_enabled(self) -> bool:
+        return bool(self.gemini_api_key)
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -87,9 +91,12 @@ def load() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST", "http://localhost:3001"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
-        model=os.getenv("REASONER_MODEL", "claude-sonnet-4-6"),
-        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "claude-opus-4-8"),
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        model=os.getenv("REASONER_MODEL", "gemini-2.5-flash"),
+        # Default to Flash for synthesis too — 2.5-pro has near-zero free-tier quota
+        # (429 RESOURCE_EXHAUSTED). Override to gemini-2.5-pro on a paid key.
+        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "gemini-2.5-flash"),
+        # GEMINI_API_KEY is the run-time synthesis key (GOOGLE_API_KEY also accepted).
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
         browserbase_api_key=os.getenv("BROWSERBASE_API_KEY", ""),
         browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID", ""),
         smtp_host=os.getenv("SMTP_HOST", ""),

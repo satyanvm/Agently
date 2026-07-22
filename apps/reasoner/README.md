@@ -27,7 +27,7 @@ re-charging its tokens.
 
 Prereqs (from the repo root): Postgres + Temporal up via `docker compose up -d`,
 migrations applied (incl. `0009_temporal_engine.sql`), and `.env` populated
-(`DATABASE_URL`, `TEMPORAL_*`, optionally `ANTHROPIC_API_KEY`, `BROWSERBASE_*`,
+(`DATABASE_URL`, `TEMPORAL_*`, optionally `GEMINI_API_KEY`, `BROWSERBASE_*`,
 `LANGFUSE_*`). Langfuse is optional: `docker compose -f docker-compose.langfuse.yml up -d`.
 
 ```bash

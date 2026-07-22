@@ -33,6 +33,7 @@ services:
       - ./packages/db/migrations/0007_workflow_default_input.sql:/docker-entrypoint-initdb.d/0007_workflow_default_input.sql:ro
       - ./packages/db/migrations/0008_integrations.sql:/docker-entrypoint-initdb.d/0008_integrations.sql:ro
       - ./packages/db/migrations/0009_temporal_engine.sql:/docker-entrypoint-initdb.d/0009_temporal_engine.sql:ro
+      - ./packages/db/migrations/0010_retire_native_engine.sql:/docker-entrypoint-initdb.d/0010_retire_native_engine.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agently -d agently"]
       interval: 3s

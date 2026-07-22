@@ -316,14 +316,13 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
-	// Engine selects the execution plane: "native" (the in-house Go worker) or
-	// "temporal" (the Temporal + LangGraph reasoner). Empty means AUTO — the run
-	// service routes by the workflow's graph (typed nodes → temporal, legacy
-	// untyped digests → native). An explicit value always wins.
+	// Engine is accepted for backward compatibility but every run now executes on
+	// the Temporal + LangGraph reasoner — the native Go worker was retired
+	// (archived under archive/worker). Only "temporal" (or empty) is valid.
 	Engine string
 }
 
-var validEngines = map[string]bool{"native": true, "temporal": true}
+var validEngines = map[string]bool{"temporal": true}
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	v := &ValidationError{}

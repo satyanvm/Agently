@@ -395,7 +395,7 @@ func scanRun(row pgx.Row) (domain.Run, error) {
 	}
 	rn.Engine = engine
 	if rn.Engine == "" {
-		rn.Engine = "native"
+		rn.Engine = "temporal"
 	}
 	rn.LangfuseTraceID = langfuseTraceID
 	rn.QueuedAt = anyTs(queued)
@@ -449,7 +449,7 @@ func collectRuns(s *pgStore, rows pgx.Rows) []domain.Run {
 func (r *pgRunRepo) Insert(run domain.Run) domain.Run {
 	engine := run.Engine
 	if engine == "" {
-		engine = "native"
+		engine = "temporal"
 	}
 	_, err := r.s.pool.Exec(bg(),
 		`insert into runs (id, workspace_id, workflow_id, workflow_version_id, number, status,

@@ -44,10 +44,9 @@ that read it.
 | `apps/web/**` (components, `lib/`, pages) | ✅ Yes (Fast Refresh) | nothing |
 | `apps/web/next.config.ts` or web env | ❌ | `pnpm agently:web` |
 | `apps/api/**.go` | ❌ | `pnpm agently:api` (rebuilds + restarts) |
-| `apps/worker/**.go` | ❌ | `pnpm agently:worker` (rebuilds + restarts) |
 | `apps/reasoner/**.py` | ❌ | `pnpm agently:reasoner` |
 | `apps/pieces-worker/**.ts` or piece packages | ❌ | `cd apps/pieces-worker && npm run build && npm run gen:index`, then `pnpm agently:pieces` (index changes also need `pnpm agently:api`) |
-| **`.env`** value (e.g. `BROWSERBASE_PROJECT_ID`) | ❌ | restart the reader(s): `agently:worker` and/or `agently:reasoner` (and `agently:api` if it reads it) |
+| **`.env`** value (e.g. `BROWSERBASE_PROJECT_ID`) | ❌ | restart the reader(s): `agently:reasoner` (and `agently:api` if it reads it) |
 | `docker-compose.yml` | ❌ | `docker compose up -d` |
 | new file in `packages/db/migrations/` | ❌ (fresh-DB only) | apply manually — see below |
 
@@ -63,9 +62,8 @@ Rule of thumb: **Web = automatic. Go/Python = restart. `.env` = restart the read
 | `pnpm agently:stop` | stop the 4 app processes; leave Docker running |
 | `pnpm agently:down` | stop app processes **and** `docker compose down` |
 | `pnpm agently:status` | per-service up/down + Docker container status |
-| `pnpm agently:logs [svc]` | tail logs; `svc` = `api`\|`worker`\|`reasoner`\|`pieces`\|`web` (default: all) |
+| `pnpm agently:logs [svc]` | tail logs; `svc` = `api`\|`reasoner`\|`pieces`\|`web` (default: all) |
 | `pnpm agently:api` | rebuild + restart just the API |
-| `pnpm agently:worker` | rebuild + restart just the Worker |
 | `pnpm agently:reasoner` | restart just the Reasoner |
 | `pnpm agently:pieces` | restart just the Pieces worker (skipped if apps/pieces-worker isn't built) |
 | `pnpm agently:web` | restart just the Web |
@@ -76,24 +74,22 @@ Logs live in `.agently/logs/*.log`; PIDs in `.agently/*.pid` (git-ignored).
 
 ## Credentials & env
 
-- **`.env`** (auto-loaded by the services): `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`,
-  `OPENAI_API_KEY`, `RESEND_API_KEY`, `SMTP_*`.
-- **Anthropic** (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`) currently come from your
-  **shell session**. If you launch from a terminal that has them exported, the worker
-  and reasoner produce **real Claude** output; otherwise they fall back to OpenAI(.env)
-  or the deterministic **mock**.
-  **Recommended:** add these two lines to `.env` so every start is real without exporting:
+- **`.env`** (auto-loaded by the services): `GEMINI_API_KEY`, `BROWSERBASE_API_KEY`,
+  `BROWSERBASE_PROJECT_ID`, `OPENAI_API_KEY`, `RESEND_API_KEY`, `SMTP_*`.
+- **LLM** — the reasoner (run-time synthesis) and the API planner both run on **Google
+  Gemini**. Add one line to `.env` and every start is real, no proxy, no exporting:
   ```
-  ANTHROPIC_API_KEY=...
-  ANTHROPIC_BASE_URL=https://api-cc.freemodel.dev
+  GEMINI_API_KEY=...
   ```
+  Without it they fall back to `OPENAI_API_KEY` (planner only) or the deterministic
+  **mock**. Override the models with `REASONER_MODEL` / `REASONER_SYNTHESIS_MODEL`
+  (defaults `gemini-2.5-flash` / `gemini-2.5-pro`) and `GEMINI_MODEL` (planner).
 
 ### Which engine runs my graph?
-- **Native (Go worker):** dispatches nodes by *name* keywords; does not literally execute
-  a drawn `tool.browser` node. Default for API launches.
-- **Temporal (reasoner):** executes the composed graph **literally** — a browser node
-  actually visits its URL, an `agent.llm` node runs its prompt. The visual builder's
-  **Test run** button uses this engine.
+Every run executes on the **Temporal reasoner** (the native Go worker was retired in
+v1-11). It runs the composed graph **literally** — a browser node actually visits its
+URL, an `agent.llm` node runs its prompt on Gemini. The visual builder's **Test run**
+button uses this engine.
 
 ---
 
