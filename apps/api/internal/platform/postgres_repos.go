@@ -1177,6 +1177,96 @@ func (r *pgIntegrationRepo) DeleteByWorkspaceProvider(workspaceID domain.Workspa
 	return err == nil && tag.RowsAffected() > 0
 }
 
+/* ----------------------------- credentials --------------------------- */
+
+type pgCredentialRepo struct{ s *pgStore }
+
+const credentialCols = `id, workspace_id, type, name, data, created_at, updated_at`
+
+func scanCredential(row pgx.Row) (domain.Credential, error) {
+	var c domain.Credential
+	var id, ws, typ, name string
+	var data []byte
+	var created, updated any
+	if err := row.Scan(&id, &ws, &typ, &name, &data, &created, &updated); err != nil {
+		return c, err
+	}
+	c.ID = domain.CredentialId(id)
+	c.WorkspaceID = domain.WorkspaceId(ws)
+	c.Type, c.Name = typ, name
+	c.Data = map[string]any{}
+	jsonInto(data, &c.Data)
+	c.CreatedAt, c.UpdatedAt = anyTs(created), anyTs(updated)
+	return c, nil
+}
+
+func (r *pgCredentialRepo) ListByWorkspace(workspaceID domain.WorkspaceId) []domain.Credential {
+	rows, err := r.s.pool.Query(bg(),
+		`select `+credentialCols+` from credentials where workspace_id=$1 order by created_at`,
+		string(workspaceID))
+	if err != nil {
+		r.s.fail("credential.List", err)
+		return nil
+	}
+	defer rows.Close()
+	out := []domain.Credential{}
+	for rows.Next() {
+		c, err := scanCredential(rows)
+		if err != nil {
+			r.s.fail("credential.List scan", err)
+			return out
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func (r *pgCredentialRepo) GetByID(id domain.CredentialId) (domain.Credential, bool) {
+	row := r.s.pool.QueryRow(bg(),
+		`select `+credentialCols+` from credentials where id=$1`, string(id))
+	c, err := scanCredential(row)
+	if err != nil {
+		return domain.Credential{}, false
+	}
+	return c, true
+}
+
+func (r *pgCredentialRepo) Insert(c domain.Credential) domain.Credential {
+	_, err := r.s.pool.Exec(bg(),
+		`insert into credentials (`+credentialCols+`) values ($1,$2,$3,$4,$5,$6,$7)`,
+		string(c.ID), string(c.WorkspaceID), c.Type, c.Name,
+		jsonArg(orEmptyMap(c.Data)), tsArg(c.CreatedAt), tsArg(c.UpdatedAt))
+	r.s.fail("credential.Insert", err)
+	return c
+}
+
+func (r *pgCredentialRepo) Update(id domain.CredentialId, patch CredentialPatch) (domain.Credential, error) {
+	b := newSetBuilder()
+	if patch.Name != nil {
+		b.add("name", *patch.Name)
+	}
+	if patch.Data != nil {
+		b.add("data", jsonArg(orEmptyMap(*patch.Data)))
+	}
+	if patch.UpdatedAt != nil {
+		b.add("updated_at", tsArg(*patch.UpdatedAt))
+	}
+	if err := b.exec(r.s, "credentials", string(id)); err != nil {
+		return domain.Credential{}, err
+	}
+	c, ok := r.GetByID(id)
+	if !ok {
+		return domain.Credential{}, domain.NotFound("Credential")
+	}
+	return c, nil
+}
+
+func (r *pgCredentialRepo) Delete(id domain.CredentialId) bool {
+	tag, err := r.s.pool.Exec(bg(), `delete from credentials where id=$1`, string(id))
+	r.s.fail("credential.Delete", err)
+	return err == nil && tag.RowsAffected() > 0
+}
+
 /* ------------------------ small shared helpers ----------------------- */
 
 // setBuilder builds a dynamic `UPDATE … SET col=$n, …` from non-nil patch fields.

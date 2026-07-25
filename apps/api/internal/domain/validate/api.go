@@ -265,6 +265,61 @@ func ParseSaveGraphInput(body map[string]any) ([]domain.GraphNode, error) {
 	return nodes, nil
 }
 
+// CreateCredentialInput mirrors the POST /api/credentials body
+// (docs/credentials-contract.md §4).
+type CreateCredentialInput struct {
+	Name   string
+	Type   string
+	Values map[string]any
+}
+
+func ParseCreateCredentialInput(body map[string]any) (CreateCredentialInput, error) {
+	v := &ValidationError{}
+	name := getString(body, "name")
+	v.stringRequired("name", name)
+	v.stringMaxLen("name", name, 120)
+
+	typ := getString(body, "type")
+	v.stringRequired("type", typ)
+
+	out := CreateCredentialInput{Name: name, Type: typ, Values: getMap(body, "values")}
+	if out.Values == nil {
+		out.Values = map[string]any{}
+	}
+	if v.HasErrors() {
+		return CreateCredentialInput{}, v
+	}
+	return out, nil
+}
+
+// UpdateCredentialInput mirrors the PUT /api/credentials/{id} body: both fields
+// optional; Values nil means "leave the secrets untouched" (merge is per-key).
+type UpdateCredentialInput struct {
+	Name   *string
+	Values map[string]any
+}
+
+func ParseUpdateCredentialInput(body map[string]any) (UpdateCredentialInput, error) {
+	v := &ValidationError{}
+	out := UpdateCredentialInput{}
+	if hasKey(body, "name") {
+		name := getString(body, "name")
+		v.stringRequired("name", name)
+		v.stringMaxLen("name", name, 120)
+		out.Name = &name
+	}
+	if hasKey(body, "values") {
+		out.Values = getMap(body, "values")
+		if out.Values == nil {
+			out.Values = map[string]any{}
+		}
+	}
+	if v.HasErrors() {
+		return UpdateCredentialInput{}, v
+	}
+	return out, nil
+}
+
 // CreateAgentInput mirrors the zod CreateAgentInput.
 type CreateAgentInput struct {
 	Name        string

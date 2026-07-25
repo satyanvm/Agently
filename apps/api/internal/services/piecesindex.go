@@ -32,6 +32,8 @@ type pieceIndexNode struct {
 	Label        string       `json:"label"`
 	Description  string       `json:"description"`
 	Kind         string       `json:"kind"`
+	// Trigger entries only: "webhook" | "polling" | "app_webhook".
+	Strategy     string       `json:"strategy"`
 	Search       []string     `json:"search"`
 	Auth         *pieceAuth   `json:"auth"`
 	Props        []pieceProp  `json:"props"`

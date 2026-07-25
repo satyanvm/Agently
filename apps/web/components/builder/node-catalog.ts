@@ -47,6 +47,16 @@ export interface NodeSpec {
   cluster?: string;
   /** Human label of the cluster, for palette group headers. */
   clusterLabel?: string;
+  /**
+   * Credential type id (docs/credentials-contract.md §2/§3). Non-null means the
+   * node needs credentials; unset/null (legacy nodes) means no credential UI.
+   */
+  credentialType?: string | null;
+  /**
+   * Piece trigger strategy (docs/pieces-runtime-contract.md §7a): "webhook",
+   * "polling", or "app_webhook". Present only on `pieces.*` trigger nodes.
+   */
+  strategy?: "webhook" | "polling" | "app_webhook";
 }
 
 export const NODE_CATALOG: NodeSpec[] = [
@@ -212,6 +222,10 @@ interface GeneratedNode {
   clusterLabel: string;
   config: NodeField[];
   credentials: string[];
+  /** Optional — older generator output omits it (legacy nodes: no credential UI). */
+  credentialType?: string | null;
+  /** Piece trigger strategy; present only on `pieces.*` trigger nodes. */
+  strategy?: "webhook" | "polling" | "app_webhook";
 }
 
 const CLUSTER_ICON: Record<string, LucideIcon> = {
@@ -255,6 +269,8 @@ const INTEGRATION_NODES: NodeSpec[] = (integrationCatalog as GeneratedNode[]).ma
     toneBg: INTEGRATION_TONE[kind].toneBg,
     cluster: n.cluster,
     clusterLabel: n.clusterLabel,
+    credentialType: n.credentialType ?? null,
+    ...(n.strategy ? { strategy: n.strategy } : {}),
   };
 });
 
@@ -272,15 +288,28 @@ export function findNodeSpec(id: string): NodeSpec | undefined {
   return NODE_CATALOG.find((n) => n.id === id);
 }
 
-/** A single editable field in a node's inspector form. */
+/**
+ * A single editable field, shared by node config forms AND credential forms
+ * (docs/credentials-contract.md §1). One dynamic renderer maps control →
+ * component: components/builder/dynamic-field.tsx.
+ */
 export interface NodeField {
   key: string;
   label: string;
-  control: "text" | "textarea" | "number" | "select";
+  control: "text" | "secret" | "textarea" | "number" | "checkbox" | "select" | "json";
+  required?: boolean;
   placeholder?: string;
   options?: string[];
   help?: string;
+  /** Activepieces dynamic/dropdown props: rendered as text, raw-ID fallback. */
+  dynamic?: boolean;
 }
+
+/**
+ * Reserved config key holding the selected credential id (contract §6). Never
+ * rendered as a normal field and excluded from the "n/m configured" count.
+ */
+export const CREDENTIAL_ID_KEY = "__credentialId";
 
 /**
  * The config form for each node type, keyed by catalog id. The inspector renders
@@ -357,7 +386,9 @@ export function nodeFields(typeId: string): NodeField[] {
 export function defaultConfig(typeId: string): Record<string, unknown> {
   const cfg: Record<string, unknown> = {};
   for (const f of nodeFields(typeId)) {
-    cfg[f.key] = f.control === "select" ? f.options?.[0] ?? "" : "";
+    if (f.control === "select") cfg[f.key] = f.options?.[0] ?? "";
+    else if (f.control === "checkbox") cfg[f.key] = false;
+    else cfg[f.key] = "";
   }
   return cfg;
 }

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { NodeCatalog } from "./node-catalog-panel";
 import { NodeInspector } from "./node-inspector";
 import { WorkflowNode } from "./workflow-node";
+import { CredentialsProvider } from "./credentials-context";
 import { NODE_CATALOG, defaultConfig, findNodeSpec } from "./node-catalog";
 import { getWorkflowGraph, saveWorkflowGraph, launchRun } from "@/lib/api";
 import { maxNumericNodeId } from "@/lib/builder-graph";
@@ -181,6 +182,9 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   return (
+    // Credentials are shared by the canvas (needs-creds badges) and the
+    // inspector (credential picker); one provider keeps them in sync.
+    <CredentialsProvider>
     <div className="flex h-full w-full">
       {/* Left sidebar - Node Catalog */}
       <NodeCatalog />
@@ -246,5 +250,6 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
         onDelete={deleteSelectedNode}
       />
     </div>
+    </CredentialsProvider>
   );
 }

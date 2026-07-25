@@ -58,6 +58,7 @@ type store struct {
 	notifs       []domain.Notification
 	activity     []domain.ActivityEvent
 	integrations []domain.Integration
+	credentials  []domain.Credential
 }
 
 // NewMemoryRepositories builds a complete in-memory Repositories from seed data.
@@ -95,6 +96,7 @@ func NewMemoryRepositories(data MemoryData) *Repositories {
 		Notifications: &notificationRepo{s},
 		Activity:      &activityRepo{s},
 		Integrations:  &integrationRepo{s},
+		Credentials:   &credentialRepo{s},
 	}
 }
 
@@ -718,6 +720,76 @@ func (r *integrationRepo) DeleteByWorkspaceProvider(workspaceID domain.Workspace
 	for i, it := range r.s.integrations {
 		if it.WorkspaceID == workspaceID && it.Provider == provider {
 			r.s.integrations = append(r.s.integrations[:i], r.s.integrations[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+/* -------------------------- credentials -------------------------- */
+
+type credentialRepo struct{ s *store }
+
+func (r *credentialRepo) ListByWorkspace(workspaceID domain.WorkspaceId) []domain.Credential {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	out := []domain.Credential{}
+	for _, c := range r.s.credentials {
+		if c.WorkspaceID == workspaceID {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (r *credentialRepo) GetByID(id domain.CredentialId) (domain.Credential, bool) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	for _, c := range r.s.credentials {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return domain.Credential{}, false
+}
+
+func (r *credentialRepo) Insert(c domain.Credential) domain.Credential {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if c.Data == nil {
+		c.Data = map[string]any{}
+	}
+	r.s.credentials = append(r.s.credentials, c)
+	return c
+}
+
+func (r *credentialRepo) Update(id domain.CredentialId, patch CredentialPatch) (domain.Credential, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for i := range r.s.credentials {
+		if r.s.credentials[i].ID != id {
+			continue
+		}
+		if patch.Name != nil {
+			r.s.credentials[i].Name = *patch.Name
+		}
+		if patch.Data != nil {
+			r.s.credentials[i].Data = *patch.Data
+		}
+		if patch.UpdatedAt != nil {
+			r.s.credentials[i].UpdatedAt = *patch.UpdatedAt
+		}
+		return r.s.credentials[i], nil
+	}
+	return domain.Credential{}, domain.NotFound("Credential")
+}
+
+func (r *credentialRepo) Delete(id domain.CredentialId) bool {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for i, c := range r.s.credentials {
+		if c.ID == id {
+			r.s.credentials = append(r.s.credentials[:i], r.s.credentials[i+1:]...)
 			return true
 		}
 	}

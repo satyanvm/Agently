@@ -1266,7 +1266,154 @@ recorded follow-up, not a hidden gap.
 
 ---
 
+## 22. v1-11 — the full node surface + DB-backed credentials with n8n-style UI (DONE)
+
+**The one sentence:** all ~5,500 nodes (193 hand-written/imported + 5,304 Activepieces
+piece actions from 707 installed packages) are in the builder palette and runnable, and
+credentials moved from "env vars only" to a **workspace credential store** (Postgres +
+CRUD API + n8n-style UI): a node that needs credentials shows a badge, you click it,
+pick or create a named credential, and the runtime resolves it from the DB at execution
+time — proven end-to-end.
+
+### 22.1 The contract (read first)
+
+`docs/credentials-contract.md` is the load-bearing agreement, same role as the pieces
+runtime contract. It pins: the field-control vocabulary (§1), the generated catalog
+shape incl. `credentialType` (§2), the credential-types catalog + derivation rules (§3),
+the REST API (§4), storage (§5), the reserved config key `__credentialId` (§6), runtime
+resolution order (§7), and workstream ownership (§8).
+
+### 22.2 What was built, per layer
+
+**Scale-out of the piece surface (`apps/pieces-worker`):** all 707 community pieces
+from npm are installed (was 10). `gen:index` now emits 5,304 action nodes into
+`packages/nodes/pieces/index.json`, skipping broken packages per-piece instead of
+failing the run, and carrying the auth metadata (incl. custom_auth props) the
+credential-type derivation needs.
+
+**Catalog generation (`packages/nodes/build-web.mjs`):** merges the pieces index into
+the web catalog (5,497 nodes) and emits a second artifact,
+`apps/web/components/builder/credential-types.generated.json` (740 credential types).
+Derivation is deterministic: hand-written providers get one type per node-id prefix
+(fields = union of their env-key credentials, rendered as secrets); pieces get
+`pieces.<slug>` with fields derived from their auth type (secret_text → one secret;
+basic → user+pass; oauth2 → manual access/refresh token entry — no OAuth dance yet;
+custom_auth → one field per auth prop).
+
+**Store + API (`apps/api`):** migration `0011_credentials.sql` — workspace-scoped
+`credentials` table (`type`, `name`, `data jsonb`; plaintext MVP, encrypt-at-rest is a
+recorded follow-up). CRUD at `/api/credentials` with **write-only secrets**: responses
+carry `setKeys` (which fields are set), never values; PUT merges values per-key so an
+edit that doesn't retype a secret preserves it.
+
+**Runtime resolution (both planes):** a node's chosen credential rides in its config
+under the reserved key `__credentialId` (flows through all existing workflow-JSON
+plumbing untouched; stripped before prop/template rendering, excluded from the UI's
+"n/m configured" count). For http/builtin nodes the **reasoner** resolves the id →
+`credentials.data` inside an activity and feeds `{{credentials.KEY}}` templating,
+falling back per-key to process env (the old behavior). For `pieces.*` nodes the
+`execute_piece` payload gains `credentialId` alongside `authEnvKey` — secrets still
+never cross the Temporal payload boundary; the **Node worker** resolves the id from
+Postgres (else env) and normalizes to the piece's auth shape.
+
+**UI (`apps/web/components/builder/`):** one **dynamic field renderer**
+(`dynamic-field.tsx`) implements the whole control vocabulary (text with email/url
+inference, secret with show/hide, textarea, number, checkbox, select, validated JSON)
+and is shared by node config forms AND credential forms — the "template that renders
+the right component per field" idea, so both surfaces stay one component. Node cards
+show an amber "Set up credentials" pill when `credentialType` is set but no (or a
+dangling) `__credentialId`; the inspector renders a Credentials section first
+(n8n-style): select an existing credential of that type, or "+ Create new" → modal
+rendered from the generated types file, save → POST → auto-select. Saved secrets show
+"•••••• (saved)" and are only re-sent when retyped. The palette was rescaled for
+thousands of nodes (clustered groups, capped rendering with "Show all N", search-driven).
+
+### 22.3 The proof (smoke-tested live, 2026-07-23)
+
+- Migration applied; `GET /api/credentials` → `[]`; two credentials created via API
+  (`setKeys` only in responses, never values).
+- A 3-node workflow (manual → `openai.chatCompletion` → `pieces.openai.ask_chatgpt`)
+  ran on the temporal engine with DB credentials: both nodes hit the real OpenAI API.
+- **The discriminating probe:** the same key exists in `.env`, so a working call
+  doesn't prove the DB path. Pointing both nodes at a deliberately-invalid DB
+  credential flipped the provider response from 429 (valid key, quota exhausted) to
+  **401 "Incorrect API key: sk-inval\*\*\*robe"** on BOTH the reasoner path and the
+  pieces-worker path — the DB value demonstrably took precedence over the env var.
+- UI driven headlessly (Playwright): badge visible → click node → credential section →
+  Create modal → save → badge gone, credential auto-selected, row confirmed via API.
+  DELETE returns 204, dangling delete 404, other nodes referencing a deleted credential
+  re-show the badge.
+
+**Recorded caveats:** OAuth2 pieces take manually-pasted tokens (no per-provider consent
+flow yet); `credentials.data` is plaintext in the dev DB; piece business failures
+(e.g. provider 4xx) are recorded per the §21 returned-not-thrown design and the RUN still
+reports `succeeded` — fine for record-intent, but worth revisiting for UX honesty.
+
+### 22.4 Piece triggers (v1-11 follow-up)
+
+Piece triggers are indexed (`kind:"trigger"` + `strategy: webhook|polling|app_webhook`
+in the pieces index) and land in the palette as trigger nodes. The execution design's
+one idea: **events are produced before a run exists**, so Temporal workflow code never
+touches payload transformation. The worker grew an interactive HTTP runtime
+(`src/options-server.ts` on :7391, `PIECES_HTTP_PORT`) with `/run-trigger` and
+`/trigger-lifecycle` — it runs the trigger's real `run()`/`onEnable()`/`onDisable()`
+with a Postgres-backed `Store` (`piece_trigger_state`, migration 0012, scoped per
+workflow+node) for polling cursors and webhook registrations.
+
+- **Webhook path:** provider → `POST /api/hooks/{slug}/{nodeKey}` (`handler/hooks.go`)
+  → worker `/run-trigger` transforms the delivery into events → each event launches a
+  temporal run with `input.__trigger_event`. Worker down → the raw payload launches
+  the run, flagged `{"raw": true, "reason": "pieces-worker-unavailable"}`.
+- **Polling path:** `services/piecespoller.go`, a control-plane ticker mirroring
+  scheduler.go (every `PIECES_POLL_INTERVAL`, default 5m; `PIECES_POLLER=0` off) —
+  polls every workflow whose entry node is a `pieces.*` polling trigger; the trigger's
+  own store dedupes, each new event launches a run (≤3/tick).
+- **In the run:** the reasoner's `prepare_piece_node` sees `spec.kind == "trigger"`
+  and surfaces `run.input.__trigger_event` as the node's output (record-mode
+  passthrough) — downstream `{{outputs.<key>.…}}` templating just works.
+- **Lifecycle:** `POST /api/workflows/{slug}/triggers/{nodeKey}/enable|disable|poll`
+  (enable registers the webhook with the provider using `WEBHOOK_PUBLIC_BASE` +
+  `/api/hooks/…`; `poll` is a manual tick for testing).
+- Limits (recorded): one run per webhook delivery (`events[0]`), `app_webhook` not
+  routed, no UI enable/disable toggle yet, single-API-instance poller assumption.
+
+### 22.5 Live authenticated dynamic dropdowns (n8n "From list" parity)
+
+Dynamic Activepieces props (dropdown / multi_select_dropdown / dynamic) were raw-ID
+text fields; now a node with a selected credential gets a two-mode control
+(`dynamic-options-field.tsx`): **From list** lazily fetches real provider options —
+`POST /api/pieces/options` (Go proxy, `handler/pieces_options.go`) → worker
+`/options` → the prop's real `options()` resolver with auth resolved DB-first exactly
+like `execute_piece` — cached per node+prop+credential with a refresh button; **By
+ID** stays the raw input, and any fetch failure falls back to it with a compact
+error, never blocking the form. Option values round-trip as plain config values
+(objects serialize stably), so saved workflow JSON is shape-unchanged. Refresher
+props receive the node's current config, so dependent dropdowns (board → list) see
+their inputs.
+
+---
+
 ## Changelog
+
+- **v1-11 (DONE) — §22 added** — full node surface + DB-backed credentials. 707
+  Activepieces packages installed (5,304 action nodes indexed; 5,497 total in the web
+  catalog), workspace `credentials` store (migration 0011) + write-only CRUD API,
+  `__credentialId` node-config convention, DB-first/env-fallback resolution in both
+  the reasoner and the pieces-worker, one dynamic field renderer powering node config
+  AND n8n-style credential forms (badge → pick/create → run). Contract:
+  `docs/credentials-contract.md`. Smoke-proven live incl. the 429→401 flip that shows
+  DB credentials override env. Recorded gaps: OAuth consent flow, encrypt-at-rest.
+
+- **v1-11 (DONE) — §§22.4–22.5 added** — piece triggers + live dynamic dropdowns.
+  Triggers indexed with strategy and executable: webhook ingress
+  `POST /api/hooks/{slug}/{nodeKey}` and a scheduler-style polling ticker
+  (`piecespoller.go`) call the worker's new HTTP trigger runtime
+  (`/run-trigger`, `/trigger-lifecycle`, Postgres store via migration 0012);
+  events launch runs as `input.__trigger_event`, which the trigger node passes
+  through — no payload work in Temporal workflow code. Dynamic props gained the
+  n8n From-list/By-ID control backed by `POST /api/pieces/options` → worker
+  `/options` invoking the prop's real `options()` with DB-first credential
+  resolution. Contract: pieces-runtime-contract §§6a, 7a.
 
 - **v1-9 (DONE) — §21 added** — Activepieces pieces as Temporal activities. New
   `apps/pieces-worker` (Node activity worker on queue `agently-pieces`) loads

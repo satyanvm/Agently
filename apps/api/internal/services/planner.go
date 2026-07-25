@@ -139,6 +139,80 @@ func basePlan(prompt, email string) Plan {
 
 /* --------------------------------- map phase --------------------------------- */
 
+// Pieces clusters (one per Activepieces piece, ~700 of them) would explode the
+// map fan-out if each got its own LLM call. They are prescreened LEXICALLY: a
+// cheap term-overlap score against the prompt keeps only the most plausible
+// few, so the map phase stays ~a dozen-and-a-half calls no matter how large
+// the installed piece surface grows. Hand-written clusters (a dozen) always go
+// to the model, exactly as before.
+const maxPieceClusterCalls = 12
+
+// mapConcurrency bounds parallel map-phase LLM calls (rate-limit hygiene).
+const mapConcurrency = 8
+
+// promptTokens lowercases and tokenizes the user's request for the prescreen.
+func promptTokens(prompt string) map[string]bool {
+	toks := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(prompt), func(r rune) bool {
+		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
+	}) {
+		if len(w) > 2 {
+			toks[w] = true
+		}
+	}
+	return toks
+}
+
+// topPieceClusters scores each pieces.<slug> cluster by term overlap with the
+// prompt (slug words weigh extra) and returns the best few, alphabetical among
+// ties so the selection — and therefore the compiled prompt — is reproducible.
+func topPieceClusters(cat *Catalog, prompt string, keys []string, max int) []string {
+	toks := promptTokens(prompt)
+	if len(toks) == 0 {
+		return nil
+	}
+	type scored struct {
+		key   string
+		score int
+	}
+	var ranked []scored
+	for _, key := range keys {
+		f := cat.Clusters[key]
+		score := 0
+		for _, w := range strings.Split(strings.TrimPrefix(key, "pieces."), "-") {
+			if toks[w] {
+				score += 3 // naming the service is the strongest signal
+			}
+		}
+		seen := map[string]bool{}
+		for _, n := range f.Nodes {
+			for _, w := range strings.Fields(strings.ToLower(n.Search + " " + n.Label)) {
+				if toks[w] && !seen[w] {
+					seen[w] = true
+					score++
+				}
+			}
+		}
+		if score > 0 {
+			ranked = append(ranked, scored{key, score})
+		}
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		return ranked[i].key < ranked[j].key
+	})
+	if len(ranked) > max {
+		ranked = ranked[:max]
+	}
+	out := make([]string, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.key
+	}
+	return out
+}
+
 // mapPhase fans one small-model call out per integration cluster (builtin is
 // always in the reduce context and never routed). Each call sees only that
 // cluster's compact index. Failures and junk are dropped silently — a missed
@@ -168,15 +242,30 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 
 		// WaitGroup waits until every goroutine has finished.
 		wg sync.WaitGroup
+
+		// Semaphore bounding parallel LLM calls.
+		sem = make(chan struct{}, mapConcurrency)
 	)
 
-	// Iterate through all cluster names in sorted order.
+	// Partition clusters: hand-written ones ALL go to the model (as before);
+	// pieces.<slug> clusters go through the lexical prescreen first.
+	var work, pieceKeys []string
 	for _, key := range cat.sortedClusters() {
 
 		// Ignore the builtin cluster.
 		if key == "builtin" {
 			continue
 		}
+		if strings.HasPrefix(key, "pieces.") {
+			pieceKeys = append(pieceKeys, key)
+			continue
+		}
+		work = append(work, key)
+	}
+	work = append(work, topPieceClusters(cat, prompt, pieceKeys, maxPieceClusterCalls)...)
+
+	// Iterate through the clusters that made the cut.
+	for _, key := range work {
 
 		// Get the catalog information for this cluster.
 		f := cat.Clusters[key]
@@ -185,12 +274,16 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 		wg.Add(1)
 
 		// Start a new goroutine.
-		// Every cluster runs independently and in parallel.
+		// Every cluster runs independently, bounded by the semaphore.
 		go func(f catalogFile) {
 
 			// This will automatically execute when the goroutine exits,
 			// even if we return early because of an error.
 			defer wg.Done()
+
+			// Respect the concurrency bound.
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			// Build the user prompt that will be sent to the LLM.
 			user := "Request: " + prompt +

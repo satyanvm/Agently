@@ -28,6 +28,13 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Post("/workflows/{slug}/runs", launchRun(p))
 		r.Get("/workflows/{slug}/runs", listWorkflowRuns(p))
 
+		// Piece trigger lifecycle + webhook ingress (pieces-runtime-contract,
+		// triggers section). /hooks is the provider-facing delivery URL.
+		r.Post("/workflows/{slug}/triggers/{nodeKey}/enable", triggerLifecycle(p, "enable"))
+		r.Post("/workflows/{slug}/triggers/{nodeKey}/disable", triggerLifecycle(p, "disable"))
+		r.Post("/workflows/{slug}/triggers/{nodeKey}/poll", triggerPoll(p))
+		r.Post("/hooks/{slug}/{nodeKey}", pieceHook(p))
+
 		r.Get("/runs", listRuns(p))
 		r.Get("/runs/{id}", getRun(p))
 		r.Post("/runs/{id}/cancel", cancelRun(p))
@@ -47,6 +54,16 @@ func NewRouter(p *services.Platform) chi.Router {
 
 		// Third-party account connections (OAuth2). connect/callback are browser
 		// navigations (302s), not JSON endpoints.
+		// DB-backed credential store (docs/credentials-contract.md §4). Values
+		// are write-only; responses expose which keys are set, never the secrets.
+		r.Get("/credentials", listCredentials(p))
+		r.Post("/credentials", createCredential(p))
+		r.Put("/credentials/{id}", updateCredential(p))
+		r.Delete("/credentials/{id}", deleteCredential(p))
+
+		// Dynamic-prop options for pieces.* nodes (proxied to the pieces worker).
+		r.Post("/pieces/options", piecesOptions(p))
+
 		r.Get("/integrations", listIntegrations(p))
 		r.Get("/integrations/google/connect", connectGoogle(p))
 		r.Get("/integrations/google/callback", googleCallback(p))

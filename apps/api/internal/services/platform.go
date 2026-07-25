@@ -28,6 +28,7 @@ type Platform struct {
 	Activity      *ActivityService
 	Stats         *StatsService
 	Integrations  *IntegrationService
+	Credentials   *CredentialService
 }
 
 // Options configure platform construction. All fields are optional; sensible
@@ -108,5 +109,6 @@ func NewPlatform(opts Options) *Platform {
 		Activity:      NewActivityService(deps),
 		Stats:         NewStatsService(deps),
 		Integrations:  NewIntegrationService(deps, &http.Client{Timeout: 20 * time.Second}),
+		Credentials:   NewCredentialService(deps),
 	}
 }

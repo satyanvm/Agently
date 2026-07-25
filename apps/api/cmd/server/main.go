@@ -59,6 +59,11 @@ func main() {
 	if os.Getenv("SCHEDULER") != "0" {
 		go plat.NewScheduler(os.Getenv("SCHEDULER_TZ")).Start(schedCtx)
 	}
+	// Piece polling triggers: ticks every PIECES_POLL_INTERVAL (default 5m) and
+	// launches runs for new events (services/piecespoller.go). PIECES_POLLER=0 disables.
+	if os.Getenv("PIECES_POLLER") != "0" {
+		go plat.NewPiecesPoller().Start(schedCtx)
+	}
 
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {
