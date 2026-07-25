@@ -66,7 +66,11 @@ type catalogFile struct {
 	Cluster     string        `json:"cluster"`
 	Label       string        `json:"label"`
 	Description string        `json:"description"`
-	Nodes       []CatalogNode `json:"nodes"`
+	// Categories is piece-cluster metadata (Activepieces framework categories,
+	// e.g. "PRODUCTIVITY") used by the router directory; hand-written cluster
+	// files don't set it.
+	Categories []string      `json:"categories,omitempty"`
+	Nodes      []CatalogNode `json:"nodes"`
 }
 
 // Catalog is the loaded universe of node types.

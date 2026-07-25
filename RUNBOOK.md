@@ -45,7 +45,7 @@ that read it.
 | `apps/web/next.config.ts` or web env | ❌ | `pnpm agently:web` |
 | `apps/api/**.go` | ❌ | `pnpm agently:api` (rebuilds + restarts) |
 | `apps/reasoner/**.py` | ❌ | `pnpm agently:reasoner` |
-| `apps/pieces-worker/**.ts` or piece packages | ❌ | `cd apps/pieces-worker && npm run build && npm run gen:index`, then `pnpm agently:pieces` (index changes also need `pnpm agently:api`) |
+| `apps/pieces-worker/**.ts` or piece packages | ❌ | `cd apps/pieces-worker && npm run build && npm run gen:index && npm run gen:embeddings`, then `pnpm agently:pieces` (index changes also need `pnpm agently:api`; gen:embeddings needs `GEMINI_API_KEY` and is incremental — skip it and the planner just routes without the embedding prefilter) |
 | **`.env`** value (e.g. `BROWSERBASE_PROJECT_ID`) | ❌ | restart the reader(s): `agently:reasoner` (and `agently:api` if it reads it) |
 | `docker-compose.yml` | ❌ | `docker compose up -d` |
 | new file in `packages/db/migrations/` | ❌ (fresh-DB only) | apply manually — see below |

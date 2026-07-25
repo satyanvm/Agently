@@ -25,18 +25,20 @@ type pieceIndexFile struct {
 }
 
 type pieceIndexNode struct {
-	ID           string       `json:"id"`
-	Piece        string       `json:"piece"`
-	PieceVersion string       `json:"pieceVersion"`
-	Action       string       `json:"action"`
-	Label        string       `json:"label"`
-	Description  string       `json:"description"`
-	Kind         string       `json:"kind"`
+	ID               string   `json:"id"`
+	Piece            string   `json:"piece"`
+	PieceVersion     string   `json:"pieceVersion"`
+	PieceDisplayName string   `json:"pieceDisplayName"`
+	Categories       []string `json:"categories"`
+	Action           string   `json:"action"`
+	Label            string   `json:"label"`
+	Description      string   `json:"description"`
+	Kind             string   `json:"kind"`
 	// Trigger entries only: "webhook" | "polling" | "app_webhook".
-	Strategy     string       `json:"strategy"`
-	Search       []string     `json:"search"`
-	Auth         *pieceAuth   `json:"auth"`
-	Props        []pieceProp  `json:"props"`
+	Strategy string      `json:"strategy"`
+	Search   []string    `json:"search"`
+	Auth     *pieceAuth  `json:"auth"`
+	Props    []pieceProp `json:"props"`
 }
 
 type pieceAuth struct {
@@ -94,6 +96,8 @@ func mergePiecesIndex(cat *Catalog, path string) {
 		return
 	}
 	byCluster := map[string][]CatalogNode{}
+	displayName := map[string]string{} // cluster → index pieceDisplayName
+	categories := map[string][]string{}
 	for _, n := range idx.Nodes {
 		if n.ID == "" || !strings.HasPrefix(n.ID, "pieces.") {
 			continue
@@ -103,6 +107,12 @@ func mergePiecesIndex(cat *Catalog, path string) {
 			continue
 		}
 		cluster := "pieces." + slug
+		if n.PieceDisplayName != "" {
+			displayName[cluster] = n.PieceDisplayName
+		}
+		if len(n.Categories) > 0 {
+			categories[cluster] = n.Categories
+		}
 		node := CatalogNode{
 			ID:          n.ID,
 			Label:       n.Label,
@@ -124,10 +134,12 @@ func mergePiecesIndex(cat *Catalog, path string) {
 	}
 	for cluster, nodes := range byCluster {
 		slug := strings.TrimPrefix(cluster, "pieces.")
+		name := orStr(displayName[cluster], pieceDisplayName(slug))
 		cat.Clusters[cluster] = catalogFile{
 			Cluster:     cluster,
-			Label:       pieceDisplayName(slug) + " (Activepieces)",
-			Description: "Actions from the " + pieceDisplayName(slug) + " Activepieces piece, executed on the pieces worker.",
+			Label:       name + " (Activepieces)",
+			Description: "Actions from the " + name + " Activepieces piece, executed on the pieces worker.",
+			Categories:  categories[cluster],
 			Nodes:       nodes,
 		}
 	}
