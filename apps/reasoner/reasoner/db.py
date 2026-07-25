@@ -86,6 +86,28 @@ async def claim_queued_temporal_runs(limit: int = 10) -> list[dict[str, Any]]:
         return [dict(zip(cols, row)) for row in rows]
 
 
+# ─────────────────────────── credentials ───────────────────────────
+
+async def fetch_credential_data(credential_id: str) -> dict[str, Any] | None:
+    """Return the secret key/values of a stored credential, or None if unknown.
+
+    Backs `config.__credentialId` resolution (docs/credentials-contract.md §7).
+    Called ONLY from inside activities — the secret values are used for template
+    rendering there and never enter workflow payloads or run history.
+    """
+    if not credential_id:
+        return None
+    async with _conn() as conn:
+        cur = await conn.execute(
+            "select data from credentials where id = %s", (credential_id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        data = row[0]
+        return dict(data) if isinstance(data, dict) else {}
+
+
 # ──────────────────────────── graph fetch ────────────────────────────
 
 async def fetch_graph_nodes(run_id: str) -> list[dict[str, Any]]:

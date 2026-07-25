@@ -29,14 +29,29 @@ export interface PieceAction {
   run: (ctx: any) => Promise<unknown>;
 }
 
+export interface PieceTrigger {
+  name: string;
+  displayName?: string;
+  description?: string;
+  type?: string; // TriggerStrategy: WEBHOOK | POLLING | APP_WEBHOOK
+  props?: Record<string, any>;
+  run: (ctx: any) => Promise<unknown>;
+  onEnable?: (ctx: any) => Promise<unknown>;
+  onDisable?: (ctx: any) => Promise<unknown>;
+  test?: (ctx: any) => Promise<unknown>;
+  sampleData?: unknown;
+}
+
 export interface LoadedPiece {
   slug: string; // "google-sheets" from "@activepieces/piece-google-sheets"
   packageName: string; // "@activepieces/piece-google-sheets"
   version: string;
   displayName: string;
   description: string;
+  categories: string[]; // framework PieceCategory names, e.g. ["COMMUNICATION"]
   auth: PieceAuthProp | undefined; // first auth when the piece declares several
   actions: Record<string, PieceAction>;
+  triggers: Record<string, PieceTrigger>;
 }
 
 export interface Registry {
@@ -98,14 +113,21 @@ export function loadRegistry(baseDir: string = __dirname): Registry {
       const pkgJson = JSON.parse(
         fs.readFileSync(path.join(scopeDir, entry, 'package.json'), 'utf8'),
       );
+      const rawCategories = (piece as any).categories;
       registry.pieces.set(slugOf(packageName), {
         slug: slugOf(packageName),
         packageName,
         version: String(pkgJson.version ?? '0.0.0'),
         displayName: piece.displayName,
         description: String((piece as any).description ?? ''),
+        categories: Array.isArray(rawCategories) ? rawCategories.map(String) : [],
         auth: firstAuth((piece as any).auth),
         actions: piece.actions(),
+        // Same duck-typing as actions: a piece without triggers() has none.
+        triggers:
+          typeof (piece as any).triggers === 'function'
+            ? ((piece as any).triggers() as Record<string, PieceTrigger>)
+            : {},
       });
     } catch (err) {
       registry.failures.push({ packageName, error: String(err) });
@@ -133,4 +155,12 @@ export function actionOf(registry: Registry, slug: string, actionName: string): 
   const action = piece.actions[actionName];
   if (!action) return null;
   return { piece, action };
+}
+
+export function triggerOf(registry: Registry, slug: string, triggerName: string): { piece: LoadedPiece; trigger: PieceTrigger } | null {
+  const piece = registry.pieces.get(slug);
+  if (!piece) return null;
+  const trigger = piece.triggers[triggerName];
+  if (!trigger) return null;
+  return { piece, trigger };
 }

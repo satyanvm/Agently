@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { CredentialResolver } from './credentials';
 import { actionOf, LoadedPiece, PieceAction, Registry } from './pieces';
 
 export interface ExecutePieceInput {
@@ -17,6 +18,9 @@ export interface ExecutePieceInput {
   action: string; // "send_channel_message"
   props: Record<string, unknown>;
   authEnvKey?: string | null;
+  // DB-backed credential id (docs/credentials-contract.md §7). Resolved HERE
+  // against Postgres; the secret never rides the Temporal payload.
+  credentialId?: string | null;
 }
 
 export type ExecutePieceResult =
@@ -25,7 +29,7 @@ export type ExecutePieceResult =
 
 const RUN_TIMEOUT_MS = 150_000; // inside the workflow's 180s start_to_close
 
-export function makeExecutePiece(registry: Registry) {
+export function makeExecutePiece(registry: Registry, resolveCredential?: CredentialResolver | null) {
   return async function executePiece(input: ExecutePieceInput): Promise<ExecutePieceResult> {
     const slug = input.piece.replace(/^@activepieces\/piece-/, '');
     const found = actionOf(registry, slug, input.action);
@@ -40,19 +44,32 @@ export function makeExecutePiece(registry: Registry) {
     }
     const { piece, action } = found;
 
-    // Credentials resolve HERE, by env var name — secrets never ride Temporal
-    // payloads (contract §4). Missing credential is a business outcome, not infra.
+    // Credentials resolve HERE — secrets never ride Temporal payloads
+    // (contract §4). Resolution order (credentials-contract §7): the DB
+    // credential id when set, else process.env[authEnvKey]. Missing both is a
+    // business outcome, not infra. A DB *error* (unlike a missing row) throws
+    // out of the resolver and hits the retry policy.
     let auth: unknown;
-    if (input.authEnvKey) {
-      const raw = process.env[input.authEnvKey] ?? '';
-      if (!raw) {
+    if (input.credentialId || input.authEnvKey) {
+      if (input.credentialId && resolveCredential) {
+        const data = await resolveCredential(input.credentialId);
+        if (data !== null) auth = normalizeDbAuth(data, piece);
+      }
+      if (auth === undefined && input.authEnvKey) {
+        const raw = process.env[input.authEnvKey] ?? '';
+        if (raw) auth = normalizeAuth(raw, piece);
+      }
+      if (auth === undefined) {
+        const sources = [
+          input.credentialId ? `credential ${input.credentialId}` : '',
+          input.authEnvKey ? `env var ${input.authEnvKey}` : '',
+        ].filter(Boolean).join(' and ');
         return {
           ok: false,
-          error: `credential env var ${input.authEnvKey} is not set on the pieces worker`,
+          error: `credential not resolvable on the pieces worker (checked ${sources})`,
           errorType: 'MissingCredential',
         };
       }
-      auth = normalizeAuth(raw, piece);
     }
 
     try {
@@ -71,6 +88,37 @@ export function makeExecutePiece(registry: Registry) {
       };
     }
   };
+}
+
+/**
+ * Shape a DB credential row's `data` the way the piece's auth property expects
+ * (docs/credentials-contract.md §7):
+ *   secret_text → data.value string; basic_auth → { username, password };
+ *   custom_auth → data object as-is; oauth2 → { access_token, ...data }.
+ * The secret_text string keeps the dual String-object access pattern from
+ * normalizeAuth (bare token AND .secret_text), and custom_auth keeps the
+ * auth.x / auth.props.x dual access.
+ */
+export function normalizeDbAuth(data: Record<string, unknown>, piece: LoadedPiece): unknown {
+  const authType = String(piece.auth?.type ?? '').toUpperCase();
+  switch (authType) {
+    case 'SECRET_TEXT': {
+      const value = String(data.value ?? '');
+      // eslint-disable-next-line no-new-wrappers
+      const dual = new String(value) as String & { secret_text: string; type: string };
+      dual.secret_text = value;
+      dual.type = 'SECRET_TEXT';
+      return dual;
+    }
+    case 'BASIC_AUTH':
+      return { username: String(data.username ?? ''), password: String(data.password ?? '') };
+    case 'CUSTOM_AUTH':
+      return { ...data, props: (data.props as Record<string, unknown>) ?? data };
+    case 'OAUTH2':
+      return { access_token: data.access_token, ...data };
+    default:
+      return data;
+  }
 }
 
 /**

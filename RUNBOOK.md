@@ -25,7 +25,7 @@ Open the UI at **http://localhost:3000**. Temporal UI at **http://localhost:8080
 | API | Go | **8090** | control plane — the UI talks to this |
 | Worker | Go | — | **native** execution engine |
 | Reasoner | Python | — | **temporal** execution engine (dynamic graphs, real browser) |
-| Pieces | Node | — | Activepieces runtime — `pieces.*` nodes via the `agently-pieces` task queue (optional; see apps/pieces-worker) |
+| Pieces | Node | **7391** | Activepieces runtime — `pieces.*` nodes via the `agently-pieces` task queue, plus the HTTP surface on :7391 for dynamic-prop options + trigger webhooks/polling (optional; see apps/pieces-worker) |
 | Web | Next.js | **3000** | the UI |
 
 > **Port note:** Temporal UI owns `:8080`, so the API runs on **`:8090`** and the web

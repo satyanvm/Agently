@@ -305,6 +305,21 @@ type Integration struct {
 	UpdatedAt    Timestamp     `json:"updatedAt"`
 }
 
+// Credential is a workspace's named secret bundle for one credential type
+// (docs/credentials-contract.md §§3-5): "slack" (env-key fields) or
+// "pieces.<slug>" (piece auth fields). Data holds the secret key/values —
+// like Integration.RefreshToken it is NEVER serialized to API clients; the
+// read model only exposes which keys are set.
+type Credential struct {
+	ID          CredentialId   `json:"id"`
+	WorkspaceID WorkspaceId    `json:"workspaceId"`
+	Type        string         `json:"type"` // credential type id (§3)
+	Name        string         `json:"name"`
+	Data        map[string]any `json:"-"` // secret values, never marshaled
+	CreatedAt   Timestamp      `json:"createdAt"`
+	UpdatedAt   Timestamp      `json:"updatedAt"`
+}
+
 /* ========================= Dashboard ========================== */
 
 type WorkspaceStats struct {

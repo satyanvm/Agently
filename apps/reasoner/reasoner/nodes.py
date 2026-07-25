@@ -169,6 +169,49 @@ def _cfg(ctx: NodeContext, key: str, default: str = "") -> str:
     return default if val is None else str(val)
 
 
+# Reserved config key naming the DB credential a node uses
+# (docs/credentials-contract.md §6). Never a template value: it is stripped from
+# config before any prop/template rendering.
+CREDENTIAL_ID_KEY = "__credentialId"
+
+
+def split_credential(cfg: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Split a node config into (public config, credential id).
+
+    The public config has the reserved __credentialId key removed — the shape
+    every template root / sandbox payload must see.
+    """
+    cred_id = str(cfg.get(CREDENTIAL_ID_KEY) or "")
+    public = {k: v for k, v in cfg.items() if k != CREDENTIAL_ID_KEY}
+    return public, cred_id
+
+
+async def _credential_values(run_id: str, key: str, cred_id: str) -> dict[str, Any]:
+    """Fetch a credential row's secret values; tolerate a dangling id.
+
+    Runs inside an activity (this module only ever executes in activity context),
+    per contract §7. A missing/unreadable row degrades to {} so the per-key env
+    fallback still applies.
+    """
+    if not cred_id:
+        return {}
+    try:
+        data = await db.fetch_credential_data(cred_id)
+    except Exception as exc:  # noqa: BLE001 — a DB hiccup must not crash the node
+        await db.append_log(
+            run_id, "warn", "system", key,
+            f"Could not resolve credential {cred_id}: {exc} — falling back to env",
+        )
+        return {}
+    if data is None:
+        await db.append_log(
+            run_id, "warn", "system", key,
+            f"Credential {cred_id} not found — falling back to env",
+        )
+        return {}
+    return data
+
+
 # ─────────────────────────── handlers ───────────────────────────
 
 @handles("trigger.manual", "trigger.webhook", "trigger.schedule")
@@ -261,7 +304,8 @@ async def _code(ctx: NodeContext) -> NodeResult:
         )
         return NodeResult(output={"code": source, "executed": False}, summary="Recorded code (sandbox disabled)")
 
-    payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": ctx.node.get("config", {}), **ctx.extra}
+    cfg, _ = split_credential(ctx.node.get("config", {}) or {})
+    payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": cfg, **ctx.extra}
     res = await sandbox.run(language, source, payload)
     if not res.ok:
         await db.append_log(ctx.run_id, "error", "tool", key, f"Code failed: {res.error}", detail=res.stdout or None)
@@ -462,14 +506,24 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     key = ctx.node["key"]
     runtime = spec.get("runtime", "http")
 
-    creds: dict[str, str] = {}
+    # DB-backed credentials (docs/credentials-contract.md §7): the node's
+    # __credentialId (stripped from the template config) resolves to the stored
+    # secret values; each declared key falls back to the process env — today's
+    # behaviour — when the row doesn't provide it.
+    cfg, cred_id = split_credential(ctx.node.get("config", {}) or {})
+    cred_data = await _credential_values(ctx.run_id, key, cred_id)
+
+    creds: dict[str, Any] = {}
     missing: list[str] = []
     for c in spec.get("credentials") or []:
-        val = os.getenv(c.get("key", ""), "")
+        ckey = c.get("key", "")
+        val: Any = cred_data.get(ckey)
+        if val is None or val == "":
+            val = os.getenv(ckey, "")
         if val:
-            creds[c["key"]] = val
+            creds[ckey] = val
         else:
-            missing.append(c.get("key", "?"))
+            missing.append(ckey or "?")
     if missing:
         await db.append_log(
             ctx.run_id, "warn", "system", key,
@@ -480,7 +534,6 @@ async def _integration(ctx: NodeContext) -> NodeResult:
             summary=f"Recorded (needs {', '.join(missing)})",
         )
 
-    cfg = ctx.node.get("config", {}) or {}
     roots = {"config": cfg, "credentials": creds}
 
     if runtime == "browser":

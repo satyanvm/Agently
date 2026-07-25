@@ -152,6 +152,23 @@ type IntegrationRepo interface {
 	DeleteByWorkspaceProvider(workspaceID domain.WorkspaceId, provider string) bool
 }
 
+// CredentialPatch carries the mutable fields of a credential update. Data is the
+// FULL post-merge secret map (the service merges values per-key before calling).
+type CredentialPatch struct {
+	Name      *string
+	Data      *map[string]any
+	UpdatedAt *domain.Timestamp
+}
+
+// CredentialRepo stores DB-backed credentials (docs/credentials-contract.md §5).
+type CredentialRepo interface {
+	ListByWorkspace(workspaceID domain.WorkspaceId) []domain.Credential
+	GetByID(id domain.CredentialId) (domain.Credential, bool)
+	Insert(credential domain.Credential) domain.Credential
+	Update(id domain.CredentialId, patch CredentialPatch) (domain.Credential, error)
+	Delete(id domain.CredentialId) bool
+}
+
 // Repositories is the full set of repositories handed to services.
 type Repositories struct {
 	Workspace     WorkspaceRepo
@@ -168,4 +185,5 @@ type Repositories struct {
 	Notifications NotificationRepo
 	Activity      ActivityRepo
 	Integrations  IntegrationRepo
+	Credentials   CredentialRepo
 }

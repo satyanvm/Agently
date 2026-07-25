@@ -175,6 +175,32 @@ class PreparePieceNodeTest(unittest.TestCase):
         self.assertEqual(prep.result["missingCredentials"], ["AP_SLACK_AUTH"])
         self.assertFalse(prep.result["executed"])
 
+    def test_credential_id_counts_as_present_and_travels(self):
+        """A DB credential selection (config.__credentialId) satisfies the
+        presence gate without the env var; the ID travels in the payload
+        (docs/credentials-contract.md §7), stripped from props."""
+        os.environ.pop("AP_SLACK_AUTH", None)
+        node = {
+            "key": "s", "type": "pieces.slack.send_channel_message",
+            "config": {"channel": "#g", "text": "hi", "__credentialId": "cred_abc123"},
+        }
+        prep = self._prepare(node)
+        self.assertEqual(prep.mode, "execute")
+        self.assertEqual(prep.payload["credentialId"], "cred_abc123")
+        self.assertEqual(prep.payload["authEnvKey"], "AP_SLACK_AUTH")
+        self.assertNotIn("__credentialId", prep.payload["props"])
+
+    def test_no_credential_id_payload_field_is_none(self):
+        os.environ["AP_SLACK_AUTH"] = "xoxb-token"
+        try:
+            node = {"key": "s", "type": "pieces.slack.send_channel_message",
+                    "config": {"channel": "#g", "text": "hi"}}
+            prep = self._prepare(node)
+        finally:
+            os.environ.pop("AP_SLACK_AUTH", None)
+        self.assertEqual(prep.mode, "execute")
+        self.assertIsNone(prep.payload["credentialId"])
+
     def test_unknown_piece_records(self):
         node = {"key": "x", "type": "pieces.ghost.do_thing", "config": {}}
         prep = self._prepare(node)

@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Trash2, X } from "lucide-react";
-import type { Node } from "@xyflow/react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { findNodeSpec, nodeFields, type NodeField } from "./node-catalog";
+import { CREDENTIAL_ID_KEY, findNodeSpec, nodeFields } from "./node-catalog";
+import { CredentialSection } from "./credential-section";
+import { DynamicField } from "./dynamic-field";
+import { DynamicOptionsField } from "./dynamic-options-field";
 import { cn } from "@/lib/utils";
-import type { NodeData, WorkflowNodeType } from "./workflow-builder";
+import type { WorkflowNodeType } from "./workflow-builder";
 
 interface NodeInspectorProps {
   node: WorkflowNodeType | undefined;
@@ -35,13 +36,26 @@ export function NodeInspector({ node, onUpdateConfig, onDelete }: NodeInspectorP
   if (!spec) return null;
 
   const Icon = spec.icon;
-  const fields = nodeFields(node.data.typeId);
+  // The reserved __credentialId key is handled by the credential section only —
+  // never rendered as a normal config field (contract §6).
+  const fields = nodeFields(node.data.typeId).filter((f) => f.key !== CREDENTIAL_ID_KEY);
 
   const updateField = (key: string, value: unknown) => {
     onUpdateConfig(node.id, {
       ...node.data.config,
       [key]: value,
     });
+  };
+
+  const rawCredentialId = node.data.config[CREDENTIAL_ID_KEY];
+  const selectedCredentialId =
+    typeof rawCredentialId === "string" && rawCredentialId !== "" ? rawCredentialId : undefined;
+
+  const selectCredential = (id: string | undefined) => {
+    const next = { ...node.data.config };
+    if (id) next[CREDENTIAL_ID_KEY] = id;
+    else delete next[CREDENTIAL_ID_KEY];
+    onUpdateConfig(node.id, next);
   };
 
   return (
@@ -59,21 +73,43 @@ export function NodeInspector({ node, onUpdateConfig, onDelete }: NodeInspectorP
         </div>
       </div>
 
-      {/* Configuration fields */}
+      {/* Credentials first (n8n-style), then configuration fields */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {spec.credentialType && (
+          <CredentialSection
+            key={`${node.id}:${spec.credentialType}`}
+            credentialType={spec.credentialType}
+            selectedId={selectedCredentialId}
+            onSelect={selectCredential}
+          />
+        )}
         {fields.length === 0 ? (
           <div className="text-[12px] text-faint text-center py-8">
             No configuration needed
           </div>
         ) : (
-          fields.map((field) => (
-            <NodeField
-              key={field.key}
-              field={field}
-              value={node.data.config[field.key]}
-              onChange={(value) => updateField(field.key, value)}
-            />
-          ))
+          fields.map((field) =>
+            // Dynamic pieces props with a credential selected get the live
+            // From-list / By-ID control; everything else the plain renderer.
+            field.dynamic && selectedCredentialId && node.data.typeId.startsWith("pieces.") ? (
+              <DynamicOptionsField
+                key={field.key}
+                field={field}
+                value={node.data.config[field.key]}
+                onChange={(value) => updateField(field.key, value)}
+                nodeTypeId={node.data.typeId}
+                config={node.data.config}
+                credentialId={selectedCredentialId}
+              />
+            ) : (
+              <DynamicField
+                key={field.key}
+                field={field}
+                value={node.data.config[field.key]}
+                onChange={(value) => updateField(field.key, value)}
+              />
+            ),
+          )
         )}
       </div>
 
@@ -89,64 +125,6 @@ export function NodeInspector({ node, onUpdateConfig, onDelete }: NodeInspectorP
           Delete node
         </Button>
       </div>
-    </div>
-  );
-}
-
-function NodeField({
-  field,
-  value,
-  onChange,
-}: {
-  field: NodeField;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  return (
-    <div>
-      <label className="block text-[12px] font-medium text-fg mb-1.5">
-        {field.label}
-      </label>
-      {field.control === "text" && (
-        <Input
-          value={String(value ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder}
-          className="text-[13px]"
-        />
-      )}
-      {field.control === "textarea" && (
-        <textarea
-          value={String(value ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder}
-          rows={4}
-          className={cn(
-            "w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-fg placeholder:text-faint",
-            "transition-colors focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/25",
-            "resize-none font-mono"
-          )}
-        />
-      )}
-      {field.control === "select" && field.options && (
-        <select
-          value={String(value ?? field.options[0])}
-          onChange={(e) => onChange(e.target.value)}
-          className={cn(
-            "w-full h-9 rounded-md border border-border bg-surface px-3 text-[13px] text-fg",
-            "transition-colors focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/25"
-          )}
-        >
-          {field.options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-      )}
-      {field.help && (
-        <p className="mt-1 text-[11px] text-faint">{field.help}</p>
-      )}
     </div>
   );
 }

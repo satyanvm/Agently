@@ -5,7 +5,7 @@
  */
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { jsonSafe, makeExecutePiece, normalizeAuth, withDefaults } from '../execute';
+import { jsonSafe, makeExecutePiece, normalizeAuth, normalizeDbAuth, withDefaults } from '../execute';
 import { LoadedPiece, Registry, resolvePieceExport } from '../pieces';
 import { buildIndex } from '../gen-index';
 
@@ -16,7 +16,9 @@ function fakePiece(overrides: Partial<LoadedPiece> = {}): LoadedPiece {
     version: '1.2.3',
     displayName: 'Fake',
     description: 'A fake piece',
+    categories: [],
     auth: { type: 'SECRET_TEXT', required: true },
+    triggers: {},
     actions: {
       echo: {
         name: 'echo',
@@ -124,6 +126,74 @@ test('missing credential env returns MissingCredential, not throw', async () => 
   if (!res.ok) assert.equal(res.errorType, 'MissingCredential');
 });
 
+test('credentialId resolves via the DB resolver and wins over env', async () => {
+  process.env.AP_FAKE_AUTH = 'env-secret';
+  const exec = makeExecutePiece(
+    registryWith(fakePiece()),
+    async (id: string) => (id === 'cred_1' ? { value: 'db-secret' } : null),
+  );
+  const res = await exec({
+    piece: '@activepieces/piece-fake',
+    action: 'echo',
+    props: { text: 'x' },
+    authEnvKey: 'AP_FAKE_AUTH',
+    credentialId: 'cred_1',
+  });
+  assert.deepEqual(res, { ok: true, output: { echoed: 'x', hadAuth: true } });
+  delete process.env.AP_FAKE_AUTH;
+});
+
+test('dangling credentialId falls back to env; missing both → MissingCredential', async () => {
+  const resolver = async () => null; // row deleted
+  process.env.AP_FAKE_AUTH = 'env-secret';
+  const exec = makeExecutePiece(registryWith(fakePiece()), resolver);
+  const withEnv = await exec({
+    piece: '@activepieces/piece-fake',
+    action: 'echo',
+    props: { text: 'x' },
+    authEnvKey: 'AP_FAKE_AUTH',
+    credentialId: 'cred_gone',
+  });
+  assert.equal(withEnv.ok, true);
+
+  delete process.env.AP_FAKE_AUTH;
+  const withoutEnv = await exec({
+    piece: '@activepieces/piece-fake',
+    action: 'echo',
+    props: { text: 'x' },
+    authEnvKey: 'AP_FAKE_AUTH',
+    credentialId: 'cred_gone',
+  });
+  assert.equal(withoutEnv.ok, false);
+  if (!withoutEnv.ok) assert.equal(withoutEnv.errorType, 'MissingCredential');
+});
+
+test('normalizeDbAuth shapes DB rows per credentials-contract §7', () => {
+  const secret = normalizeDbAuth({ value: 'sk-1' }, fakePiece()) as any;
+  assert.equal(`Bearer ${secret}`, 'Bearer sk-1');
+  assert.equal(secret.secret_text, 'sk-1');
+
+  const basic = normalizeDbAuth(
+    { username: 'me', password: 'pw' },
+    fakePiece({ auth: { type: 'BASIC_AUTH', required: true } }),
+  );
+  assert.deepEqual(basic, { username: 'me', password: 'pw' });
+
+  const custom = normalizeDbAuth(
+    { apiKey: 'k' },
+    fakePiece({ auth: { type: 'CUSTOM_AUTH', required: true } }),
+  ) as any;
+  assert.equal(custom.apiKey, 'k');
+  assert.equal(custom.props.apiKey, 'k');
+
+  const oauth = normalizeDbAuth(
+    { access_token: 'tok', refresh_token: 'ref' },
+    fakePiece({ auth: { type: 'OAUTH2', required: true } }),
+  ) as any;
+  assert.equal(oauth.access_token, 'tok');
+  assert.equal(oauth.refresh_token, 'ref');
+});
+
 test('unsupported platform features surface as ok:false UnsupportedPieceFeature', async () => {
   const exec = makeExecutePiece(registryWith(fakePiece()));
   const res = await exec({
@@ -191,9 +261,16 @@ test('buildIndex emits contract-conformant nodes for installed pieces', () => {
   // Works with zero pieces installed (empty index) — but every node present
   // must satisfy the contract schema.
   for (const n of nodes) {
-    assert.match(n.id, /^pieces\.[a-z0-9-]+\.\S+$/);
+    // Action names are VERBATIM from createAction (contract §1) and a handful
+    // of community pieces use spaces/caps instead of snake_case — ids are
+    // opaque strings everywhere downstream, so only require a non-empty tail.
+    assert.match(n.id, /^pieces\.[a-z0-9-]+\..+$/);
     assert.match(n.piece, /^@activepieces\/piece-/);
-    assert.equal(n.kind, 'action');
+    assert.ok(n.kind === 'action' || n.kind === 'trigger', `unexpected kind ${n.kind} on ${n.id}`);
+    if (n.kind === 'trigger' && n.strategy !== undefined) {
+      assert.ok(['webhook', 'polling', 'app_webhook'].includes(n.strategy),
+        `unexpected strategy ${n.strategy} on ${n.id}`);
+    }
     assert.equal(typeof n.label, 'string');
     assert.ok(Array.isArray(n.search));
     assert.ok(['oauth2', 'secret_text', 'basic_auth', 'custom_auth', 'none'].includes(n.auth.type),

@@ -22,7 +22,7 @@ from typing import Any
 from temporalio import activity
 
 from . import db, engine, obs, pieces
-from .nodes import NodeContext, render_tpl
+from .nodes import NodeContext, render_tpl, split_credential
 
 
 # ─────────────────────────── activity payloads ───────────────────────────
@@ -242,8 +242,35 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
             result={"recorded": True, "executed": False, "reason": "unknown-piece"},
         )
 
+    # Piece TRIGGER nodes: the event was already produced BEFORE this run
+    # existed (webhook ingress / polling tick called the trigger's run() on the
+    # pieces worker — apps/api hooks.go + piecespoller.go) and rides in as
+    # run.input.__trigger_event. The node simply surfaces it as its output so
+    # downstream {{outputs.<key>.…}} templating works; no cross-queue call.
+    if str(spec.get("kind", "action")) == "trigger":
+        event = (inp.run_input or {}).get("__trigger_event")
+        if event is None:
+            result: dict[str, Any] = {"recorded": True, "executed": False, "reason": "no-trigger-event"}
+            await db.append_log(
+                inp.run_id, "info", "agent", key,
+                f"{node_type} recorded — run was not started by its trigger (no event payload)",
+            )
+        else:
+            result = dict(event) if isinstance(event, dict) else {"event": event}
+            result["executed"] = True
+            await db.append_log(inp.run_id, "info", "agent", key, f"{node_type} trigger event received")
+        return PreparePieceResult(mode="record", result=result)
+
+    # The node may name a DB-backed credential via the reserved __credentialId
+    # config key (docs/credentials-contract.md §§6-7). It is stripped from the
+    # config BEFORE prop/template rendering and travels to the Node worker as
+    # `credentialId` — the id only, never the secret values.
+    cfg, cred_id = split_credential(node.get("config", {}) or {})
+
     cred_key = pieces.credential_key_for(spec)
-    if pieces.auth_required(spec) and not os.getenv(cred_key or "", ""):
+    # Presence gate: a selected DB credential counts as present (the Node worker
+    # resolves it by id); otherwise the env var must exist, as before.
+    if pieces.auth_required(spec) and not cred_id and not os.getenv(cred_key or "", ""):
         await db.append_log(
             inp.run_id, "warn", "system", key,
             f"{node_type} recorded — missing credential env var: {cred_key}",
@@ -259,7 +286,6 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
         run_id=inp.run_id, agent_id=inp.agent_id, node=node,
         upstream=inp.upstream, run_input=inp.run_input, extra=inp.extra,
     )
-    cfg = node.get("config", {}) or {}
     roots = {"config": cfg, "credentials": {}}
     known_props = {p.get("key") for p in spec.get("props") or []}
     props: dict[str, Any] = {}
@@ -290,6 +316,9 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
             "action": spec["action"],
             "props": props,
             "authEnvKey": cred_key,
+            # The Node worker resolves this id against Postgres (contract §4);
+            # falls back to process.env[authEnvKey] when null/dangling.
+            "credentialId": cred_id or None,
         },
     )
 
@@ -307,8 +336,12 @@ async def record_piece_result(inp: RecordPieceInput) -> RunNodeResult:
 
     if inp.mode == "record":
         output = dict(res)
-        summary = "Recorded (needs " + ", ".join(res.get("missingCredentials", [])) + ")" \
-            if res.get("missingCredentials") else f"Recorded ({res.get('reason', 'intent')})"
+        if res.get("missingCredentials"):
+            summary = "Recorded (needs " + ", ".join(res.get("missingCredentials", [])) + ")"
+        elif res.get("executed"):
+            summary = "Trigger event received"
+        else:
+            summary = f"Recorded ({res.get('reason', 'intent')})"
     elif res.get("ok"):
         raw = res.get("output")
         output = raw if isinstance(raw, dict) else {"value": raw}

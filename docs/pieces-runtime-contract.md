@@ -43,12 +43,16 @@ only, never in workflow code) by the Python reasoner.
       "id": "pieces.slack.send_channel_message",
       "piece": "@activepieces/piece-slack",
       "pieceVersion": "0.11.4",
+      "pieceDisplayName": "Slack",
+      "categories": ["COMMUNICATION"],
       "action": "send_channel_message",
       "label": "Send message to a channel",
       "description": "…",
       "kind": "action",
       "search": ["slack", "message", "chat"],
-      "auth": { "type": "oauth2", "credentialKey": "AP_SLACK_AUTH", "required": true },
+      "auth": { "type": "oauth2", "credentialKey": "AP_SLACK_AUTH", "required": true,
+                "displayName": "Connection", "description": "…",
+                "props": [ /* custom_auth only: {key, displayName, type, required, description} */ ] },
       "props": [
         { "key": "channel", "label": "Channel", "type": "short_text",
           "required": true, "description": "…" }
@@ -58,13 +62,23 @@ only, never in workflow code) by the Python reasoner.
 }
 ```
 
+- `pieceDisplayName` / `categories` are piece-level metadata for the web-catalog
+  generator (cluster + credential-type labels, docs/credentials-contract.md §§2-3).
+- `auth.displayName` / `auth.description` are present when the piece declares
+  them; `auth.props` is present ONLY for `custom_auth` and carries the §3
+  credential-field derivation inputs.
+
 - `auth.type` ∈ `oauth2 | secret_text | basic_auth | custom_auth | none`
   (the framework's PropertyType, lower-cased).
 - `props[].type` is the framework's property type name lower-cased
   (`short_text`, `long_text`, `number`, `checkbox`, `static_dropdown`, `json`, `array`,
   `object`, `dropdown`, `dynamic`, …). Dynamic/dropdown props are included in the index
   (planner may still set them as plain values) but marked `"dynamic": true`.
-- Only `kind: "action"` nodes for now. Triggers are out of scope for this phase.
+- The index carries BOTH kinds: `kind: "action"` and `kind: "trigger"`. Trigger
+  entries reuse the `action` field for the trigger name and add
+  `"strategy": "webhook" | "polling" | "app_webhook"` (the framework's
+  TriggerStrategy, lower-cased). A name collision between an action and a
+  trigger keeps the action and logs a skip. Execution: §§6a, 7a.
 
 ## 3. Temporal topology
 
@@ -89,20 +103,30 @@ Single JSON argument:
   "pieceVersion": "0.11.4",
   "action": "send_channel_message",
   "props": { "channel": "#general", "text": "hi" },
-  "authEnvKey": "AP_SLACK_AUTH"
+  "authEnvKey": "AP_SLACK_AUTH",
+  "credentialId": "cred_1a2b3c…"
 }
 ```
 
 - `props` arrive **fully rendered** — the Python side resolves all `{{…}}` templates
   against `config`/`input`/`outputs` before scheduling. The Node worker never templates.
-- `authEnvKey` is the credential env var NAME (`null` for auth-less pieces). The
-  secret itself never crosses the Temporal payload boundary (payloads persist in
-  workflow event history). The **Node worker** resolves `process.env[authEnvKey]`
-  and normalizes it to the shape the piece's auth property expects: value parsed as
-  JSON if it parses, else raw string; oauth2 + bare string →
-  `{ access_token: "<string>" }`; basic/custom → object passthrough. A missing env
-  var on the worker → `{ "ok": false, "errorType": "MissingCredential" }` (returned,
-  not thrown), which the reasoner records as intent.
+  The reserved `__credentialId` config key (docs/credentials-contract.md §6) is
+  STRIPPED from config before rendering and travels as `credentialId` instead.
+- `credentialId` is the id of a DB-backed credential row
+  (docs/credentials-contract.md §§5, 7), or `null` when the node has none
+  selected. `authEnvKey` is the credential env var NAME (`null` for auth-less
+  pieces). Secrets never cross the Temporal payload boundary (payloads persist
+  in workflow event history) — only the id and the env var name do. The **Node
+  worker** resolves the credential: by `credentialId` from Postgres when set
+  (same `DATABASE_URL` env the reasoner uses), else `process.env[authEnvKey]`.
+  DB values normalize to the piece's auth shape per credentials-contract §7
+  (`secret_text` → `data.value`; `basic_auth` → `{username, password}`;
+  `custom_auth` → data as-is; `oauth2` → `{ access_token, ...data }`); env
+  values normalize as before: value parsed as JSON if it parses, else raw
+  string; oauth2 + bare string → `{ access_token: "<string>" }`; basic/custom →
+  object passthrough. Missing both sources →
+  `{ "ok": false, "errorType": "MissingCredential" }` (returned, not thrown),
+  which the reasoner records as intent.
 
 Single JSON result — piece-level failures are **returned, not thrown** (so Temporal
 does not retry business errors); only infra failures (piece not installed, worker bug)
@@ -120,7 +144,10 @@ upper-cased with `-` → `_` (e.g. `AP_GOOGLE_SHEETS_AUTH`). Both workers load t
 shared repo-root `.env`. The **Python** side only checks *presence* (inside an
 activity, never in workflow code) so an unconfigured piece degrades to
 record-intent without a cross-queue round-trip; the **Node** side reads the value.
-Missing/empty credential for a piece whose `auth.required` is true → do not
+A node whose config carries `__credentialId` counts as *present* — the Node
+worker resolves the DB credential (docs/credentials-contract.md §7), so the
+Python gate must not also require the env var. No `__credentialId` AND
+missing/empty env credential for a piece whose `auth.required` is true → do not
 schedule `execute_piece`; degrade to the existing record-intent shape:
 
 ```json
@@ -136,3 +163,63 @@ never fail the run.
 - `apps/pieces-worker/**` and `packages/nodes/pieces/**` — Node worker + index (task 1).
 - `apps/reasoner/**` — routing, rendering, credential resolution, persistence (task 2).
 - `apps/api/internal/services/**` — planner/catalog awareness of the index (task 3).
+
+## 6a. Interactive HTTP runtime (options + triggers)
+
+Besides the Temporal queue, the worker serves a small HTTP surface on
+`PIECES_HTTP_PORT` (default **7391**), consumed only by the Go API
+(`PIECES_WORKER_URL`, default `http://localhost:7391`). All responses are
+HTTP 200 with `{ok:…}` business results — never 5xx for expected failures.
+
+- `POST /options` — dynamic-prop options for the builder's "From list"
+  dropdowns: `{piece, actionOrTrigger, propKey, credentialId?, authEnvKey?,
+  props}` → `{ok:true, options:[{label,value}]}` | `{ok:false, error,
+  errorType}`. Auth resolves exactly like `execute_piece` (§4). Proxied to the
+  UI at `POST /api/pieces/options` (worker down → `errorType:
+  "OptionsUnavailable"`).
+- `POST /run-trigger` — run a piece trigger's real `run(context)`:
+  `{piece, trigger, props, credentialId?, authEnvKey?, workflowId, nodeKey,
+  webhookUrl?, payload?}` → `{ok:true, events:[…]}` | `{ok:false, …}`.
+  `payload` (`{body, headers, queryParams}`) is a raw webhook delivery;
+  null/absent = a polling tick. Polling dedupe state lives in the store below.
+- `POST /trigger-lifecycle` — `{op:"enable"|"disable", …same fields}` calls
+  the trigger's `onEnable`/`onDisable` (webhook registration with the
+  provider; `webhookUrl` is the public ingress URL).
+
+## 7a. Triggers — how events become runs
+
+Events are produced **before a run exists**; workflow code never transforms
+payloads, so Temporal determinism is untouched.
+
+```
+provider webhook ─► POST /api/hooks/{slug}/{nodeKey}      (Go, handler/hooks.go)
+                     └► worker /run-trigger (payload) ─► events
+polling ─► PiecesPoller tick (Go, services/piecespoller.go,
+           every PIECES_POLL_INTERVAL, default 5m; PIECES_POLLER=0 disables)
+                     └► worker /run-trigger (payload:null) ─► events
+                                          │
+        each event ─► RunService.Launch(engine=temporal,
+                        input={"__trigger_event": <event>})
+                                          │
+        reasoner prepare_piece_node: spec.kind=="trigger" →
+        node output = input.__trigger_event  (mode=record passthrough)
+```
+
+- Ingress URL: `WEBHOOK_PUBLIC_BASE` (default `http://localhost:8090`) +
+  `/api/hooks/<slug>/<nodeKey>`. Lifecycle endpoints:
+  `POST /api/workflows/{slug}/triggers/{nodeKey}/enable|disable|poll`
+  (`poll` = one manual polling tick).
+- Trigger state (polling cursors, webhook registration ids) lives in
+  `piece_trigger_state` (migration 0012), keyed `(workflow_id, node_key, key)`
+  — the worker's implementation of the framework `Store`
+  (`src/trigger-store.ts`). No `DATABASE_URL` → in-memory store (polling
+  dedupe resets on worker restart).
+- Credentials resolve identically to §§4-5 (`credentialId` → Postgres, else
+  `authEnvKey` env; missing → `{ok:false, errorType:"MissingCredential"}`).
+- v1 limitations (recorded, not hidden): a webhook delivery launches at most
+  ONE run (`events[0]`); a polling tick launches at most 3 runs;
+  `app_webhook` strategies are indexed but not routed; enable/disable is
+  API-only (no UI toggle yet); the poller assumes a single API instance
+  (same caveat as the scheduler); a worker-down webhook delivery degrades to
+  launching the run with the RAW payload flagged
+  `{"raw": true, "reason": "pieces-worker-unavailable"}`.

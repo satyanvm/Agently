@@ -30,6 +30,7 @@ type (
 	ActivityId        string
 	EventId           string
 	IntegrationId     string
+	CredentialId      string
 )
 
 // EntityKind keys the IDPrefix map. The single place prefixes are declared.
@@ -54,6 +55,7 @@ const (
 	KindActivity        EntityKind = "activity"
 	KindEvent           EntityKind = "event"
 	KindIntegration     EntityKind = "integration"
+	KindCredential      EntityKind = "credential"
 )
 
 // IDPrefix maps each entity kind to its id prefix.
@@ -76,6 +78,7 @@ var IDPrefix = map[EntityKind]string{
 	KindActivity:        "act",
 	KindEvent:           "evt",
 	KindIntegration:     "int",
+	KindCredential:      "cred",
 }
 
 const base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -119,3 +122,4 @@ func NewNotificationId() NotificationId       { return NotificationId(NewID(Kind
 func NewActivityId() ActivityId               { return ActivityId(NewID(KindActivity)) }
 func NewEventId() EventId                     { return EventId(NewID(KindEvent)) }
 func NewIntegrationId() IntegrationId         { return IntegrationId(NewID(KindIntegration)) }
+func NewCredentialId() CredentialId           { return CredentialId(NewID(KindCredential)) }
