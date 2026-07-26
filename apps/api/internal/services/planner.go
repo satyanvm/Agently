@@ -8,9 +8,15 @@ package services
 // The compiler is MAP-REDUCE over the catalog, because the node universe is far too
 // large to hand a model whole:
 //
-//   MAP    — for every catalog cluster in parallel, a small fast model reads that
-//            cluster's compact index ("id — label — description") plus the user's
-//            request and returns the node ids that could plausibly serve it.
+//   ROUTE  — pieces.<slug> clusters (~700, one per Activepieces piece) are first
+//            narrowed to a handful by ONE small-model call over the full piece
+//            directory (piecesrouter.go), optionally prefiltered by the offline
+//            embedding index (piecesembed.go). The old lexical term-overlap
+//            prescreen survives only as the fallback when the router fails.
+//   MAP    — for every hand-written cluster and every routed piece cluster in
+//            parallel, a small fast model reads that cluster's compact index
+//            ("id — label — description") plus the user's request and returns
+//            the node ids that could plausibly serve it.
 //   REDUCE — the big model receives ONLY the selected nodes' full schemas (config
 //            keys, output fields, credential slots) plus the built-in core, and
 //            authors the complete graph: keys, types, dependsOn, per-node config
@@ -140,17 +146,21 @@ func basePlan(prompt, email string) Plan {
 /* --------------------------------- map phase --------------------------------- */
 
 // Pieces clusters (one per Activepieces piece, ~700 of them) would explode the
-// map fan-out if each got its own LLM call. They are prescreened LEXICALLY: a
-// cheap term-overlap score against the prompt keeps only the most plausible
-// few, so the map phase stays ~a dozen-and-a-half calls no matter how large
-// the installed piece surface grows. Hand-written clusters (a dozen) always go
-// to the model, exactly as before.
+// map fan-out if each got its own LLM call. They are narrowed by the semantic
+// ROUTER (piecesrouter.go) — with the lexical term-overlap prescreen below as
+// its fallback — so the map phase stays ~a dozen-and-a-half calls no matter how
+// large the installed piece surface grows. Hand-written clusters (a dozen)
+// always go to the model, exactly as before.
 const maxPieceClusterCalls = 12
+
+// totalCap bounds how many selected node schemas reach the reduce prompt.
+const totalCap = 32
 
 // mapConcurrency bounds parallel map-phase LLM calls (rate-limit hygiene).
 const mapConcurrency = 8
 
-// promptTokens lowercases and tokenizes the user's request for the prescreen.
+// promptTokens lowercases and tokenizes the user's request for the FALLBACK
+// prescreen (topPieceClusters).
 func promptTokens(prompt string) map[string]bool {
 	toks := map[string]bool{}
 	for _, w := range strings.FieldsFunc(strings.ToLower(prompt), func(r rune) bool {
@@ -163,9 +173,13 @@ func promptTokens(prompt string) map[string]bool {
 	return toks
 }
 
-// topPieceClusters scores each pieces.<slug> cluster by term overlap with the
-// prompt (slug words weigh extra) and returns the best few, alphabetical among
-// ties so the selection — and therefore the compiled prompt — is reproducible.
+// topPieceClusters is the FALLBACK piece prescreen, used only when the router
+// (routePieceClusters) fails — no LLM key, timeout, junk output. It scores each
+// pieces.<slug> cluster by term overlap with the prompt (slug words weigh
+// extra) and returns the best few, alphabetical among ties so the selection —
+// and therefore the compiled prompt — is reproducible. Purely lexical: it
+// cannot see synonyms ("spreadsheet" never finds google-sheets), which is why
+// it is no longer the primary path.
 func topPieceClusters(cat *Catalog, prompt string, keys []string, max int) []string {
 	toks := promptTokens(prompt)
 	if len(toks) == 0 {
@@ -213,46 +227,65 @@ func topPieceClusters(cat *Catalog, prompt string, keys []string, max int) []str
 	return out
 }
 
-// mapPhase fans one small-model call out per integration cluster (builtin is
-// always in the reduce context and never routed). Each call sees only that
-// cluster's compact index. Failures and junk are dropped silently — a missed
-// cluster costs recall, never correctness. Returns selected ids, capped and
-// stable-sorted so the reduce prompt is reproducible.
+// mapPhase selects candidate node ids for the reduce prompt (builtin is always
+// in the reduce context and never routed). Hand-written clusters each get one
+// small-model call immediately; piece clusters wait on the router — whose
+// latency overlaps those calls — then get the same per-cluster treatment. Each
+// call sees only that cluster's compact index. Failures and junk are dropped
+// silently — a missed cluster costs recall, never correctness. The union is
+// capped fairly across clusters and stable-sorted so the reduce prompt is
+// reproducible.
 func mapPhase(ctx context.Context, cat *Catalog, prompt string) []string {
-
-	// Constant system prompt given to the LLM.
-	// This tells the model exactly what output format is expected.
 	const system = `You route a user's automation request to integration nodes.
 Given the request and a catalog cluster index (one node per line: "id — label — description"),
 return JSON: {"nodes": ["id", ...]} listing ONLY ids from this index that could plausibly be
 used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if none apply.`
+	const perCluster = 8
 
-	// Maximum number of nodes we want to accept from a single cluster.
-	perCluster := 8
-
-	// Declare multiple variables together.
 	var (
-
-		// Mutex protects shared data from being modified by
-		// multiple goroutines at the same time.
-		mu sync.Mutex
-
-		// Stores all selected node IDs from every cluster.
-		selected []string
-
-		// WaitGroup waits until every goroutine has finished.
-		wg sync.WaitGroup
-
-		// Semaphore bounding parallel LLM calls.
-		sem = make(chan struct{}, mapConcurrency)
+		mu        sync.Mutex
+		byCluster = map[string][]string{} // cluster → ids in the model's own order (its ranking)
+		wg        sync.WaitGroup
+		sem       = make(chan struct{}, mapConcurrency)
 	)
 
-	// Partition clusters: hand-written ones ALL go to the model (as before);
-	// pieces.<slug> clusters go through the lexical prescreen first.
-	var work, pieceKeys []string
-	for _, key := range cat.sortedClusters() {
+	runCluster := func(f catalogFile) {
+		defer wg.Done()
+		sem <- struct{}{}
+		defer func() { <-sem }()
 
-		// Ignore the builtin cluster.
+		user := "Request: " + prompt + "\n\nCluster \"" + f.Label + "\":\n" + clusterIndex(f)
+		raw, err := planLLMWith(ctx, mapModel(), 512, 12*time.Second, system, []llmMsg{{Role: "user", Content: user}})
+		if err != nil {
+			return
+		}
+		var out struct {
+			Nodes []string `json:"nodes"`
+		}
+		if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
+			return
+		}
+		valid := make([]string, 0, len(out.Nodes))
+		for _, id := range out.Nodes {
+			if n, ok := cat.ByID[id]; ok && n.Cluster == f.Cluster {
+				valid = append(valid, id)
+			}
+			if len(valid) == perCluster {
+				break
+			}
+		}
+		if len(valid) == 0 {
+			return
+		}
+		mu.Lock()
+		byCluster[f.Cluster] = valid
+		mu.Unlock()
+	}
+
+	// Partition clusters: hand-written ones ALL go to the model, right now;
+	// pieces.<slug> clusters go through the router first.
+	var handWritten, pieceKeys []string
+	for _, key := range cat.sortedClusters() {
 		if key == "builtin" {
 			continue
 		}
@@ -260,125 +293,58 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 			pieceKeys = append(pieceKeys, key)
 			continue
 		}
-		work = append(work, key)
+		handWritten = append(handWritten, key)
 	}
-	work = append(work, topPieceClusters(cat, prompt, pieceKeys, maxPieceClusterCalls)...)
-
-	// Iterate through the clusters that made the cut.
-	for _, key := range work {
-
-		// Get the catalog information for this cluster.
-		f := cat.Clusters[key]
-
-		// Tell the WaitGroup that one more goroutine is about to start.
+	for _, key := range handWritten {
 		wg.Add(1)
+		go runCluster(cat.Clusters[key])
+	}
 
-		// Start a new goroutine.
-		// Every cluster runs independently, bounded by the semaphore.
-		go func(f catalogFile) {
+	// Semantic router over the piece directory, running while the hand-written
+	// calls are in flight; the lexical prescreen only on router failure.
+	pieceClusters, ok := routePieceClusters(ctx, cat, prompt, pieceKeys, maxPieceClusterCalls)
+	if !ok {
+		pieceClusters = topPieceClusters(cat, prompt, pieceKeys, maxPieceClusterCalls)
+	}
+	for _, key := range pieceClusters {
+		wg.Add(1)
+		go runCluster(cat.Clusters[key])
+	}
+	wg.Wait()
 
-			// This will automatically execute when the goroutine exits,
-			// even if we return early because of an error.
-			defer wg.Done()
+	return capFairly(byCluster, totalCap)
+}
 
-			// Respect the concurrency bound.
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Build the user prompt that will be sent to the LLM.
-			user := "Request: " + prompt +
-				"\n\nCluster \"" + f.Label + "\":\n" +
-				clusterIndex(f) // is this sending the cluster? Because we do need send the whole cluster(with  id + label + description to the LLM)
-
-			// Ask the LLM to choose relevant node IDs.
-			raw, err := planLLMWith(
-				ctx,
-				mapModel(),
-				512,
-				12*time.Second,
-				system,
-				[]llmMsg{
-					{
-						Role:    "user",
-						Content: user,
-					},
-				},
-			)
-
-			// If the LLM call failed, stop this goroutine.
-			if err != nil {
-				return
-			}
-
-			// Anonymous struct used only for decoding JSON.
-			// Expected JSON:
-			//
-			// {
-			//     "nodes": ["id1", "id2"]
-			// }
-			var out struct {
-				Nodes []string `json:"nodes"`
-			}
-
-			// Convert the JSON string into the Go struct.
-			if err := json.Unmarshal(
-				[]byte(extractJSON(raw)),
-				&out,
-			); err != nil {
-				return
-			}
-
-			// Create a slice to hold only valid node IDs.
-			valid := make([]string, 0, len(out.Nodes))
-
-			// Check every node returned by the LLM.
-			for _, id := range out.Nodes {
-
-				// Look up the node in the catalog.
-				n, ok := cat.ByID[id]
-
-				// Accept the node only if:
-				// 1. It actually exists.
-				// 2. It belongs to the current cluster.
-				if ok && n.Cluster == f.Cluster {
-					valid = append(valid, id)
-				}
-
-				// Stop after collecting enough nodes.
-				if len(valid) == perCluster {
+// capFairly trims the union of per-cluster selections to max. Its predecessor
+// sorted ALL ids alphabetically and truncated — silently dropping every node
+// late in the alphabet regardless of what the map models judged. Instead,
+// clusters take turns contributing their next-best id (each map call's output
+// order is its ranking) until the cap; the survivors are then sorted so the
+// reduce prompt stays reproducible. The ORDER is cosmetic — the CUT is what
+// must be fair.
+func capFairly(byCluster map[string][]string, max int) []string {
+	clusters := make([]string, 0, len(byCluster))
+	total := 0
+	for k, ids := range byCluster {
+		clusters = append(clusters, k)
+		total += len(ids)
+	}
+	sort.Strings(clusters)
+	if total > max {
+		total = max
+	}
+	selected := make([]string, 0, total)
+	for round := 0; len(selected) < total; round++ {
+		for _, k := range clusters {
+			if ids := byCluster[k]; round < len(ids) {
+				selected = append(selected, ids[round])
+				if len(selected) == total {
 					break
 				}
 			}
-
-			// Lock before modifying shared data.
-			mu.Lock()
-
-			// Append every valid node into the global result slice.
-			// The ... expands the slice so every element is appended.
-			selected = append(selected, valid...)
-
-			// Unlock so other goroutines can access selected.
-			mu.Unlock()
-
-		}(f) // Immediately call the anonymous function with f.
-
+		}
 	}
-
-	// Wait until every goroutine has called wg.Done().
-	wg.Wait()
-
-	// Sort the final list alphabetically.
 	sort.Strings(selected)
-
-	// Maximum total number of selected nodes.
-	const totalCap = 32
-
-	// Trim the slice if it is too large.
-	if len(selected) > totalCap {
-		selected = selected[:totalCap]
-	}
-
-	// Return the final list of node IDs.
 	return selected
 }
 
