@@ -15,9 +15,10 @@ const EXAMPLE =
 
 /**
  * The "prompt → workflow" composer. You describe what you want in plain English; we
- * compile it (server-side, /api/workflows/plan) into an agent graph and show a live
- * preview of the agents BEFORE you create. On create, we redirect to the new
- * workflow so you can run it immediately.
+ * compile it (server-side, /api/workflows/plan) into an agent graph. Preview is
+ * on demand — compilation runs a full LLM map-reduce, so it must never fire while
+ * the user is still typing. On create, we redirect to the new workflow so you can
+ * run it immediately.
  */
 export function CreateWorkflowDialog({
   open,
@@ -33,28 +34,26 @@ export function CreateWorkflowDialog({
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Debounced live preview: re-plan ~600ms after the user stops typing.
-  React.useEffect(() => {
-    if (!open) return;
+  const onPreview = async () => {
     const text = prompt.trim();
-    if (text.length < 12) {
-      setPlan(null);
-      return;
-    }
+    if (!text || planning) return;
     setPlanning(true);
-    const t = setTimeout(async () => {
-      try {
-        const p = await planWorkflow({ prompt: text });
-        setPlan(p);
-        setError(null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to plan");
-      } finally {
-        setPlanning(false);
-      }
-    }, 600);
-    return () => clearTimeout(t);
-  }, [prompt, open]);
+    try {
+      const p = await planWorkflow({ prompt: text });
+      setPlan(p);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to plan");
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  // A preview describes the prompt it was compiled from; editing the prompt
+  // invalidates it (no recompile until the user asks again).
+  React.useEffect(() => {
+    setPlan(null);
+  }, [prompt]);
 
   // Reset on close.
   React.useEffect(() => {
@@ -106,18 +105,28 @@ export function CreateWorkflowDialog({
           </button>
         </div>
 
-        {/* Live preview of the compiled graph */}
+        {/* On-demand preview of the compiled graph */}
         <div className="rounded-lg border border-border bg-surface-2/40 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-ghost">
               Preview
             </span>
-            {planning && <Loader2 className="size-3.5 animate-spin text-faint" />}
+            {planning ? (
+              <Loader2 className="size-3.5 animate-spin text-faint" />
+            ) : (
+              <button
+                onClick={onPreview}
+                disabled={!prompt.trim()}
+                className="inline-flex items-center gap-1.5 text-[11px] text-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Sparkles className="size-3" /> Preview
+              </button>
+            )}
           </div>
 
           {!plan && !planning && (
             <p className="py-3 text-center text-[12px] text-faint">
-              Start typing — the agents you’ll get appear here.
+              Describe your workflow, then hit Preview to see the agents you’ll get.
             </p>
           )}
 
