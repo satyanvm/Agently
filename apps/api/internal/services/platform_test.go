@@ -32,15 +32,16 @@ func TestLaunchThenCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	// Launch enqueues; a worker claims it later.
+	// Launch enqueues; the Temporal reasoner claims it later.
 	if detail.Status != domain.RunQueued {
 		t.Fatalf("expected queued, got %s", detail.Status)
 	}
 	if detail.Number != 1 {
 		t.Fatalf("expected first run number 1, got %d", detail.Number)
 	}
-	if len(detail.Agents) != 5 {
-		t.Fatalf("expected 5 materialized agents, got %d", len(detail.Agents))
+	// The reasoner materializes run agents as it executes — Launch must not.
+	if len(detail.Agents) != 0 {
+		t.Fatalf("expected no pre-materialized agents, got %d", len(detail.Agents))
 	}
 	canceled, err := p.Runs.Cancel(detail.ID)
 	if err != nil {
@@ -77,7 +78,8 @@ func TestEmittedEventsBuffered(t *testing.T) {
 			logged++
 		}
 	}
-	if queued < 1 || started < 1 || logged < 2 {
+	// Launch only enqueues: run.started is the reasoner's to emit via Start.
+	if queued < 1 || started != 0 || logged < 2 {
 		t.Fatalf("expected launch events buffered: queued=%d started=%d logged=%d", queued, started, logged)
 	}
 }
