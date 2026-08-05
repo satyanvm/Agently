@@ -103,10 +103,12 @@ func loadPieceEmbeddingsFrom(manifestPath string) *pieceEmbeddings {
 	return &pieceEmbeddings{Model: m.Model, Dims: m.Dims, IDs: m.IDs, Vecs: vecs}
 }
 
-// prefilterPieceClusters returns up to topN piece cluster keys ranked by their
-// best action's similarity to the prompt, best first. ok=false means the
-// prefilter is unavailable (no sidecar, no key, embed failure) and the caller
-// should proceed with the full set.
+// prefilterPieceClusters returns cluster keys ranked by their best action's
+// similarity to the prompt, best first — roughly topN of them (score ties at
+// the boundary are all kept, and clusters absent from the sidecar are appended
+// unranked; see rankPieceClusters). ok=false means the prefilter is
+// unavailable (no sidecar, no key, embed failure) and the caller should
+// proceed with the full set.
 func prefilterPieceClusters(ctx context.Context, cat *Catalog, prompt string, pieceKeys []string, topN int) ([]string, bool) {
 	emb := loadPieceEmbeddings()
 	if emb == nil {
@@ -124,8 +126,13 @@ func prefilterPieceClusters(ctx context.Context, cat *Catalog, prompt string, pi
 }
 
 // rankPieceClusters is the pure scoring core (separated for tests): dot every
-// node vector against the query, roll up to clusters by max, rank descending
-// with alphabetical tie-break for reproducible prompts.
+// node vector against the query, roll up to clusters by max, rank descending.
+// Alphabetical order among equal scores keeps the ORDER deterministic but may
+// never decide SURVIVAL: the topN cut extends to include every cluster tied
+// with the score at the boundary (asked for 100, ranks 99–102 tied → all 102).
+// Clusters with no vector in the sidecar can't be judged at all, so they are
+// appended after the ranked ones instead of silently vanishing — the prefilter
+// is a recall layer; precision is the router's job.
 func rankPieceClusters(cat *Catalog, emb *pieceEmbeddings, query []float32, pieceKeys []string, topN int) []string {
 	allowed := make(map[string]bool, len(pieceKeys))
 	for _, k := range pieceKeys {
@@ -157,9 +164,20 @@ func rankPieceClusters(cat *Catalog, emb *pieceEmbeddings, query []float32, piec
 		return ranked[i] < ranked[j]
 	})
 	if len(ranked) > topN {
-		ranked = ranked[:topN]
+		cut := topN
+		for cut < len(ranked) && best[ranked[cut]] == best[ranked[topN-1]] {
+			cut++
+		}
+		ranked = ranked[:cut]
 	}
-	return ranked
+	var unscored []string
+	for _, k := range pieceKeys {
+		if _, ok := best[k]; !ok {
+			unscored = append(unscored, k)
+		}
+	}
+	sort.Strings(unscored)
+	return append(ranked, unscored...)
 }
 
 // embedQueryGemini embeds one query text (taskType RETRIEVAL_QUERY, matching

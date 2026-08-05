@@ -8,15 +8,16 @@ package services
 // The compiler is MAP-REDUCE over the catalog, because the node universe is far too
 // large to hand a model whole:
 //
-//   ROUTE  — pieces.<slug> clusters (~700, one per Activepieces piece) are first
-//            narrowed to a handful by ONE small-model call over the full piece
-//            directory (piecesrouter.go), optionally prefiltered by the offline
-//            embedding index (piecesembed.go). The old lexical term-overlap
-//            prescreen survives only as the fallback when the router fails.
-//   MAP    — for every hand-written cluster and every routed piece cluster in
-//            parallel, a small fast model reads that cluster's compact index
-//            ("id — label — description") plus the user's request and returns
-//            the node ids that could plausibly serve it.
+//   ROUTE  — ALL clusters (~700 pieces.<slug> plus the hand-written dozen) are
+//            first narrowed to a handful by ONE small-model call over the full
+//            cluster directory (piecesrouter.go), optionally prefiltered by the
+//            offline embedding index (piecesembed.go). On router failure we
+//            fall back to mapping every hand-written cluster plus the old
+//            lexical term-overlap piece prescreen.
+//   MAP    — for every routed cluster in parallel, a small fast model reads
+//            that cluster's compact index ("id — label — description") plus the
+//            user's request and returns the node ids that could plausibly
+//            serve it.
 //   REDUCE — the big model receives ONLY the selected nodes' full schemas (config
 //            keys, output fields, credential slots) plus the built-in core, and
 //            authors the complete graph: keys, types, dependsOn, per-node config
@@ -145,13 +146,14 @@ func basePlan(prompt, email string) Plan {
 
 /* --------------------------------- map phase --------------------------------- */
 
-// Pieces clusters (one per Activepieces piece, ~700 of them) would explode the
-// map fan-out if each got its own LLM call. They are narrowed by the semantic
-// ROUTER (piecesrouter.go) — with the lexical term-overlap prescreen below as
-// its fallback — so the map phase stays ~a dozen-and-a-half calls no matter how
-// large the installed piece surface grows. Hand-written clusters (a dozen)
-// always go to the model, exactly as before.
-const maxPieceClusterCalls = 12
+// The cluster universe (~700 pieces + a dozen hand-written) would explode the
+// map fan-out if each cluster got its own LLM call. ALL of them are narrowed
+// by the semantic ROUTER (piecesrouter.go) — hand-written clusters compete on
+// relevance like everything else — so the map phase stays a handful of calls
+// no matter how large the installed surface grows. Only on router failure do
+// we fall back to mapping every hand-written cluster plus the lexical
+// term-overlap piece prescreen below.
+const maxClusterCalls = 12
 
 // totalCap bounds how many selected node schemas reach the reduce prompt.
 const totalCap = 32
@@ -174,7 +176,7 @@ func promptTokens(prompt string) map[string]bool {
 }
 
 // topPieceClusters is the FALLBACK piece prescreen, used only when the router
-// (routePieceClusters) fails — no LLM key, timeout, junk output. It scores each
+// (routeClusters) fails — no LLM key, timeout, junk output. It scores each
 // pieces.<slug> cluster by term overlap with the prompt (slug words weigh
 // extra) and returns the best few, alphabetical among ties so the selection —
 // and therefore the compiled prompt — is reproducible. Purely lexical: it
@@ -228,12 +230,12 @@ func topPieceClusters(cat *Catalog, prompt string, keys []string, max int) []str
 }
 
 // mapPhase selects candidate node ids for the reduce prompt (builtin is always
-// in the reduce context and never routed). Hand-written clusters each get one
-// small-model call immediately; piece clusters wait on the router — whose
-// latency overlaps those calls — then get the same per-cluster treatment. Each
-// call sees only that cluster's compact index. Failures and junk are dropped
-// silently — a missed cluster costs recall, never correctness. The union is
-// capped fairly across clusters and stable-sorted so the reduce prompt is
+// in the reduce context and never routed). The router picks the relevant
+// clusters — hand-written and pieces alike, most relevant first — and each
+// routed cluster then gets one small-model call over its compact index.
+// Failures and junk are dropped silently — a missed cluster costs recall,
+// never correctness. The union is capped fairly across clusters in the
+// router's relevance order, then stable-sorted so the reduce prompt is
 // reproducible.
 func mapPhase(ctx context.Context, cat *Catalog, prompt string) []string {
 	const system = `You route a user's automation request to integration nodes.
@@ -282,8 +284,9 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 		mu.Unlock()
 	}
 
-	// Partition clusters: hand-written ones ALL go to the model, right now;
-	// pieces.<slug> clusters go through the router first.
+	// Every non-builtin cluster — hand-written and pieces alike — competes in
+	// the router on relevance. Only when the router fails do we revert to the
+	// old shape: map every hand-written cluster, lexical-prescreen the pieces.
 	var handWritten, pieceKeys []string
 	for _, key := range cat.sortedClusters() {
 		if key == "builtin" {
@@ -295,41 +298,53 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 		}
 		handWritten = append(handWritten, key)
 	}
-	for _, key := range handWritten {
-		wg.Add(1)
-		go runCluster(cat.Clusters[key])
-	}
-
-	// Semantic router over the piece directory, running while the hand-written
-	// calls are in flight; the lexical prescreen only on router failure.
-	pieceClusters, ok := routePieceClusters(ctx, cat, prompt, pieceKeys, maxPieceClusterCalls)
+	routed, ok := routeClusters(ctx, cat, prompt, append(append([]string{}, handWritten...), pieceKeys...), maxClusterCalls)
 	if !ok {
-		pieceClusters = topPieceClusters(cat, prompt, pieceKeys, maxPieceClusterCalls)
+		routed = append(append([]string{}, handWritten...), topPieceClusters(cat, prompt, pieceKeys, maxClusterCalls)...)
 	}
-	for _, key := range pieceClusters {
+	for _, key := range routed {
 		wg.Add(1)
 		go runCluster(cat.Clusters[key])
 	}
 	wg.Wait()
 
-	return capFairly(byCluster, totalCap)
+	// routed doubles as the relevance order for the cap: most relevant cluster
+	// first (router ranking; fallback: hand-written, then prescreen score).
+	return capFairly(byCluster, routed, totalCap)
 }
 
 // capFairly trims the union of per-cluster selections to max. Its predecessor
 // sorted ALL ids alphabetically and truncated — silently dropping every node
 // late in the alphabet regardless of what the map models judged. Instead,
 // clusters take turns contributing their next-best id (each map call's output
-// order is its ranking) until the cap; the survivors are then sorted so the
-// reduce prompt stays reproducible. The ORDER is cosmetic — the CUT is what
-// must be fair.
-func capFairly(byCluster map[string][]string, max int) []string {
+// order is its ranking) until the cap. Turn order is the given relevance
+// order (the router's ranking), so when the cap lands mid-round the extra
+// node goes to the MOST RELEVANT cluster — never to whoever sorts first
+// alphabetically. The final sort is cosmetic: it fixes the reduce-prompt
+// ordering for reproducibility and costs nanoseconds; it never changes WHICH
+// ids survive.
+func capFairly(byCluster map[string][]string, order []string, max int) []string {
 	clusters := make([]string, 0, len(byCluster))
+	seen := make(map[string]bool, len(byCluster))
 	total := 0
-	for k, ids := range byCluster {
-		clusters = append(clusters, k)
-		total += len(ids)
+	for _, k := range order {
+		if ids, ok := byCluster[k]; ok && !seen[k] {
+			seen[k] = true
+			clusters = append(clusters, k)
+			total += len(ids)
+		}
 	}
-	sort.Strings(clusters)
+	// Defensive: clusters that produced ids but are missing from order still
+	// contribute, after the ranked ones.
+	var rest []string
+	for k, ids := range byCluster {
+		if !seen[k] {
+			rest = append(rest, k)
+			total += len(ids)
+		}
+	}
+	sort.Strings(rest)
+	clusters = append(clusters, rest...)
 	if total > max {
 		total = max
 	}

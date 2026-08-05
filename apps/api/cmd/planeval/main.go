@@ -84,7 +84,7 @@ var goldens = []golden{
 }
 
 func main() {
-	max := flag.Int("max", 12, "selection budget (mirrors maxPieceClusterCalls)")
+	max := flag.Int("max", 12, "selection budget (mirrors maxClusterCalls)")
 	verbose := flag.Bool("v", false, "print every missed group")
 	pause := flag.Duration("pause", 0, "wait between prompts (rate-limit hygiene, e.g. -pause 10s)")
 	retries := flag.Int("retries", 0, "re-attempt a prompt when the router got rate-limited (waits -pause between tries)")

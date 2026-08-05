@@ -34,6 +34,7 @@ product.md
 plan_for_prompt_to_workflow.md
 practice.go
 understand.md
+v1-13.md
 # embedding generator staging (resumable partial runs — never load-bearing)
 packages/nodes/pieces/embeddings.partial.json
 packages/nodes/pieces/embeddings.partial.bin

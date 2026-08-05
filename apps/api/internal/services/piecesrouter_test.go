@@ -97,9 +97,9 @@ func TestMergePiecesIndex_DisplayNameAndCategories(t *testing.T) {
 	}
 }
 
-func TestPieceDirectory_ListsEverythingUntruncated(t *testing.T) {
+func TestClusterDirectory_ListsEverythingUntruncated(t *testing.T) {
 	cat := routerCatalog(t)
-	dir := pieceDirectory(cat, []string{"pieces.google-sheets", "pieces.twilio"})
+	dir := clusterDirectory(cat, []string{"pieces.google-sheets", "pieces.twilio"})
 
 	for _, want := range []string{
 		"google-sheets — Google Sheets [PRODUCTIVITY]:",
@@ -117,17 +117,28 @@ func TestPieceDirectory_ListsEverythingUntruncated(t *testing.T) {
 	}
 }
 
-func TestRoutePieceClusters_NoKeyFallsBack(t *testing.T) {
+func TestClusterDirectory_RendersHandWrittenClusters(t *testing.T) {
+	cat := routerCatalog(t)
+	if _, ok := cat.Clusters["communication"]; !ok {
+		t.Skip("hand-written catalog not on disk in this environment")
+	}
+	dir := clusterDirectory(cat, []string{"communication"})
+	if !strings.Contains(dir, "communication — ") {
+		t.Fatalf("hand-written cluster missing from directory:\n%s", dir)
+	}
+}
+
+func TestRouteClusters_NoKeyFallsBack(t *testing.T) {
 	for _, k := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	cat := routerCatalog(t)
-	if _, ok := routePieceClusters(context.Background(), cat, "text me", []string{"pieces.twilio"}, 12); ok {
+	if _, ok := routeClusters(context.Background(), cat, "text me", []string{"pieces.twilio"}, 12); ok {
 		t.Fatal("router must report failure with no LLM key so the lexical fallback runs")
 	}
-	// No piece clusters at all is a valid empty answer, not a failure.
-	if sel, ok := routePieceClusters(context.Background(), cat, "text me", nil, 12); !ok || len(sel) != 0 {
-		t.Fatalf("empty pieceKeys: sel=%v ok=%v, want empty+true", sel, ok)
+	// No clusters at all is a valid empty answer, not a failure.
+	if sel, ok := routeClusters(context.Background(), cat, "text me", nil, 12); !ok || len(sel) != 0 {
+		t.Fatalf("empty clusterKeys: sel=%v ok=%v, want empty+true", sel, ok)
 	}
 }
 
@@ -137,7 +148,7 @@ func TestCapFairly_NoAlphabeticalBias(t *testing.T) {
 		"pieces.aardvark": {"pieces.aardvark.a1", "pieces.aardvark.a2", "pieces.aardvark.a3", "pieces.aardvark.a4", "pieces.aardvark.a5", "pieces.aardvark.a6", "pieces.aardvark.a7", "pieces.aardvark.a8"},
 		"pieces.zebra":    {"pieces.zebra.z1", "pieces.zebra.z2", "pieces.zebra.z3", "pieces.zebra.z4", "pieces.zebra.z5", "pieces.zebra.z6", "pieces.zebra.z7", "pieces.zebra.z8"},
 	}
-	got := capFairly(byCluster, 8)
+	got := capFairly(byCluster, []string{"pieces.zebra", "pieces.aardvark"}, 8)
 	if len(got) != 8 {
 		t.Fatalf("len = %d, want 8", len(got))
 	}
@@ -168,11 +179,39 @@ func TestCapFairly_NoAlphabeticalBias(t *testing.T) {
 
 	// Under the cap: everything passes through.
 	small := map[string][]string{"c": {"c.1", "c.2"}}
-	if got := capFairly(small, 32); len(got) != 2 {
+	if got := capFairly(small, []string{"c"}, 32); len(got) != 2 {
 		t.Fatalf("under cap: %v", got)
 	}
-	if got := capFairly(map[string][]string{}, 32); len(got) != 0 {
+	if got := capFairly(map[string][]string{}, nil, 32); len(got) != 0 {
 		t.Fatalf("empty: %v", got)
+	}
+}
+
+func TestCapFairly_MarginalNodeGoesToMostRelevantCluster(t *testing.T) {
+	byCluster := map[string][]string{
+		"pieces.aardvark": {"pieces.aardvark.a1", "pieces.aardvark.a2"},
+		"pieces.zebra":    {"pieces.zebra.z1", "pieces.zebra.z2"},
+	}
+	// Cap 3 lands mid-round: the extra id must come from the cluster the
+	// router ranked FIRST (zebra), not from whoever sorts first alphabetically.
+	got := capFairly(byCluster, []string{"pieces.zebra", "pieces.aardvark"}, 3)
+	counts := map[string]int{}
+	for _, id := range got {
+		counts[strings.Join(strings.Split(id, ".")[:2], ".")]++
+	}
+	if counts["pieces.zebra"] != 2 || counts["pieces.aardvark"] != 1 {
+		t.Fatalf("split = %v, want zebra 2 / aardvark 1: %v", counts, got)
+	}
+
+	// Clusters missing from the relevance order still contribute (defensively),
+	// after the ranked ones.
+	got = capFairly(byCluster, []string{"pieces.zebra"}, 3)
+	counts = map[string]int{}
+	for _, id := range got {
+		counts[strings.Join(strings.Split(id, ".")[:2], ".")]++
+	}
+	if counts["pieces.zebra"] != 2 || counts["pieces.aardvark"] != 1 {
+		t.Fatalf("unranked cluster dropped: %v", got)
 	}
 }
 
@@ -269,6 +308,39 @@ func TestRankPieceClusters_MaxRollupAndOrder(t *testing.T) {
 	}
 	if got := rankPieceClusters(cat, emb, query, []string{"pieces.google-sheets"}, 10); len(got) != 1 || got[0] != "pieces.google-sheets" {
 		t.Fatalf("allowed filter: %v", got)
+	}
+}
+
+func TestRankPieceClusters_TieInclusiveCutAndUnscoredKept(t *testing.T) {
+	cat := routerCatalog(t)
+	dir := t.TempDir()
+	// twilio and google-sheets tie exactly at the cut; alphabet may order them
+	// but must never evict one.
+	mPath := writeEmbeddingsFixture(t, dir, 2, []struct {
+		ID  string
+		Vec []float32
+	}{
+		{"pieces.twilio.send_sms", []float32{1, 0}},
+		{"pieces.google-sheets.add_row", []float32{1, 0}},
+		{"pieces.google-sheets.new_row", []float32{0, 1}},
+	})
+	emb := loadPieceEmbeddingsFrom(mPath)
+	if emb == nil {
+		t.Fatal("fixture failed to load")
+	}
+
+	query := []float32{1, 0}
+	// Ask for 1: both tied clusters must survive the cut ("take the full 102").
+	got := rankPieceClusters(cat, emb, query, []string{"pieces.twilio", "pieces.google-sheets"}, 1)
+	if len(got) != 2 {
+		t.Fatalf("tie at the cut must keep both, got %v", got)
+	}
+
+	// A cluster with no vectors in the sidecar cannot be judged — it must stay
+	// visible to the router (appended after the ranked ones), not vanish.
+	got = rankPieceClusters(cat, emb, query, []string{"pieces.twilio", "communication"}, 10)
+	if len(got) != 2 || got[len(got)-1] != "communication" {
+		t.Fatalf("unscored cluster must be appended, got %v", got)
 	}
 }
 
