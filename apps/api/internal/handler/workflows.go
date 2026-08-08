@@ -58,8 +58,11 @@ func planWorkflow(p *services.Platform) http.HandlerFunc {
 			if prompt == "" {
 				return nil, 0, domain.BadRequest("prompt is required")
 			}
-			plan := p.Workflows.Plan(prompt, getStringField(body, "name"),
+			plan, err := p.Workflows.Plan(prompt, getStringField(body, "name"),
 				getStringField(body, "email"), getStringField(body, "schedule"))
+			if err != nil {
+				return nil, 0, err
+			}
 			return plan, http.StatusOK, nil
 		})
 	}
@@ -134,14 +137,8 @@ func launchRun(p *services.Platform) http.HandlerFunc {
 		handle(w, func() (any, int, error) {
 			slug := chi.URLParam(r, "slug")
 			body, _ := decodeBody(r)
-			// Allow ?engine=temporal as a convenience; an explicit body value wins.
 			if body == nil {
 				body = map[string]any{}
-			}
-			if _, ok := body["engine"]; !ok {
-				if e := r.URL.Query().Get("engine"); e != "" {
-					body["engine"] = e
-				}
 			}
 			input, err := validate.ParseLaunchRunInput(body)
 			if err != nil {

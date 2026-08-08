@@ -38,17 +38,6 @@ const LEVEL_META: Record<LogLevel, { tone: string; dot: string; label: string }>
 
 const CHANNELS: LogChannel[] = ["system", "agent", "model", "tool", "browser"];
 
-// Pool of plausible live lines appended to simulate realtime streaming.
-const LIVE_POOL: Omit<LogEntry, "id" | "seq" | "ts" | "offsetMs" | "runId">[] = [
-  { level: "debug", channel: "browser", source: "Navigator", message: "scroll → viewport bottom · 6 images loaded" },
-  { level: "info", channel: "tool", source: "Scout · Launches", message: "fetch https://rival.io/blog · 200 · 118ms" },
-  { level: "info", channel: "model", source: "Synthesizer", message: "scoring competitive dimensions", reasoning: true },
-  { level: "debug", channel: "agent", source: "Conductor", message: "heartbeat · 6 agents healthy" },
-  { level: "warn", channel: "browser", source: "Navigator", message: "slow response from nimbus.ai (2.4s)" },
-  { level: "info", channel: "browser", source: "Navigator", message: "screenshot captured · nimbus-pricing.png" },
-  { level: "success", channel: "tool", source: "Scout · Launches", message: "12 changelog entries parsed" },
-];
-
 export function LogViewer({
   logs,
   runStartISO,
@@ -66,7 +55,6 @@ export function LogViewer({
   const [source, setSource] = React.useState<string>("all");
   const [tailing, setTailing] = React.useState(live);
   const [wrap, setWrap] = React.useState(true);
-  const [extra, setExtra] = React.useState<LogEntry[]>([]);
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -77,34 +65,9 @@ export function LogViewer({
     [logs],
   );
 
-  // Simulated realtime stream.
-  React.useEffect(() => {
-    if (!tailing) return;
-    let n = 0;
-    const id = setInterval(() => {
-      const tmpl = LIVE_POOL[n % LIVE_POOL.length]!;
-      const now = Date.now();
-      setExtra((prev) => [
-        ...prev,
-        {
-          ...tmpl,
-          id: `live-${now}-${n}`,
-          runId: logs[0]?.runId ?? "run",
-          seq: 10000 + n,
-          ts: new Date(now).toISOString(),
-          offsetMs: now - runStart,
-        },
-      ]);
-      n++;
-    }, 1900);
-    return () => clearInterval(id);
-  }, [tailing, runStart, logs]);
-
-  const all = React.useMemo(() => [...logs, ...extra], [logs, extra]);
-
   const filtered = React.useMemo(() => {
     const needle = q.toLowerCase();
-    return all.filter((l) => {
+    return logs.filter((l) => {
       if (!activeChannels.has(l.channel)) return false;
       if (severity === "warn" && !(l.level === "warn" || l.level === "error")) return false;
       if (severity === "error" && l.level !== "error") return false;
@@ -113,10 +76,10 @@ export function LogViewer({
         return false;
       return true;
     });
-  }, [all, q, activeChannels, severity, source]);
+  }, [logs, q, activeChannels, severity, source]);
 
-  const errors = all.filter((l) => l.level === "error").length;
-  const warns = all.filter((l) => l.level === "warn").length;
+  const errors = logs.filter((l) => l.level === "error").length;
+  const warns = logs.filter((l) => l.level === "warn").length;
 
   // Autoscroll when tailing.
   React.useEffect(() => {

@@ -371,13 +371,7 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
-	// Engine is accepted for backward compatibility but every run now executes on
-	// the Temporal + LangGraph reasoner — the native Go worker was retired
-	// (archived under archive/worker). Only "temporal" (or empty) is valid.
-	Engine string
 }
-
-var validEngines = map[string]bool{"temporal": true}
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	v := &ValidationError{}
@@ -387,15 +381,9 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	}
 	v.enumValue("trigger", trigger, domain.ValidTriggerTypes)
 
-	engine := getString(body, "engine")
-	if engine != "" {
-		v.enumValue("engine", engine, validEngines)
-	}
-
 	out := LaunchRunInput{
 		Input:   getMap(body, "input"),
 		Trigger: domain.TriggerType(trigger),
-		Engine:  engine,
 	}
 	if hasKey(body, "region") {
 		r := getString(body, "region")

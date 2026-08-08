@@ -18,13 +18,11 @@ async function main(): Promise<void> {
   const namespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
   const taskQueue = process.env.PIECES_TASK_QUEUE ?? 'agently-pieces';
 
-  // DB-backed credential resolution (docs/credentials-contract.md §7): reads
-  // the same DATABASE_URL the reasoner uses. Without it, credential ids fall
-  // back to the env-var path.
-  const resolveCredential = makeDbCredentialResolver(process.env.DATABASE_URL);
-  if (!resolveCredential) {
-    console.warn('DATABASE_URL not set — __credentialId resolution disabled (env-var fallback only)');
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is required — set it in the repository .env');
   }
+  const resolveCredential = makeDbCredentialResolver(databaseUrl);
 
   const registry = loadRegistry();
   const actionCount = [...registry.pieces.values()].reduce(
@@ -36,12 +34,15 @@ async function main(): Promise<void> {
   for (const f of registry.failures) {
     console.warn(`piece failed to load: ${f.packageName}: ${f.error}`);
   }
+  if (registry.failures.length > 0) {
+    throw new Error(`pieces registry failed to load ${registry.failures.length} package(s)`);
+  }
   if (registry.pieces.size === 0) {
-    console.warn('no pieces installed — execute_piece will fail until packages are added');
+    throw new Error('no Activepieces packages installed — build the pieces registry before starting');
   }
 
   // Interactive HTTP surface: dynamic-prop options + the trigger runtime.
-  startOptionsServer(registry, resolveCredential, makeTriggerStoreFactory(process.env.DATABASE_URL));
+  startOptionsServer(registry, resolveCredential, makeTriggerStoreFactory(databaseUrl));
 
   const connection = await NativeConnection.connect({ address: hostport });
   const worker = await Worker.create({

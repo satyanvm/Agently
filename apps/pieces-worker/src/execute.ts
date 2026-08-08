@@ -46,16 +46,21 @@ export function makeExecutePiece(registry: Registry, resolveCredential?: Credent
 
     // Credentials resolve HERE — secrets never ride Temporal payloads
     // (contract §4). Resolution order (credentials-contract §7): the DB
-    // credential id when set, else process.env[authEnvKey]. Missing both is a
-    // business outcome, not infra. A DB *error* (unlike a missing row) throws
-    // out of the resolver and hits the retry policy.
+    // credential id when set, otherwise process.env[authEnvKey]. A dangling
+    // credential id is an error; silently switching to another secret can run
+    // the action against the wrong account.
     let auth: unknown;
     if (input.credentialId || input.authEnvKey) {
-      if (input.credentialId && resolveCredential) {
+      if (input.credentialId) {
+        if (!resolveCredential) {
+          return { ok: false, error: 'DATABASE_URL-backed credential resolver is unavailable', errorType: 'MissingCredential' };
+        }
         const data = await resolveCredential(input.credentialId);
-        if (data !== null) auth = normalizeDbAuth(data, piece);
-      }
-      if (auth === undefined && input.authEnvKey) {
+        if (data === null) {
+          return { ok: false, error: `credential ${input.credentialId} not found`, errorType: 'MissingCredential' };
+        }
+        auth = normalizeDbAuth(data, piece);
+      } else if (input.authEnvKey) {
         const raw = process.env[input.authEnvKey] ?? '';
         if (raw) auth = normalizeAuth(raw, piece);
       }

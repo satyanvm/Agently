@@ -25,7 +25,6 @@ import (
 func LaunchInputForTriggerEvent(event any, trigger domain.TriggerType) validate.LaunchRunInput {
 	return validate.LaunchRunInput{
 		Trigger: trigger,
-		Engine:  "temporal",
 		Input:   map[string]any{"__trigger_event": event},
 	}
 }

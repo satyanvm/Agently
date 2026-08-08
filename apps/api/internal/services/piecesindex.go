@@ -5,18 +5,38 @@ package services
 // each piece into the node catalog as its own cluster, so the map-reduce prompt
 // compiler plans `pieces.<slug>.<action>` types exactly like hand-written
 // catalog nodes. Execution is the reasoner's business: every run executes on the
-// Temporal engine, whose DynamicWorkflow forwards `pieces.*` nodes to the Node
+// Temporal reasoner, whose DynamicWorkflow forwards `pieces.*` nodes to the Node
 // pieces worker (docs/pieces-runtime-contract.md).
 //
-// A missing or malformed index is never an error — the platform degrades to the
-// hand-written catalog, mirroring loadCatalogFrom's tolerance.
+// Server preflight rejects a missing, malformed, or empty index.
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// RequirePiecesIndex rejects a missing, malformed, or empty generated index.
+func RequirePiecesIndex() error {
+	path := piecesIndexPath()
+	if path == "" {
+		return fmt.Errorf("pieces index not found; run: cd apps/pieces-worker && npm run gen:index")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read pieces index %s: %w", path, err)
+	}
+	var idx pieceIndexFile
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		return fmt.Errorf("parse pieces index %s: %w", path, err)
+	}
+	if idx.Version <= 0 || len(idx.Nodes) == 0 {
+		return fmt.Errorf("pieces index %s is empty or has an invalid version", path)
+	}
+	return nil
+}
 
 // pieceIndexFile mirrors the contract §2 schema.
 type pieceIndexFile struct {
@@ -81,8 +101,8 @@ func piecesIndexPath() string {
 }
 
 // mergePiecesIndex loads the index at path and adds one cluster per piece to the
-// catalog. Nil-safe and silent on any failure: prompt compilation must work with
-// zero pieces exactly as it did before pieces existed.
+// catalog. Preflight has already validated the production path; nil/invalid inputs
+// remain no-ops here so focused loader tests can exercise them safely.
 func mergePiecesIndex(cat *Catalog, path string) {
 	if cat == nil || path == "" {
 		return

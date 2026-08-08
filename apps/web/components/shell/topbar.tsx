@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, Bell, Plus, ChevronRight } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
-import { Avatar } from "@/components/ui/avatar";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { CommandPalette } from "./command-palette";
 
@@ -84,9 +83,6 @@ export function TopBar({
             <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent ring-2 ring-surface" />
           </Link>
 
-          <button className="flex items-center gap-2 rounded-full p-0.5 pr-0.5 transition-colors hover:bg-surface-2">
-            <Avatar initials="MC" />
-          </button>
         </div>
       </header>
 

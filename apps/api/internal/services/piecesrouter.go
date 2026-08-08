@@ -7,19 +7,20 @@ package services
 // one map call per cluster, but NOT too large to describe whole: one line per
 // cluster listing every action label is only ~35k tokens. So selection is a
 // single small-model ROUTING call over that full directory — semantic, unlike
-// the lexical term-overlap prescreen it replaces (kept in planner.go as the
-// fallback).
+// the removed lexical term-overlap prescreen.
 //
-// When an embedding sidecar is present (piecesembed.go), the directory is
-// prefiltered to the top-scoring pieces first, shrinking the router prompt
-// (clusters absent from the sidecar — the hand-written ones — ride along
-// unranked); with no sidecar the router reads the full directory. Both paths
-// degrade silently — a router failure falls back to mapping every hand-written
-// cluster plus the lexical piece prescreen, never failing compilation.
+// The directory is prefiltered by the embedding sidecar (piecesembed.go) to the
+// top-scoring pieces first, shrinking the router prompt (clusters absent from
+// the sidecar — the hand-written ones — ride along unranked). Neither stage
+// degrades: a missing sidecar or a router failure fails the compile with its
+// reason. The lexical term-overlap prescreen that used to catch these is gone;
+// it could not see synonyms ("spreadsheet" never found google-sheets), so
+// falling back to it produced a confidently wrong graph rather than an error.
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -86,17 +87,20 @@ func clusterDirectory(cat *Catalog, keys []string) string {
 // map phase with one small-model call over the cluster directory. The returned
 // order is the model's own ranking — downstream (capFairly) uses it to decide
 // which cluster contributes the marginal node, so it is deliberately NOT
-// re-sorted. ok=false on any failure (no key, timeout, junk output, nothing
-// valid) — the caller falls back to the lexical prescreen.
-func routeClusters(ctx context.Context, cat *Catalog, prompt string, clusterKeys []string, max int) ([]string, bool) {
+// re-sorted. Any failure (no key, timeout, junk output, nothing valid) is
+// returned as an error and fails the compile.
+func routeClusters(ctx context.Context, cat *Catalog, prompt string, clusterKeys []string, max int) ([]string, error) {
 	if len(clusterKeys) == 0 {
-		return nil, true // nothing to route is a valid answer, not a failure
+		return nil, nil // nothing to route is a valid answer, not a failure
 	}
 
-	// Recall layer: embeddings shrink the directory when available.
-	keys := clusterKeys
-	if top, ok := prefilterPieceClusters(ctx, cat, prompt, clusterKeys, routerPrefilterTop); ok && len(top) > 0 {
-		keys = top
+	// Recall layer: embeddings shrink the directory before the router reads it.
+	keys, err := prefilterPieceClusters(ctx, cat, prompt, clusterKeys, routerPrefilterTop)
+	if err != nil {
+		return nil, fmt.Errorf("piece prefilter: %w", err)
+	}
+	if len(keys) == 0 {
+		keys = clusterKeys
 	}
 
 	system := `You route a user's automation request to integration clusters (each is one service
@@ -110,14 +114,14 @@ Return {"clusters": []} if none apply.`
 	user := "Request: " + prompt + "\n\nCluster directory:\n" + clusterDirectory(cat, keys)
 	raw, err := planLLMWith(ctx, mapModel(), 1024, routerTimeout, system, []llmMsg{{Role: "user", Content: user}})
 	if err != nil {
-		return nil, false
+		return nil, fmt.Errorf("cluster router: %w", err)
 	}
 	var out struct {
 		Clusters []string `json:"clusters"`
 		Pieces   []string `json:"pieces"` // tolerated: the field name used by an earlier prompt
 	}
 	if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
-		return nil, false
+		return nil, fmt.Errorf("cluster router returned unparseable JSON: %w", err)
 	}
 	picked := out.Clusters
 	if len(picked) == 0 {
@@ -147,18 +151,22 @@ Return {"clusters": []} if none apply.`
 		}
 	}
 	if len(selected) == 0 && len(picked) > 0 {
-		return nil, false // the model answered but with junk — distrust it entirely
+		// The model answered but named nothing in the directory it was shown.
+		return nil, fmt.Errorf("cluster router picked %d cluster(s), none of them in the offered directory: %s",
+			len(picked), truncateStr(strings.Join(picked, ", "), 200))
 	}
-	return selected, true
+	return selected, nil
 }
 
-// PieceSelectionMethods runs every piece-selection strategy against prompt and
-// returns slug lists keyed by method: "lexical" (fallback prescreen, always),
-// "embeddings" (prefilter alone, when the sidecar + key exist), "router" (the
-// primary path, when an LLM key exists). Restricted to piece clusters so the
-// recall numbers stay comparable across strategies. For cmd/planeval's recall
-// measurement — compilation itself uses mapPhase.
-func PieceSelectionMethods(ctx context.Context, prompt string, max int) map[string][]string {
+// PieceSelectionMethods runs each piece-selection strategy against prompt and
+// returns slug lists keyed by method: "embeddings" (the prefilter alone) and
+// "router" (the primary path, prefilter + model). Restricted to piece clusters
+// so the recall numbers stay comparable across strategies. For cmd/planeval's
+// recall measurement — compilation itself uses mapPhase.
+//
+// A strategy that errors is omitted from the map and reported through errs, so
+// planeval can print WHY a row is missing instead of scoring it as zero recall.
+func PieceSelectionMethods(ctx context.Context, prompt string, max int) (map[string][]string, map[string]error) {
 	cat := LoadCatalog()
 	var pieceKeys []string
 	for _, key := range cat.sortedClusters() {
@@ -173,12 +181,17 @@ func PieceSelectionMethods(ctx context.Context, prompt string, max int) map[stri
 		}
 		return out
 	}
-	out := map[string][]string{"lexical": slugs(topPieceClusters(cat, prompt, pieceKeys, max))}
-	if top, ok := prefilterPieceClusters(ctx, cat, prompt, pieceKeys, max); ok {
+	out := map[string][]string{}
+	errs := map[string]error{}
+	if top, err := prefilterPieceClusters(ctx, cat, prompt, pieceKeys, max); err != nil {
+		errs["embeddings"] = err
+	} else {
 		out["embeddings"] = slugs(top)
 	}
-	if sel, ok := routeClusters(ctx, cat, prompt, pieceKeys, max); ok {
+	if sel, err := routeClusters(ctx, cat, prompt, pieceKeys, max); err != nil {
+		errs["router"] = err
+	} else {
 		out["router"] = slugs(sel)
 	}
-	return out
+	return out, errs
 }

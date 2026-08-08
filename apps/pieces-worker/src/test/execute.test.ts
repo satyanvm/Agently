@@ -143,7 +143,7 @@ test('credentialId resolves via the DB resolver and wins over env', async () => 
   delete process.env.AP_FAKE_AUTH;
 });
 
-test('dangling credentialId falls back to env; missing both → MissingCredential', async () => {
+test('dangling credentialId fails even when an env credential exists', async () => {
   const resolver = async () => null; // row deleted
   process.env.AP_FAKE_AUTH = 'env-secret';
   const exec = makeExecutePiece(registryWith(fakePiece()), resolver);
@@ -154,7 +154,8 @@ test('dangling credentialId falls back to env; missing both → MissingCredentia
     authEnvKey: 'AP_FAKE_AUTH',
     credentialId: 'cred_gone',
   });
-  assert.equal(withEnv.ok, true);
+  assert.equal(withEnv.ok, false);
+  if (!withEnv.ok) assert.equal(withEnv.errorType, 'MissingCredential');
 
   delete process.env.AP_FAKE_AUTH;
   const withoutEnv = await exec({

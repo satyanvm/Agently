@@ -31,13 +31,12 @@ type Platform struct {
 	Credentials   *CredentialService
 }
 
-// Options configure platform construction. All fields are optional; sensible
-// defaults (system clock, dev logger, in-memory seeded store) are used when nil.
+// Options configure platform construction. Tests may provide in-memory
+// repositories explicitly; the server provides a Postgres pool.
 //
 // Storage selection: if Pool is non-nil, the platform uses Postgres-backed
 // repositories (seeding the DB from the canonical dataset on first boot).
-// Otherwise it falls back to the in-memory store. Explicit Repositories, if set,
-// override both. Tests pass neither and get the in-memory store.
+// Explicit Repositories, if set, are intended for tests.
 type Options struct {
 	Clock        platform.Clock
 	Logger       platform.Logger
@@ -65,7 +64,7 @@ func NewPlatform(opts Options) *Platform {
 	if opts.Seed != nil {
 		seed = *opts.Seed
 	} else {
-		seed = platform.BuildSeed(platform.FixedClock(platform.NowISO))
+		seed = platform.BuildSeed(clock)
 	}
 	repos := opts.Repositories
 	if repos == nil {

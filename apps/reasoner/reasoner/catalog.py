@@ -6,8 +6,9 @@ any GraphNode whose `type` matches a catalog id executes via the definition's
 declared runtime (http / browser / code / llm) — hundreds of integrations, one
 handler, zero per-service code.
 
-Loaded once at import, like CONFIG. A missing catalog directory is not an error —
-the platform degrades to the built-in code-backed types only.
+Loaded once at import, like CONFIG. A missing catalog directory IS an error: it
+used to silently reduce the platform to the built-in types, so every integration
+node in an otherwise valid workflow became a pass-through nobody was told about.
 """
 from __future__ import annotations
 
@@ -35,14 +36,17 @@ def _load() -> dict[str, dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     directory = _catalog_dir()
     if directory is None:
-        log.warning("node catalog not found — integration nodes will pass through")
-        return by_id
+        raise SystemExit(
+            "Node catalog not found — every integration node depends on it. Expected "
+            "packages/nodes/catalog (or set NODES_CATALOG_DIR)."
+        )
     for path in sorted(directory.glob("*.json")):
         try:
             data = json.loads(path.read_text())
-        except (OSError, ValueError) as exc:  # a broken cluster file must not kill the worker
-            log.warning("skipping unreadable cluster file %s: %s", path.name, exc)
-            continue
+        except (OSError, ValueError) as exc:
+            # Skipping a corrupt cluster file makes every node it defines vanish
+            # from the executor while the compiler still happily plans against it.
+            raise SystemExit(f"Node catalog file {path.name} is unreadable: {exc}") from exc
         cluster = data.get("cluster", path.stem)
         for node in data.get("nodes", []):
             node_id = node.get("id")

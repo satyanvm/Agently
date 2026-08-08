@@ -347,7 +347,7 @@ const runSelect = `select r.id, r.workspace_id, r.workflow_id, r.workflow_versio
   w.name, w.slug, r.number, r.status, r.trigger, r.input, r.triggered_by, r.region,
   r.steps_done, r.steps_total, r.current_step, r.cost_usd::float8,
   r.tokens_in, r.tokens_out, r.error, r.browser_session_id,
-  r.queued_at, r.started_at, r.finished_at, r.engine, r.langfuse_trace_id
+  r.queued_at, r.started_at, r.finished_at, r.langfuse_trace_id
   from runs r join workflows w on w.id = r.workflow_id`
 
 func scanRun(row pgx.Row) (domain.Run, error) {
@@ -362,11 +362,10 @@ func scanRun(row pgx.Row) (domain.Run, error) {
 	var errStr, bsID *string
 	var queued any
 	var started, finished any
-	var engine string
 	var langfuseTraceID *string
 	if err := row.Scan(&id, &ws, &wf, &verID, &wfName, &wfSlug, &number, &status, &trigger,
 		&input, &triggeredBy, &region, &stepsDone, &stepsTotal, &currentStep, &costUsd,
-		&tokensIn, &tokensOut, &errStr, &bsID, &queued, &started, &finished, &engine, &langfuseTraceID); err != nil {
+		&tokensIn, &tokensOut, &errStr, &bsID, &queued, &started, &finished, &langfuseTraceID); err != nil {
 		return rn, err
 	}
 	rn.Input = map[string]any{}
@@ -392,10 +391,6 @@ func scanRun(row pgx.Row) (domain.Run, error) {
 	if bsID != nil {
 		b := domain.BrowserSessionId(*bsID)
 		rn.BrowserSessionID = &b
-	}
-	rn.Engine = engine
-	if rn.Engine == "" {
-		rn.Engine = "temporal"
 	}
 	rn.LangfuseTraceID = langfuseTraceID
 	rn.QueuedAt = anyTs(queued)
@@ -447,20 +442,16 @@ func collectRuns(s *pgStore, rows pgx.Rows) []domain.Run {
 }
 
 func (r *pgRunRepo) Insert(run domain.Run) domain.Run {
-	engine := run.Engine
-	if engine == "" {
-		engine = "temporal"
-	}
 	_, err := r.s.pool.Exec(bg(),
 		`insert into runs (id, workspace_id, workflow_id, workflow_version_id, number, status,
 		   trigger, input, triggered_by, region, steps_done, steps_total, current_step, cost_usd,
-		   tokens_in, tokens_out, error, browser_session_id, queued_at, started_at, finished_at, engine)
-		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		   tokens_in, tokens_out, error, browser_session_id, queued_at, started_at, finished_at)
+		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 		string(run.ID), string(run.WorkspaceID), string(run.WorkflowID), idPtrArg(run.WorkflowVersionID),
 		run.Number, string(run.Status), string(run.Trigger), jsonArg(orEmptyMap(run.Input)), jsonArg(run.TriggeredBy), run.Region,
 		run.Steps.Done, run.Steps.Total, run.CurrentStep, run.CostUsd,
 		run.Usage.TokensIn, run.Usage.TokensOut, strArg(run.Error), idPtrArg(run.BrowserSessionID),
-		tsArg(run.QueuedAt), tsPtrArg(run.StartedAt), tsPtrArg(run.FinishedAt), engine)
+		tsArg(run.QueuedAt), tsPtrArg(run.StartedAt), tsPtrArg(run.FinishedAt))
 	r.s.fail("run.Insert", err)
 	return run
 }

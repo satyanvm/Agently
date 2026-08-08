@@ -4,9 +4,9 @@ package main
 // prompts, does each selection strategy surface the pieces a correct workflow
 // needs? Strategies compared (services.PieceSelectionMethods):
 //
-//   lexical    — the term-overlap prescreen (now the fallback path)
+//   lexical    — the retired term-overlap baseline, retained only for comparison
 //   embeddings — the offline sidecar prefilter alone (needs embeddings.json/.bin
-//                next to the pieces index + GEMINI_API_KEY)
+//                next to the pieces index + VOYAGE_API_KEY)
 //   router     — the primary path: small-model call over the piece directory
 //                (needs an LLM key; includes the embedding prefilter when present)
 //
@@ -94,20 +94,30 @@ func main() {
 	type tally struct{ hit, total, prompts int }
 	stats := map[string]*tally{}
 	misses := map[string][]string{}
+	failures := map[string][]string{}
 
 	for i, g := range goldens {
 		if i > 0 && *pause > 0 {
 			time.Sleep(*pause)
 		}
-		methods := services.PieceSelectionMethods(ctx, g.prompt, *max)
+		methods, errs := services.PieceSelectionMethods(ctx, g.prompt, *max)
 		for r := 0; r < *retries; r++ {
 			if _, ok := methods["router"]; ok {
 				break
 			}
 			time.Sleep(*pause)
-			if again, ok := services.PieceSelectionMethods(ctx, g.prompt, *max)["router"]; ok {
-				methods["router"] = again
+			again, againErrs := services.PieceSelectionMethods(ctx, g.prompt, *max)
+			if sel, ok := again["router"]; ok {
+				methods["router"] = sel
+				delete(errs, "router")
+			} else {
+				errs["router"] = againErrs["router"]
 			}
+		}
+		// A strategy that errored is NOT zero recall — it is an unanswered prompt.
+		// Record why so the summary can say so instead of quietly scoring it 0.
+		for name, err := range errs {
+			failures[name] = append(failures[name], fmt.Sprintf("%q: %v", g.prompt, err))
 		}
 		for name, slugs := range methods {
 			t := stats[name]
@@ -157,8 +167,27 @@ func main() {
 	}
 	for _, n := range []string{"embeddings", "router"} {
 		if _, ok := stats[n]; !ok {
-			fmt.Printf("  %-11s (unavailable — needs %s)\n", n,
-				map[string]string{"embeddings": "embeddings sidecar + GEMINI_API_KEY", "router": "an LLM key"}[n])
+			fmt.Printf("  %-11s (never answered — needs %s)\n", n,
+				map[string]string{
+					"embeddings": "the embeddings sidecar + VOYAGE_API_KEY",
+					"router":     "ANTHROPIC_API_KEY (plus the sidecar it prefilters through)",
+				}[n])
+		}
+	}
+	// Errors are reported separately from misses: a strategy that failed on half
+	// the prompts and scored well on the rest is not an 80% strategy.
+	if len(failures) > 0 {
+		fmt.Println("\nfailures (these prompts were NOT scored):")
+		fnames := make([]string, 0, len(failures))
+		for n := range failures {
+			fnames = append(fnames, n)
+		}
+		sort.Strings(fnames)
+		for _, n := range fnames {
+			fmt.Printf("  %-11s %d/%d prompts failed\n", n, len(failures[n]), len(goldens))
+			for _, f := range failures[n] {
+				fmt.Printf("      %s\n", f)
+			}
 		}
 	}
 	if *verbose {

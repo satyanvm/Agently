@@ -128,17 +128,18 @@ func TestClusterDirectory_RendersHandWrittenClusters(t *testing.T) {
 	}
 }
 
-func TestRouteClusters_NoKeyFallsBack(t *testing.T) {
-	for _, k := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"} {
-		t.Setenv(k, "")
-	}
+func TestRouteClusters_NoKeyIsAnError(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
 	cat := routerCatalog(t)
-	if _, ok := routeClusters(context.Background(), cat, "text me", []string{"pieces.twilio"}, 12); ok {
-		t.Fatal("router must report failure with no LLM key so the lexical fallback runs")
+	// There is no lexical fallback behind the router any more: with nothing to
+	// route WITH, the compile must fail rather than guess.
+	if _, err := routeClusters(context.Background(), cat, "text me", []string{"pieces.twilio"}, 12); err == nil {
+		t.Fatal("router must return an error with no key, not a silent fallback")
 	}
-	// No clusters at all is a valid empty answer, not a failure.
-	if sel, ok := routeClusters(context.Background(), cat, "text me", nil, 12); !ok || len(sel) != 0 {
-		t.Fatalf("empty clusterKeys: sel=%v ok=%v, want empty+true", sel, ok)
+	// No clusters at all is still a valid empty answer, not a failure.
+	sel, err := routeClusters(context.Background(), cat, "text me", nil, 12)
+	if err != nil || len(sel) != 0 {
+		t.Fatalf("empty clusterKeys: sel=%v err=%v, want empty+nil", sel, err)
 	}
 }
 
@@ -253,26 +254,31 @@ func TestLoadPieceEmbeddingsFrom(t *testing.T) {
 		{"pieces.google-sheets.add_row", []float32{0, 1}},
 	})
 
-	emb := loadPieceEmbeddingsFrom(mPath)
-	if emb == nil || emb.Dims != 2 || len(emb.IDs) != 2 {
-		t.Fatalf("loaded = %+v", emb)
+	emb, err := loadPieceEmbeddingsFrom(mPath)
+	if err != nil || emb.Dims != 2 || len(emb.IDs) != 2 {
+		t.Fatalf("loaded = %+v, err = %v", emb, err)
 	}
 	if emb.Vecs[0] != 1 || emb.Vecs[3] != 1 {
 		t.Fatalf("vecs = %v", emb.Vecs)
 	}
 
-	// Truncated bin (size mismatch) must load as nil, never panic.
+	// Each way of being broken must name itself — the operator's next move is
+	// different for a truncated bin than for a missing manifest.
 	if err := os.Truncate(filepath.Join(dir, "embeddings.bin"), 4); err != nil {
 		t.Fatal(err)
 	}
-	if loadPieceEmbeddingsFrom(mPath) != nil {
-		t.Fatal("size-mismatched bin must be rejected")
-	}
-	if loadPieceEmbeddingsFrom(filepath.Join(dir, "absent.json")) != nil {
-		t.Fatal("missing manifest must be nil")
-	}
-	if loadPieceEmbeddingsFrom("") != nil {
-		t.Fatal("empty path must be nil")
+	for _, tc := range []struct{ name, path, want string }{
+		{"size mismatch", mPath, "bytes, want"},
+		{"missing manifest", filepath.Join(dir, "absent.json"), "no such file"},
+		{"empty path", "", "not found"},
+	} {
+		_, err := loadPieceEmbeddingsFrom(tc.path)
+		if err == nil {
+			t.Fatalf("%s must be rejected", tc.name)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: error %q must mention %q", tc.name, err, tc.want)
+		}
 	}
 }
 
@@ -290,9 +296,9 @@ func TestRankPieceClusters_MaxRollupAndOrder(t *testing.T) {
 		{"pieces.google-sheets.new_row", []float32{0.6, 0.8}},
 		{"pieces.unknown.ghost", []float32{1, 0}}, // not in catalog → ignored
 	})
-	emb := loadPieceEmbeddingsFrom(mPath)
-	if emb == nil {
-		t.Fatal("fixture failed to load")
+	emb, err := loadPieceEmbeddingsFrom(mPath)
+	if err != nil {
+		t.Fatalf("fixture failed to load: %v", err)
 	}
 
 	query := []float32{1, 0}
@@ -324,9 +330,9 @@ func TestRankPieceClusters_TieInclusiveCutAndUnscoredKept(t *testing.T) {
 		{"pieces.google-sheets.add_row", []float32{1, 0}},
 		{"pieces.google-sheets.new_row", []float32{0, 1}},
 	})
-	emb := loadPieceEmbeddingsFrom(mPath)
-	if emb == nil {
-		t.Fatal("fixture failed to load")
+	emb, err := loadPieceEmbeddingsFrom(mPath)
+	if err != nil {
+		t.Fatalf("fixture failed to load: %v", err)
 	}
 
 	query := []float32{1, 0}
@@ -344,11 +350,37 @@ func TestRankPieceClusters_TieInclusiveCutAndUnscoredKept(t *testing.T) {
 	}
 }
 
-func TestPrefilterPieceClusters_UnavailableIsNotFatal(t *testing.T) {
+func TestPrefilterPieceClusters_AbsentSidecarIsFatal(t *testing.T) {
 	t.Setenv("PIECES_EMBEDDINGS_PATH", filepath.Join(t.TempDir(), "absent.json"))
 	// The process-wide cache may already hold a real sidecar from another test;
 	// bypass it by checking the loader directly (prefilter shares its logic).
-	if loadPieceEmbeddingsFrom(piecesEmbeddingsPath()) != nil {
-		t.Fatal("absent sidecar must be nil → prefilter reports unavailable")
+	// An absent sidecar used to mean "router reads the full directory"; it now
+	// fails, because a prefilter that silently isn't running is unfalsifiable.
+	_, err := loadPieceEmbeddingsFrom(piecesEmbeddingsPath())
+	if err == nil {
+		t.Fatal("absent sidecar must be an error, not a silent full-directory fallback")
+	}
+	if !strings.Contains(err.Error(), "gen:embeddings") {
+		t.Fatalf("error %q must tell the operator how to rebuild", err)
+	}
+}
+
+func TestCheckSidecarMatches_RejectsStale(t *testing.T) {
+	t.Setenv("PLANNER_EMBED_MODEL", "text-embedding-3-small")
+	t.Setenv("PLANNER_EMBED_DIMS", "1024")
+	// A Gemini-era sidecar: right file, wrong vector space entirely. Scoring an
+	// OpenAI query against these would produce confident nonsense.
+	stale := &pieceEmbeddings{Model: "gemini-embedding-001", Dims: 768}
+	err := checkSidecarMatches(stale)
+	if err == nil {
+		t.Fatal("sidecar from another model must be rejected")
+	}
+	for _, want := range []string{"gemini-embedding-001", "768", "text-embedding-3-small", "1024"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q must mention %q so the mismatch is obvious", err, want)
+		}
+	}
+	if err := checkSidecarMatches(&pieceEmbeddings{Model: "text-embedding-3-small", Dims: 1024}); err != nil {
+		t.Fatalf("matching sidecar rejected: %v", err)
 	}
 }

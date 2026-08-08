@@ -116,7 +116,7 @@ class PreparePieceInput:
 @dataclass
 class PreparePieceResult:
     """mode='execute' → payload is the execute_piece argument (contract §4).
-    mode='record' → result is the record-intent output; no cross-queue call."""
+    mode='trigger' → result is the trigger event already attached to the run."""
     mode: str
     payload: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
@@ -128,7 +128,7 @@ class RecordPieceInput:
     node: dict[str, Any]
     agent_id: str
     result: dict[str, Any]
-    mode: str  # "execute" (result is the execute_piece return) | "record"
+    mode: str  # "execute" (execute_piece return) | "trigger"
 
 
 # ─────────────────────────── activities ───────────────────────────
@@ -217,7 +217,7 @@ def _clip_summary(s: str, n: int = 280) -> str:
 
 @activity.defn
 async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
-    """Resolve a piece node into an execute_piece payload — or a record-intent.
+    """Resolve a piece node into an execute_piece payload or trigger event.
 
     Mirrors the head of engine.execute_one_node (status → running, log line) so
     the UI shows the node live while the Node worker runs it. Prop values are
@@ -233,13 +233,9 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
 
     spec = pieces.piece_spec_for(node_type)
     if spec is None:
-        await db.append_log(
-            inp.run_id, "warn", "system", key,
-            f"{node_type} recorded — not in the pieces index (regenerate with apps/pieces-worker gen:index)",
-        )
-        return PreparePieceResult(
-            mode="record",
-            result={"recorded": True, "executed": False, "reason": "unknown-piece"},
+        raise RuntimeError(
+            f"{node_type} is not in the pieces index; regenerate it with "
+            "cd apps/pieces-worker && npm run gen:index"
         )
 
     # Piece TRIGGER nodes: the event was already produced BEFORE this run
@@ -250,16 +246,13 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
     if str(spec.get("kind", "action")) == "trigger":
         event = (inp.run_input or {}).get("__trigger_event")
         if event is None:
-            result: dict[str, Any] = {"recorded": True, "executed": False, "reason": "no-trigger-event"}
-            await db.append_log(
-                inp.run_id, "info", "agent", key,
-                f"{node_type} recorded — run was not started by its trigger (no event payload)",
+            raise RuntimeError(
+                f"{node_type} requires __trigger_event; this run was not started by that trigger"
             )
-        else:
-            result = dict(event) if isinstance(event, dict) else {"event": event}
-            result["executed"] = True
-            await db.append_log(inp.run_id, "info", "agent", key, f"{node_type} trigger event received")
-        return PreparePieceResult(mode="record", result=result)
+        result = dict(event) if isinstance(event, dict) else {"event": event}
+        result["executed"] = True
+        await db.append_log(inp.run_id, "info", "agent", key, f"{node_type} trigger event received")
+        return PreparePieceResult(mode="trigger", result=result)
 
     # The node may name a DB-backed credential via the reserved __credentialId
     # config key (docs/credentials-contract.md §§6-7). It is stripped from the
@@ -271,13 +264,9 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
     # Presence gate: a selected DB credential counts as present (the Node worker
     # resolves it by id); otherwise the env var must exist, as before.
     if pieces.auth_required(spec) and not cred_id and not os.getenv(cred_key or "", ""):
-        await db.append_log(
-            inp.run_id, "warn", "system", key,
-            f"{node_type} recorded — missing credential env var: {cred_key}",
-        )
-        return PreparePieceResult(
-            mode="record",
-            result={"recorded": True, "executed": False, "missingCredentials": [cred_key]},
+        raise RuntimeError(
+            f"{node_type} is missing credential {cred_key}; select a stored credential "
+            "or set the environment variable"
         )
 
     # Render each configured prop with the shared template engine (same roots the
@@ -325,39 +314,28 @@ async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
 
 @activity.defn
 async def record_piece_result(inp: RecordPieceInput) -> RunNodeResult:
-    """Persist a piece node's outcome the way run_node persists a handler's.
-
-    Never fails the run: piece-level errors ({ok:false}) and record-intents both
-    land as node output with a succeeded agent row — matching how record-intent
-    catalog nodes behave — so one unavailable integration can't kill the graph.
-    """
+    """Persist a piece node's outcome; unsuccessful execution fails the node."""
     key = inp.node["key"]
     res = inp.result or {}
 
-    if inp.mode == "record":
+    if inp.mode == "trigger":
         output = dict(res)
-        if res.get("missingCredentials"):
-            summary = "Recorded (needs " + ", ".join(res.get("missingCredentials", [])) + ")"
-        elif res.get("executed"):
-            summary = "Trigger event received"
-        else:
-            summary = f"Recorded ({res.get('reason', 'intent')})"
+        summary = "Trigger event received"
     elif res.get("ok"):
         raw = res.get("output")
         output = raw if isinstance(raw, dict) else {"value": raw}
         output.setdefault("executed", True)
         summary = _clip_summary(json.dumps(raw)) if raw is not None else "Ran"
     else:
-        output = {
-            "error": res.get("error", "piece execution failed"),
-            "errorType": res.get("errorType", "PieceExecutionError"),
-            "executed": True,
-        }
-        summary = f"Failed: {_clip_summary(str(res.get('error', '')), 120)}"
+        error = str(res.get("error", "piece execution failed"))
+        error_type = str(res.get("errorType", "PieceExecutionError"))
+        summary = f"Failed: {_clip_summary(error, 120)}"
         await db.append_log(
             inp.run_id, "error", "tool", key,
-            f"{inp.node.get('type')} failed: {res.get('error', '')}",
+            f"{inp.node.get('type')} failed ({error_type}): {error}",
         )
+        await db.set_agent_status(inp.agent_id, "failed", summary=summary)
+        return RunNodeResult(failed=True, error=f"{inp.node.get('type')}: {error_type}: {error}")
 
     await db.set_agent_status(inp.agent_id, "succeeded", summary=summary)
     return RunNodeResult(output=output, gate_open=True)

@@ -3,7 +3,7 @@
  * "From list" dropdowns. A tiny HTTP server (NOT Temporal: the builder needs
  * an interactive round-trip, and options lookups are read-only) that loads the
  * piece from the same registry as execute_piece, resolves auth the same way
- * (DB credential id first, env fallback), and invokes the prop's real
+ * (a selected DB credential must resolve; otherwise the explicit env key), and invokes the prop's real
  * `options()` resolver.
  *
  *   POST /options
@@ -124,14 +124,19 @@ async function resolveOptions(
     };
   }
 
-  // Same resolution order as execute_piece (credentials-contract §7): DB
-  // credential id when set, else env. Auth-less pieces skip straight through.
+  // Same resolution rule as execute_piece: a selected DB credential must
+  // resolve; only nodes without a selected id may use the explicit env key.
   let auth: unknown;
-  if (input.credentialId && resolveCredential) {
+  if (input.credentialId) {
+    if (!resolveCredential) {
+      return { ok: false, error: 'database credential resolver unavailable', errorType: 'MissingCredential' };
+    }
     const data = await resolveCredential(String(input.credentialId));
-    if (data !== null) auth = normalizeDbAuth(data, piece);
-  }
-  if (auth === undefined && input.authEnvKey) {
+    if (data === null) {
+      return { ok: false, error: `credential ${input.credentialId} not found`, errorType: 'MissingCredential' };
+    }
+    auth = normalizeDbAuth(data, piece);
+  } else if (input.authEnvKey) {
     const raw = process.env[String(input.authEnvKey)] ?? '';
     if (raw) auth = normalizeAuth(raw, piece);
   }

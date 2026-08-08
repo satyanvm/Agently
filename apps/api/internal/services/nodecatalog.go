@@ -63,9 +63,9 @@ type CatalogNode struct {
 }
 
 type catalogFile struct {
-	Cluster     string        `json:"cluster"`
-	Label       string        `json:"label"`
-	Description string        `json:"description"`
+	Cluster     string `json:"cluster"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
 	// Categories is piece-cluster metadata (Activepieces framework categories,
 	// e.g. "PRODUCTIVITY") used by the router directory; hand-written cluster
 	// files don't set it.
@@ -84,8 +84,8 @@ var (
 	catalogVal  *Catalog
 )
 
-// LoadCatalog loads packages/nodes/catalog once per process. Never fails: with no
-// catalog on disk it returns the built-in fallback so compilation always works.
+// LoadCatalog loads packages/nodes/catalog once per process. Server preflight
+// validates the files before this cache is constructed.
 // Activepieces piece actions (packages/nodes/pieces/index.json) merge in as their
 // own `pieces.<slug>` clusters — same planning surface, different executor.
 func LoadCatalog() *Catalog {
@@ -94,6 +94,44 @@ func LoadCatalog() *Catalog {
 		mergePiecesIndex(catalogVal, piecesIndexPath())
 	})
 	return catalogVal
+}
+
+// RequireNodeCatalog validates every hand-written cluster before the API starts.
+// The runtime loader remains cache-shaped, so preflight is where malformed files
+// become a clear startup error instead of disappearing from planner context.
+func RequireNodeCatalog() error {
+	dir := catalogDir()
+	if dir == "" {
+		return fmt.Errorf("node catalog not found; expected packages/nodes/catalog")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read node catalog %s: %w", dir, err)
+	}
+	clusters := 0
+	hasBuiltin := false
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read node catalog cluster %s: %w", entry.Name(), err)
+		}
+		var file catalogFile
+		if err := json.Unmarshal(raw, &file); err != nil {
+			return fmt.Errorf("parse node catalog cluster %s: %w", entry.Name(), err)
+		}
+		if file.Cluster == "" || len(file.Nodes) == 0 {
+			return fmt.Errorf("node catalog cluster %s is empty or missing its cluster id", entry.Name())
+		}
+		clusters++
+		hasBuiltin = hasBuiltin || file.Cluster == "builtin"
+	}
+	if clusters == 0 || !hasBuiltin {
+		return fmt.Errorf("node catalog is incomplete: found %d clusters, builtin=%t", clusters, hasBuiltin)
+	}
+	return nil
 }
 
 // catalogDir resolves the catalog location: NODES_CATALOG_DIR wins; otherwise walk
@@ -149,52 +187,7 @@ func loadCatalogFrom(dir string) *Catalog {
 			}
 		}
 	}
-	// Guarantee the built-in fifteen exist even with no catalog on disk — the
-	// compiler can always author trigger/agent/tool/logic/output graphs.
-	if _, ok := cat.Clusters["builtin"]; !ok {
-		f := builtinFallback()
-		for i := range f.Nodes {
-			f.Nodes[i].Cluster = f.Cluster
-			cat.ByID[f.Nodes[i].ID] = f.Nodes[i]
-		}
-		cat.Clusters[f.Cluster] = f
-	}
 	return cat
-}
-
-// builtinFallback hardcodes minimal defs for the fifteen code-backed types so a
-// deployment without packages/nodes still compiles prompts. Mirrors builtin.json.
-func builtinFallback() catalogFile {
-	mk := func(id, label, desc, kind string, cfg ...CatalogField) CatalogNode {
-		return CatalogNode{ID: id, Label: label, Description: desc, Kind: kind, Runtime: "builtin", Search: id, Config: cfg}
-	}
-	txt := func(key, label string, req bool) CatalogField {
-		return CatalogField{Key: key, Label: label, Control: "text", Required: req}
-	}
-	area := func(key, label string, req bool) CatalogField {
-		return CatalogField{Key: key, Label: label, Control: "textarea", Required: req}
-	}
-	return catalogFile{
-		Cluster: "builtin", Label: "Core",
-		Description: "Code-backed platform primitives.",
-		Nodes: []CatalogNode{
-			mk("trigger.manual", "Manual trigger", "Start on demand; seeds run input.", "trigger"),
-			mk("trigger.webhook", "Webhook trigger", "Start from an HTTP request.", "trigger", txt("path", "Path", false)),
-			mk("trigger.schedule", "Schedule trigger", "Run on a cron schedule.", "trigger", txt("cron", "Cron", false)),
-			mk("agent.llm", "AI agent", "Reason/summarize/extract with an LLM.", "action", area("system", "System prompt", false), area("prompt", "Prompt", true), txt("model", "Model", false)),
-			mk("agent.chat", "Chat completion", "Single-turn prompt → response.", "action", area("system", "System prompt", false), area("prompt", "Prompt", true), txt("model", "Model", false)),
-			mk("tool.browser", "Browser", "Drive a real browser over URLs.", "action", area("urls", "URLs (one per line)", true)),
-			mk("tool.http", "HTTP request", "Call any REST API or URL.", "action", txt("method", "Method", false), txt("url", "URL", true), area("headers", "Headers (JSON)", false), area("body", "Body", false)),
-			mk("tool.code", "Run code", "Sandboxed Python/JS snippet.", "action", txt("language", "Language", true), area("source", "Source", true)),
-			mk("tool.db", "Database query", "SQL against TOOL_DB_URL.", "action", area("query", "SQL", true)),
-			mk("logic.branch", "If / Else", "Gate downstream on a condition.", "logic", txt("condition", "Condition", true)),
-			mk("logic.filter", "Filter", "Pass through only when condition holds.", "logic", txt("condition", "Keep when", true)),
-			mk("logic.loop", "Loop", "Fan out downstream once per item.", "logic", txt("items", "Items expression", true)),
-			mk("output.email", "Send email", "Deliver an email via SMTP seam.", "output", txt("to", "To", true), txt("subject", "Subject", false), area("body", "Body", false)),
-			mk("output.slack", "Send to Slack", "Post to a Slack webhook.", "output", txt("webhookUrl", "Webhook URL", false), area("message", "Message", false)),
-			mk("output.report", "Generate report", "Compose a markdown/PDF artifact.", "output", txt("title", "Title", true), txt("format", "Format", false)),
-		},
-	}
 }
 
 /* ------------------------------ prompt material ------------------------------ */
@@ -239,7 +232,7 @@ func nodeSchema(n CatalogNode) string {
 		for i, c := range n.Credentials {
 			keys[i] = c.Key
 		}
-		fmt.Fprintf(&b, "credentials (env, resolved at run time — degrade to record-intent if unset): %s\n", strings.Join(keys, ", "))
+		fmt.Fprintf(&b, "credentials (required at run time; missing values fail the node): %s\n", strings.Join(keys, ", "))
 	}
 	return b.String()
 }

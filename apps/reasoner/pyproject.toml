@@ -8,9 +8,9 @@ dependencies = [
     "temporalio[langgraph]>=1.27.0",
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
-    # Run-time synthesis LLM: Google Gemini via LangChain (keeps the Langfuse
-    # LangChain callback + usage-metadata plumbing identical to the old Anthropic path).
-    "langchain-google-genai>=2.0.0",
+    # Claude is the only model provider. Via LangChain rather than the bare
+    # anthropic SDK so Langfuse's callback handler sees every call (see obs.py).
+    "langchain-anthropic>=1.4.0",
     # Langfuse self-hosted observability (OTEL-based v3 SDK + LangChain callback).
     "langfuse>=3.0.0",
     # Browser infrastructure: drive Browserbase over CDP.

@@ -14,6 +14,12 @@ import unittest
 from dataclasses import replace
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
+os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
+os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
+os.environ.setdefault("BROWSERBASE_PROJECT_ID", "test-project")
+os.environ.setdefault("SMTP_HOST", "localhost")
 
 from reasoner import db, engine, nodes  # noqa: E402
 from reasoner.llm import Completion  # noqa: E402
@@ -138,8 +144,9 @@ class TemplateTest(unittest.TestCase):
         self.assertEqual(nodes.render("t={{input.topic}}", ctx), "t=otters")
         self.assertEqual(nodes.render("u={{outputs.fetch.text}}", ctx), "u=hello")
 
-    def test_unknown_ref_is_empty(self):
-        self.assertEqual(nodes.render("x={{outputs.nope.text}}", self._ctx()), "x=")
+    def test_unknown_ref_fails(self):
+        with self.assertRaisesRegex(ValueError, "template reference not found"):
+            nodes.render("x={{outputs.nope.text}}", self._ctx())
 
     def test_condition_eval(self):
         ctx = self._ctx()
@@ -242,8 +249,8 @@ class ExecuteGraphTest(unittest.TestCase):
         self.assertEqual(self.fake.agents["ra_guarded"]["status"], "succeeded")
 
 
-class NotifyFallbackTest(unittest.TestCase):
-    """output.email / output.slack must degrade cleanly when unconfigured."""
+class NotifyFailureTest(unittest.TestCase):
+    """Undeliverable output nodes must fail the run with the real reason."""
 
     def setUp(self):
         self.fake = FakeDB()
@@ -260,32 +267,30 @@ class NotifyFallbackTest(unittest.TestCase):
     def tearDown(self):
         nodes.CONFIG = self._orig_config
 
-    def test_email_falls_back_when_unconfigured(self):
+    def test_email_fails_when_unconfigured(self):
         g = [
             {"key": "start", "type": "trigger.manual", "config": {}, "dependsOn": []},
             {"key": "mail", "type": "output.email",
              "config": {"to": "a@b.com", "subject": "Hi", "body": "the digest"}, "dependsOn": ["start"]},
         ]
         result = _run(engine.execute_graph("run_mail", g, {}))
-        self.assertTrue(result["done"])
-        self.assertEqual(self.fake.run_status, "succeeded")
-        self.assertFalse(result["outputs"]["mail"]["delivered"])
-        # fell back to recording an artifact instead of sending.
-        self.assertEqual(len(self.fake.artifacts), 1)
-        self.assertIn("the digest", self.fake.artifacts[0][2])
-        self.assertTrue(any("recorded" in m.lower() for _, _, m in self.fake.logs))
+        self.assertFalse(result["done"])
+        self.assertEqual(self.fake.run_status, "failed")
+        self.assertEqual(result["failed_node"], "mail")
+        self.assertIn("SMTP_HOST", result["error"])
+        self.assertEqual(self.fake.artifacts, [])
 
-    def test_slack_falls_back_when_no_webhook(self):
+    def test_slack_fails_when_no_webhook(self):
         g = [
             {"key": "start", "type": "trigger.manual", "config": {}, "dependsOn": []},
             {"key": "post", "type": "output.slack",
              "config": {"message": "ping"}, "dependsOn": ["start"]},
         ]
         result = _run(engine.execute_graph("run_slack", g, {}))
-        self.assertTrue(result["done"])
-        self.assertFalse(result["outputs"]["post"]["delivered"])
-        self.assertEqual(len(self.fake.artifacts), 1)
-        self.assertEqual(self.fake.artifacts[0][2], "ping")
+        self.assertFalse(result["done"])
+        self.assertEqual(result["failed_node"], "post")
+        self.assertIn("webhookUrl", result["error"])
+        self.assertEqual(self.fake.artifacts, [])
 
 
 class PlanModuleTest(unittest.TestCase):

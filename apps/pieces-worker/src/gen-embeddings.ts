@@ -1,8 +1,8 @@
 /**
  * Generate packages/nodes/pieces/embeddings.{json,bin} — the offline half of
  * the planner's embedding prefilter (apps/api piecesembed.go). One vector per
- * index node (action or trigger), embedded with Gemini as RETRIEVAL_DOCUMENT
- * and unit-normalized so the Go side's dot product equals cosine similarity.
+ * index node (action or trigger), embedded with Voyage and unit-normalized so
+ * the Go side's dot product equals cosine similarity.
  *
  * Incremental: rows whose (model, dims, text) hash matches the existing
  * manifest are reused without an API call, so re-runs after small catalog
@@ -10,16 +10,15 @@
  * vectors embedded so far are saved to embeddings.partial.{json,bin} — a
  * staging file the Go loader never reads — so re-running after the quota
  * window converges to a complete sidecar instead of starting over. Run via
- * `npm run gen:embeddings` after gen:index; requires GEMINI_API_KEY (or
- * GOOGLE_API_KEY).
+ * `npm run gen:embeddings` after gen:index; requires VOYAGE_API_KEY.
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const MODEL = process.env.PLANNER_EMBED_MODEL || 'gemini-embedding-001';
-const DIMS = Number(process.env.PLANNER_EMBED_DIMS || 768);
-const BATCH = 100; // batchEmbedContents request cap
+const MODEL = process.env.PLANNER_EMBED_MODEL || 'voyage-4';
+const DIMS = Number(process.env.PLANNER_EMBED_DIMS || 1024);
+const BATCH = 100;
 const MAX_RETRIES = 8; // waits total ~2min — rides out per-minute quota windows
 
 interface IndexNode {
@@ -65,20 +64,18 @@ function normalize(v: number[]): Float32Array {
 
 async function embedBatch(key: string, texts: string[]): Promise<Float32Array[]> {
   const body = JSON.stringify({
-    requests: texts.map((text) => ({
-      model: `models/${MODEL}`,
-      content: { parts: [{ text }] },
-      taskType: 'RETRIEVAL_DOCUMENT',
-      outputDimensionality: DIMS,
-    })),
+    model: MODEL,
+    input: texts,
+    input_type: 'document',
+    output_dimension: DIMS,
   });
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:batchEmbedContents`;
+  const url = 'https://api.voyageai.com/v1/embeddings';
   for (let attempt = 0; ; attempt++) {
     let resp: Response;
     try {
       resp = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
         body,
       });
     } catch (err) {
@@ -92,26 +89,26 @@ async function embedBatch(key: string, texts: string[]): Promise<Float32Array[]>
       throw err;
     }
     if (resp.ok) {
-      const parsed = (await resp.json()) as { embeddings?: Array<{ values?: number[] }> };
-      const rows = parsed.embeddings ?? [];
+      const parsed = (await resp.json()) as { data?: Array<{ embedding?: number[]; index?: number }> };
+      const rows = (parsed.data ?? []).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
       if (rows.length !== texts.length) {
         throw new Error(`batch returned ${rows.length} embeddings for ${texts.length} texts`);
       }
       return rows.map((r) => {
-        if (!Array.isArray(r.values) || r.values.length !== DIMS) {
-          throw new Error(`embedding has ${r.values?.length ?? 0} dims, want ${DIMS}`);
+        if (!Array.isArray(r.embedding) || r.embedding.length !== DIMS) {
+          throw new Error(`embedding has ${r.embedding?.length ?? 0} dims, want ${DIMS}`);
         }
-        return normalize(r.values);
+        return normalize(r.embedding);
       });
     }
     // 429/5xx are transient (rate limits, hiccups); everything else is fatal.
     if ((resp.status === 429 || resp.status >= 500) && attempt < MAX_RETRIES) {
       const wait = Math.min(30_000, 1_000 * 2 ** attempt);
-      console.warn(`gemini ${resp.status}; retrying in ${wait / 1000}s`);
+      console.warn(`voyage ${resp.status}; retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
       continue;
     }
-    throw new Error(`gemini batchEmbedContents status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+    throw new Error(`voyage embeddings status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
   }
 }
 
@@ -165,9 +162,9 @@ function writeSidecar(manifestPath: string, binPath: string, ids: string[], hash
 }
 
 async function main(): Promise<void> {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const key = process.env.VOYAGE_API_KEY;
   if (!key) {
-    console.error('GEMINI_API_KEY (or GOOGLE_API_KEY) is required to generate embeddings');
+    console.error('VOYAGE_API_KEY is required to generate embeddings');
     process.exit(1);
   }
 

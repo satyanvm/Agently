@@ -1,34 +1,24 @@
-# Database — source of truth for the schema
+# Database migrations
 
-SQL migrations for Supabase Postgres. Applied in filename order.
+Migrations are applied in filename order to the shared Postgres database.
+`docker-compose.yml` mounts the portable migrations for a clean local database;
+Supabase-only RLS/realtime migrations remain available for hosted deployments.
 
-- `0001_init.sql` — full schema: workspaces, members, api_keys, agent_definitions,
-  workflows, workflow_versions, runs, run_agents, agent_messages, artifacts,
-  run_logs, browser_sessions/actions/shots/console, notifications,
-  activity_events, domain_events. Enums + indexes included.
-- `0002_rls.sql` — Row Level Security: each user sees only their workspace's rows.
-  (Forward-looking; enable once Supabase Auth is wired.)
-- `0003_queue.sql` — `claim_next_run()` (FOR UPDATE SKIP LOCKED) + stalled-run
-  reaper for the worker.
-- `0004_realtime.sql` — adds tables to the Supabase realtime publication and a
-  `pg_notify` trigger on `domain_events` for non-Supabase gateways.
+Important current migrations:
 
-Apply with the Supabase CLI or by running the files against `DATABASE_URL`:
+- `0001_init.sql`: core entities and run/log/browser tables.
+- `0006`-`0008`: run input, workflow defaults, and integrations.
+- `0009`-`0010`: historical Temporal/native transition; retained for upgrade order.
+- `0011_credentials.sql`: durable credential rows.
+- `0012_piece_trigger_state.sql`: durable Activepieces trigger cursors/state.
+- `0013_drop_retired_execution_columns.sql`: removes the retired run engine and
+  Postgres-queue lease columns.
+
+Apply an upgrade without resetting data:
 
 ```bash
-for f in packages/db/migrations/0*.sql; do psql "$DATABASE_URL" -f "$f"; done
+docker exec -i agently-postgres psql -U agently -d agently < packages/db/migrations/00XX_name.sql
 ```
 
-## Relationship to the rest of the codebase
-
-The schema mirrors the canonical entity model in **`@agently/contracts`**
-(`packages/contracts/src/entities.ts`) one-for-one — table per entity, snake_case
-columns, prefixed text PKs (`wf_…`, `run_…`). When a Postgres-backed
-`Repositories` implementation is written (`packages/core/src/platform/`), it maps
-these rows to those types directly. The in-memory store used by the mock backend
-today already speaks the same shapes, so swapping storage touches only the
-repository implementation — not services, routes, or the worker.
-
-> Note: an earlier scaffold (`packages/core/src/types.ts`) modeled a simpler
-> single-agent world (Agent/Run/LogEntry). That file is retained for backward
-> compatibility; the canonical, current model is `@agently/contracts`.
+For a disposable local database, `docker compose down -v && docker compose up -d`
+recreates the volume and applies the mounted files from scratch.

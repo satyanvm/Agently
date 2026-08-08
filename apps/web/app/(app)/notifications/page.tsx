@@ -10,7 +10,6 @@ import {
   PauseCircle,
   Play,
   CheckCheck,
-  Settings2,
   ArrowRight,
 } from "lucide-react";
 import { TopBar } from "@/components/shell/topbar";
@@ -18,8 +17,7 @@ import { PageContainer, PageTitle } from "@/components/shell/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
-import { Switch } from "@/components/ui/switch";
-import { fetchNotifications } from "@/lib/api";
+import { fetchNotifications, markAllNotificationsRead, markNotificationRead } from "@/lib/api";
 import type { AppNotification, NotificationType } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -59,10 +57,12 @@ export default function NotificationsPage() {
     return true;
   });
 
-  function markAll() {
+  async function markAll() {
+    await markAllNotificationsRead().catch(() => {});
     setItems((prev) => prev.map((n) => ({ ...n, read: true })));
   }
-  function markRead(id: string) {
+  async function markRead(id: string) {
+    await markNotificationRead(id).catch(() => {});
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
   }
 
@@ -82,7 +82,7 @@ export default function NotificationsPage() {
           subtitle={unread > 0 ? `${unread} unread · across all workflows` : "You're all caught up."}
         />
 
-        <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr]">
+        <div className="grid gap-6">
           {/* Feed */}
           <div>
             <div className="mb-4">
@@ -125,7 +125,7 @@ export default function NotificationsPage() {
                       <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">{n.body}</p>
                       {n.workflowSlug && (
                         <Link
-                          href={n.runNumber ? `/runs/run-8842` : `/workflows/${n.workflowSlug}`}
+                          href={n.runId ? `/runs/${n.runId}` : `/workflows/${n.workflowSlug}`}
                           onClick={() => markRead(n.id)}
                           className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-accent-soft hover:underline"
                         >
@@ -151,73 +151,8 @@ export default function NotificationsPage() {
             </Card>
           </div>
 
-          {/* Preferences */}
-          <div>
-            <Card>
-              <div className="flex items-center gap-2 px-5 pb-1 pt-4">
-                <Settings2 className="size-4 text-muted" />
-                <h3 className="text-[13px] font-semibold text-fg">Delivery preferences</h3>
-              </div>
-              <div className="px-5 pb-2 pt-3">
-                <Pref label="In-app" desc="Show in the notification center" defaultOn />
-                <Pref label="Email" desc="maya@northwind.dev" defaultOn />
-                <Pref label="Slack" desc="#agent-ops channel" defaultOn />
-                <Pref label="Webhook" desc="POST to your endpoint" />
-              </div>
-              <div className="border-t border-border px-5 pb-5 pt-4">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-ghost">
-                  Notify me about
-                </span>
-                <div className="mt-3 space-y-1">
-                  <Pref label="Workflow completed" defaultOn compact />
-                  <Pref label="Workflow failed" defaultOn compact />
-                  <Pref label="Browser errors" defaultOn compact />
-                  <Pref label="Cost thresholds" defaultOn compact />
-                  <Pref label="Agent blocked / needs input" defaultOn compact />
-                </div>
-              </div>
-            </Card>
-
-            <Card className="mt-5 px-5 py-4">
-              <h3 className="text-[13px] font-semibold text-fg">Cost alert threshold</h3>
-              <p className="mt-1 text-[12px] text-muted">Alert when a single run exceeds this budget.</p>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="flex h-9 flex-1 items-center rounded-md border border-border bg-surface px-3">
-                  <span className="text-faint">$</span>
-                  <input
-                    defaultValue="6.00"
-                    className="ml-1 w-full bg-transparent text-sm tabular-nums text-fg focus:outline-none"
-                  />
-                </div>
-                <Button variant="secondary" size="sm">Save</Button>
-              </div>
-            </Card>
-          </div>
         </div>
       </PageContainer>
     </>
-  );
-}
-
-function Pref({
-  label,
-  desc,
-  defaultOn,
-  compact,
-}: {
-  label: string;
-  desc?: string;
-  defaultOn?: boolean;
-  compact?: boolean;
-}) {
-  const [on, setOn] = React.useState(!!defaultOn);
-  return (
-    <div className={cn("flex items-center justify-between", compact ? "py-1.5" : "py-2.5")}>
-      <div>
-        <div className="text-[13px] font-medium text-fg">{label}</div>
-        {desc && <div className="text-[11px] text-faint">{desc}</div>}
-      </div>
-      <Switch checked={on} onChange={setOn} />
-    </div>
   );
 }

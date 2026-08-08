@@ -33,12 +33,12 @@ import {
   formatDuration,
   formatCompact,
   timeAgo,
-  NOW,
+  nowMs,
 } from "@/lib/utils";
 
 function runtimeOf(run: WorkflowRun): number | null {
   if (!run.startedAt) return null;
-  const end = run.finishedAt ? Date.parse(run.finishedAt) : NOW;
+  const end = run.finishedAt ? Date.parse(run.finishedAt) : nowMs();
   return end - Date.parse(run.startedAt);
 }
 

@@ -33,8 +33,13 @@ export function formatCompact(n: number): string {
   return `${n}`;
 }
 
-/** Relative time from an ISO string, stable & dependency-free: "3m ago", "2h ago". */
-export function timeAgo(iso: string, now: number = NOW): string {
+/** Current time as a function so live runs never use a frozen clock. */
+export function nowMs(): number {
+  return Date.now();
+}
+
+/** Relative time from an ISO string, dependency-free: "3m ago", "2h ago". */
+export function timeAgo(iso: string, now: number = nowMs()): string {
   const diff = now - Date.parse(iso);
   const s = Math.round(diff / 1000);
   if (s < 60) return `${s}s ago`;
@@ -55,9 +60,3 @@ export function formatClock(iso: string): string {
     second: "2-digit",
   });
 }
-
-/**
- * A fixed "now" so server and client render identically and relative times are
- * deterministic across the mock dataset. (Real app would use live clock.)
- */
-export const NOW = Date.parse("2026-06-06T17:42:00Z");

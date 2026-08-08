@@ -70,16 +70,16 @@ def handler_for(node_type: str) -> Handler:
 
     Resolution order: code-backed built-ins (this registry) → the shared
     integration catalog (generic executor, hundreds of types as data) →
-    Activepieces piece actions (record-intent here; see note on _piece_fallback)
-    → passthrough for genuinely unknown types.
+    Activepieces piece actions (which must be routed to the pieces worker) → an
+    explicit unsupported-type failure.
     """
     if node_type in _REGISTRY:
         return _REGISTRY[node_type]
     if catalog.spec_for(node_type) is not None:
         return _integration
     if pieces.is_piece_type(node_type):
-        return _piece_fallback
-    return _passthrough
+        return _misrouted_piece
+    return _unsupported
 
 
 def supported_types() -> list[str]:
@@ -94,8 +94,8 @@ _TOKEN = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
 def render(template: Any, ctx: NodeContext) -> str:
     """Resolve {{input.x}} / {{outputs.key.field}} references in a string.
 
-    Non-string templates are coerced with str(). Unknown references collapse to
-    an empty string rather than raising, so a half-configured node still runs.
+    Non-string templates are coerced with str(). Unknown references are errors;
+    silently replacing them with empty strings produces corrupt downstream calls.
     """
     if not isinstance(template, str):
         return "" if template is None else str(template)
@@ -105,12 +105,11 @@ def render(template: Any, ctx: NodeContext) -> str:
     def resolve(expr: str) -> str:
         cur: Any = root
         for part in expr.split("."):
-            if isinstance(cur, dict):
-                cur = cur.get(part)
-            else:
-                return ""
+            if not isinstance(cur, dict) or part not in cur:
+                raise ValueError(f"template reference not found: {expr}")
+            cur = cur[part]
         if cur is None:
-            return ""
+            raise ValueError(f"template reference is null: {expr}")
         return cur if isinstance(cur, str) else json.dumps(cur)
 
     return _TOKEN.sub(lambda m: resolve(m.group(1)), template)
@@ -123,7 +122,7 @@ def render_tpl(template: Any, ctx: NodeContext, extra_roots: dict[str, Any]) -> 
     `config` (the node's filled config) and `credentials` (env vars) — and two
     helpers for safe embedding: `{{json expr}}` (JSON-encoded, for JSON bodies)
     and `{{urlencode expr}}` (percent-encoded, for query strings / form bodies).
-    Same fail-open semantics as render(): unknown references collapse to "".
+    Unknown references raise instead of collapsing to an empty string.
     """
     if not isinstance(template, str):
         return "" if template is None else str(template)
@@ -133,10 +132,9 @@ def render_tpl(template: Any, ctx: NodeContext, extra_roots: dict[str, Any]) -> 
     def lookup(expr: str) -> Any:
         cur: Any = root
         for part in expr.split("."):
-            if isinstance(cur, dict):
-                cur = cur.get(part)
-            else:
-                return None
+            if not isinstance(cur, dict) or part not in cur:
+                raise ValueError(f"template reference not found: {expr}")
+            cur = cur[part]
         return cur
 
     def resolve(raw: str) -> str:
@@ -148,12 +146,16 @@ def render_tpl(template: Any, ctx: NodeContext, extra_roots: dict[str, Any]) -> 
                 break
         val = lookup(expr)
         if helper == "json":
-            return json.dumps("" if val is None else val)
+            if val is None:
+                raise ValueError(f"template reference is null: {expr}")
+            return json.dumps(val)
         if helper == "urlencode":
-            s = "" if val is None else (val if isinstance(val, str) else json.dumps(val))
+            if val is None:
+                raise ValueError(f"template reference is null: {expr}")
+            s = val if isinstance(val, str) else json.dumps(val)
             return urllib.parse.quote(s, safe="")
         if val is None:
-            return ""
+            raise ValueError(f"template reference is null: {expr}")
         return val if isinstance(val, str) else json.dumps(val)
 
     return _TOKEN.sub(lambda m: resolve(m.group(1)), template)
@@ -187,28 +189,15 @@ def split_credential(cfg: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 
 async def _credential_values(run_id: str, key: str, cred_id: str) -> dict[str, Any]:
-    """Fetch a credential row's secret values; tolerate a dangling id.
-
-    Runs inside an activity (this module only ever executes in activity context),
-    per contract §7. A missing/unreadable row degrades to {} so the per-key env
-    fallback still applies.
-    """
+    """Fetch a credential row's secret values or raise with the exact reason."""
     if not cred_id:
         return {}
     try:
         data = await db.fetch_credential_data(cred_id)
-    except Exception as exc:  # noqa: BLE001 — a DB hiccup must not crash the node
-        await db.append_log(
-            run_id, "warn", "system", key,
-            f"Could not resolve credential {cred_id}: {exc} — falling back to env",
-        )
-        return {}
+    except Exception as exc:  # noqa: BLE001 - preserve the database reason
+        raise RuntimeError(f"could not resolve credential {cred_id}: {exc}") from exc
     if data is None:
-        await db.append_log(
-            run_id, "warn", "system", key,
-            f"Credential {cred_id} not found — falling back to env",
-        )
-        return {}
+        raise RuntimeError(f"credential {cred_id} not found")
     return data
 
 
@@ -266,7 +255,7 @@ async def _http(ctx: NodeContext) -> NodeResult:
     method = (_cfg(ctx, "method") or "GET").upper()
     url = render(_cfg(ctx, "url"), ctx)
     if not url:
-        return NodeResult(output={"error": "no url configured"}, summary="Skipped — no URL")
+        raise ValueError("tool.http requires a URL")
     headers = _parse_json_obj(render(_cfg(ctx, "headers"), ctx))
     body = render(_cfg(ctx, "body"), ctx)
     try:
@@ -274,6 +263,7 @@ async def _http(ctx: NodeContext) -> NodeResult:
             resp = await client.request(
                 method, url, headers=headers or None, content=(body or None)
             )
+        resp.raise_for_status()
         text = resp.text[:8000]
         await db.append_log(
             ctx.run_id, "info", "system", ctx.node["key"],
@@ -283,33 +273,25 @@ async def _http(ctx: NodeContext) -> NodeResult:
             output={"status": resp.status_code, "body": text},
             summary=f"{method} {url} → {resp.status_code}",
         )
-    except Exception as exc:  # noqa: BLE001 — surface as node output, not a crash
-        return NodeResult(output={"error": str(exc)}, summary=f"HTTP failed: {exc}")
+    except Exception as exc:  # noqa: BLE001 - fail the node with the provider reason
+        raise RuntimeError(f"{method} {url} failed: {exc}") from exc
 
 
 @handles("tool.code")
 async def _code(ctx: NodeContext) -> NodeResult:
-    """Execute a code snippet in the subprocess sandbox — opt-in via
-    TOOL_CODE_ENABLED=1. Unconfigured environments record the source instead
-    (the old behaviour), with a loud log pointing at the gate.
-    """
+    """Execute a code snippet in the subprocess sandbox."""
     language = _cfg(ctx, "language") or "python"
     source = _cfg(ctx, "source")
     key = ctx.node["key"]
     if not CONFIG.tool_code_enabled:
-        await db.append_log(
-            ctx.run_id, "warn", "system", key,
-            "Code recorded, not executed — set TOOL_CODE_ENABLED=1 to run tool.code for real",
-            detail=source or None,
-        )
-        return NodeResult(output={"code": source, "executed": False}, summary="Recorded code (sandbox disabled)")
+        raise RuntimeError("TOOL_CODE_ENABLED=1 is required to execute tool.code")
 
     cfg, _ = split_credential(ctx.node.get("config", {}) or {})
     payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": cfg, **ctx.extra}
     res = await sandbox.run(language, source, payload)
     if not res.ok:
         await db.append_log(ctx.run_id, "error", "tool", key, f"Code failed: {res.error}", detail=res.stdout or None)
-        return NodeResult(output={"error": res.error, "stdout": res.stdout, "executed": True}, summary=f"Code failed: {_clip(res.error, 120)}")
+        raise RuntimeError(f"code execution failed: {res.error}")
     await db.append_log(ctx.run_id, "info", "tool", key, f"Code ran ({language})", detail=_clip(res.stdout, 500) or None)
     return NodeResult(
         output={"result": res.result, "stdout": res.stdout, "executed": True},
@@ -320,23 +302,18 @@ async def _code(ctx: NodeContext) -> NodeResult:
 @handles("tool.db")
 async def _db_query(ctx: NodeContext) -> NodeResult:
     """Run SQL against the dedicated TOOL_DB_URL database — never the platform
-    Postgres. Unconfigured environments record the query instead.
+    Postgres.
     """
     query = render(_cfg(ctx, "query"), ctx)
     key = ctx.node["key"]
     if not CONFIG.tool_db_url:
-        await db.append_log(
-            ctx.run_id, "info", "system", key,
-            "Query recorded, not executed — set TOOL_DB_URL to run tool.db against a database",
-            detail=query or None,
-        )
-        return NodeResult(output={"query": query, "executed": False}, summary="Recorded query (no TOOL_DB_URL)")
+        raise RuntimeError("TOOL_DB_URL is required to execute tool.db")
 
     try:
         rows, count = await db.run_tool_query(CONFIG.tool_db_url, query, max_rows=200)
-    except Exception as exc:  # noqa: BLE001 — surface as node output, not a crash
+    except Exception as exc:  # noqa: BLE001 - fail with the database reason
         await db.append_log(ctx.run_id, "error", "tool", key, f"Query failed: {exc}", detail=query)
-        return NodeResult(output={"error": str(exc), "executed": True}, summary=f"Query failed: {_clip(str(exc), 120)}")
+        raise RuntimeError(f"database query failed: {exc}") from exc
     await db.append_log(ctx.run_id, "info", "tool", key, f"Query returned {count} row(s)", detail=query)
     return NodeResult(output={"rows": rows, "rowCount": count, "executed": True}, summary=f"{count} row(s)")
 
@@ -381,66 +358,45 @@ async def _loop(ctx: NodeContext) -> NodeResult:
 
 @handles("output.email")
 async def _email(ctx: NodeContext) -> NodeResult:
-    """Deliver a run digest by email over SMTP; fall back to record-intent.
-
-    Mirrors the retired Go worker's SMTP seam (archive/worker/internal/notifier): SMTP_HOST /
-    SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM. When SMTP is unconfigured (or the
-    send fails, or there is no recipient) we degrade to recording the intent — a log
-    line plus an artifact — so the run never fails and the UI still shows something.
-    """
+    """Deliver a run digest by email over SMTP or fail the node."""
     to = render(_cfg(ctx, "to"), ctx)
     subject = render(_cfg(ctx, "subject"), ctx) or "Agently workflow result"
     body = _notify_body(ctx)
     key = ctx.node["key"]
 
-    delivered = False
-    detail = subject
-    if CONFIG.smtp_enabled and to:
-        try:
-            await asyncio.to_thread(_send_smtp, to, subject, body)
-            delivered = True
-            await db.append_log(ctx.run_id, "success", "system", key, f"Emailed {to}", detail=subject)
-        except Exception as exc:  # noqa: BLE001 — never fail the run on a delivery error
-            detail = f"{subject} — send failed, recorded instead: {exc}"
-            await db.append_log(ctx.run_id, "warn", "system", key, f"Email send failed: {exc}", detail=subject)
-    else:
-        reason = "SMTP not configured" if not CONFIG.smtp_enabled else "no recipient"
-        await db.append_log(ctx.run_id, "info", "system", key, f"Email recorded ({reason})", detail=subject)
-
-    # Always leave an artifact so the digest is visible in the UI regardless.
+    if not CONFIG.smtp_enabled:
+        raise RuntimeError("SMTP_HOST is required for output.email")
+    if not to:
+        raise ValueError("output.email requires a recipient")
+    try:
+        await asyncio.to_thread(_send_smtp, to, subject, body)
+    except Exception as exc:  # noqa: BLE001 - fail with SMTP's reason
+        raise RuntimeError(f"email delivery to {to} failed: {exc}") from exc
+    await db.append_log(ctx.run_id, "success", "system", key, f"Emailed {to}", detail=subject)
     await db.add_artifact(ctx.run_id, f"{_slug(subject)}.eml", "file", ctx.label or "Email", f"To: {to}\nSubject: {subject}\n\n{body}")
-    channel = f"email to {to}" if to else "email (no recipient)"
-    return NodeResult(output={"delivered": delivered, "channel": channel, "to": to}, summary=("Emailed " if delivered else "Recorded ") + channel)
+    channel = f"email to {to}"
+    return NodeResult(output={"delivered": True, "channel": channel, "to": to}, summary="Emailed " + channel)
 
 
 @handles("output.slack")
 async def _slack(ctx: NodeContext) -> NodeResult:
-    """POST a message to a Slack incoming webhook; fall back to record-intent.
-
-    Follows the same provider-seam discipline as the rest of the reasoner: with a
-    webhook URL we POST via httpx; without one (or on any error) we record the
-    intent and still write an artifact. Never fails the run.
-    """
+    """POST a message to a Slack incoming webhook or fail the node."""
     webhook = render(_cfg(ctx, "webhookUrl"), ctx)
     message = render(_cfg(ctx, "message"), ctx) or _notify_body(ctx)
     key = ctx.node["key"]
 
-    delivered = False
-    if webhook:
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(webhook, json={"text": message})
-            resp.raise_for_status()
-            delivered = True
-            await db.append_log(ctx.run_id, "success", "system", key, f"Posted to Slack → {resp.status_code}", detail=_clip(message))
-        except Exception as exc:  # noqa: BLE001 — never fail the run on a delivery error
-            await db.append_log(ctx.run_id, "warn", "system", key, f"Slack post failed: {exc}", detail=_clip(message))
-    else:
-        await db.append_log(ctx.run_id, "info", "system", key, "Slack recorded (no webhook configured)", detail=_clip(message))
+    if not webhook:
+        raise ValueError("output.slack requires webhookUrl")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(webhook, json={"text": message})
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 - fail with Slack's reason
+        raise RuntimeError(f"Slack delivery failed: {exc}") from exc
+    await db.append_log(ctx.run_id, "success", "system", key, f"Posted to Slack → {resp.status_code}", detail=_clip(message))
 
     await db.add_artifact(ctx.run_id, "slack-message.txt", "file", ctx.label or "Slack", message)
-    channel = "Slack" if webhook else "Slack (no webhook)"
-    return NodeResult(output={"delivered": delivered, "channel": channel}, summary=("Posted to " if delivered else "Recorded ") + channel)
+    return NodeResult(output={"delivered": True, "channel": "Slack"}, summary="Posted to Slack")
 
 
 def _notify_body(ctx: NodeContext) -> str:
@@ -499,8 +455,7 @@ async def _integration(ctx: NodeContext) -> NodeResult:
                 TOOL_CODE_ENABLED gate).
       llm     → complete with the definition's system/prompt templates.
 
-    Missing credentials degrade to record-intent with a loud log — a graph never
-    fails because an env var isn't set on this deployment.
+    Missing credentials and runtime failures raise so the run reflects reality.
     """
     spec = catalog.spec_for(str(ctx.node.get("type", ""))) or {}
     key = ctx.node["key"]
@@ -525,13 +480,8 @@ async def _integration(ctx: NodeContext) -> NodeResult:
         else:
             missing.append(ckey or "?")
     if missing:
-        await db.append_log(
-            ctx.run_id, "warn", "system", key,
-            f"{ctx.node.get('type')} recorded — missing credential env var(s): {', '.join(missing)}",
-        )
-        return NodeResult(
-            output={"recorded": True, "executed": False, "missingCredentials": missing},
-            summary=f"Recorded (needs {', '.join(missing)})",
+        raise RuntimeError(
+            f"{ctx.node.get('type')} is missing credential(s): {', '.join(missing)}"
         )
 
     roots = {"config": cfg, "credentials": creds}
@@ -545,15 +495,13 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     if runtime == "code":
         code_spec = spec.get("code") or {}
         if not CONFIG.tool_code_enabled:
-            await db.append_log(
-                ctx.run_id, "warn", "system", key,
-                f"{ctx.node.get('type')} recorded — set TOOL_CODE_ENABLED=1 to execute code-runtime nodes",
+            raise RuntimeError(
+                f"TOOL_CODE_ENABLED=1 is required to execute {ctx.node.get('type')}"
             )
-            return NodeResult(output={"recorded": True, "executed": False}, summary="Recorded (sandbox disabled)")
         payload = {"input": ctx.run_input, "outputs": ctx.upstream, "config": cfg, **ctx.extra}
         res = await sandbox.run(code_spec.get("language", "python"), code_spec.get("source", ""), payload)
         if not res.ok:
-            return NodeResult(output={"error": res.error, "stdout": res.stdout, "executed": True}, summary=f"Failed: {_clip(res.error, 120)}")
+            raise RuntimeError(f"{ctx.node.get('type')} code execution failed: {res.error}")
         out = res.result if isinstance(res.result, dict) else {"result": res.result}
         out.setdefault("stdout", res.stdout)
         out["executed"] = True
@@ -575,7 +523,7 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     method = (http_spec.get("method") or "GET").upper()
     url = render_tpl(http_spec.get("url", ""), ctx, roots)
     if not url:
-        return NodeResult(output={"error": "no url in definition"}, summary="Skipped — no URL")
+        raise ValueError(f"{ctx.node.get('type')} resolved to an empty URL")
     headers = {
         str(hk): render_tpl(hv, ctx, roots)
         for hk, hv in (http_spec.get("headers") or {}).items()
@@ -591,9 +539,14 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
-    except Exception as exc:  # noqa: BLE001 — surface as node output, not a crash
+    except Exception as exc:  # noqa: BLE001 - fail with the upstream reason
         await db.append_log(ctx.run_id, "error", "tool", key, f"{method} {url} failed: {exc}")
-        return NodeResult(output={"error": str(exc)}, summary=f"HTTP failed: {_clip(str(exc), 120)}")
+        raise RuntimeError(f"{ctx.node.get('type')} request failed: {exc}") from exc
+
+    if resp.status_code < 200 or resp.status_code >= 300:
+        raise RuntimeError(
+            f"{ctx.node.get('type')} returned HTTP {resp.status_code}: {resp.text[:300]}"
+        )
 
     text = resp.text[:8000]
     output: dict[str, Any] = {"status": resp.status_code, "body": text}
@@ -620,37 +573,23 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     return NodeResult(output=output, summary=f"{method} {_clip(url, 80)} → {resp.status_code}")
 
 
-async def _piece_fallback(ctx: NodeContext) -> NodeResult:
+async def _misrouted_piece(ctx: NodeContext) -> NodeResult:
     """pieces.* node reached run_node instead of the pieces queue.
 
     The real execution path for piece nodes is workflow-side (DynamicWorkflow
     routes them to the Node pieces worker via execute_piece — see workflow.py
     _run_piece_node). This handler only fires on the single-activity fallback
     orchestrator (engine.execute_graph), which cannot make cross-queue calls;
-    there we record intent rather than half-execute.
+    reaching it is a routing error and must fail the run.
     """
-    await db.append_log(
-        ctx.run_id, "warn", "system", ctx.node["key"],
-        f"{ctx.node.get('type')} recorded — piece nodes execute on the pieces "
-        "worker via the per-node orchestrator, not the single-activity fallback",
-    )
-    return NodeResult(
-        output={"recorded": True, "executed": False, "reason": "fallback-orchestrator"},
-        summary="Recorded (pieces run on the pieces worker)",
+    raise RuntimeError(
+        f"{ctx.node.get('type')} cannot execute in the single-activity orchestrator; "
+        "route the run through DynamicWorkflow and the pieces worker"
     )
 
 
-async def _passthrough(ctx: NodeContext) -> NodeResult:
-    """Fallback for unknown node types — pass upstream through, log once."""
-    await db.append_log(
-        ctx.run_id, "warn", "system", ctx.node["key"],
-        f"No handler for type '{ctx.node.get('type')}' — passing through",
-    )
-    merged: dict[str, Any] = {}
-    for v in ctx.upstream.values():
-        if isinstance(v, dict):
-            merged.update(v)
-    return NodeResult(output=merged, summary="Passthrough")
+async def _unsupported(ctx: NodeContext) -> NodeResult:
+    raise RuntimeError(f"no execution handler for node type {ctx.node.get('type')!r}")
 
 
 # ─────────────────────────── helpers ───────────────────────────
@@ -672,17 +611,15 @@ def _resolve_ref(expr: str, ctx: NodeContext) -> Any:
     root = {"input": ctx.run_input, "outputs": ctx.upstream}
     cur: Any = root
     for part in expr.strip().split("."):
-        if isinstance(cur, dict):
-            cur = cur.get(part)
-        else:
-            return None
+        if not isinstance(cur, dict) or part not in cur:
+            raise ValueError(f"reference not found: {expr}")
+        cur = cur[part]
     return cur
 
 
 # A deliberately tiny comparison evaluator — NOT a general expression engine.
 # Supports `<lhs> <op> <rhs>` with ==, !=, >, <, >=, <=; both sides may be a
-# dotted ref or a literal. Anything it can't parse defaults to True (fail-open),
-# so a malformed condition never silently drops a branch.
+# dotted ref or a literal. Invalid comparisons raise instead of opening a branch.
 _COND = re.compile(r"^\s*(.+?)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$")
 
 
@@ -710,9 +647,9 @@ def _eval_condition(expr: str, ctx: NodeContext) -> bool:
             return lhs >= rhs
         if op == "<=":
             return lhs <= rhs
-    except TypeError:
-        return str(lhs) == str(rhs) if op == "==" else True
-    return True
+    except TypeError as exc:
+        raise ValueError(f"condition operands are not comparable: {expr}") from exc
+    raise ValueError(f"unsupported condition: {expr}")
 
 
 def _side(token: str, ctx: NodeContext) -> Any:

@@ -34,13 +34,16 @@ services:
       - ./packages/db/migrations/0008_integrations.sql:/docker-entrypoint-initdb.d/0008_integrations.sql:ro
       - ./packages/db/migrations/0009_temporal_engine.sql:/docker-entrypoint-initdb.d/0009_temporal_engine.sql:ro
       - ./packages/db/migrations/0010_retire_native_engine.sql:/docker-entrypoint-initdb.d/0010_retire_native_engine.sql:ro
+      - ./packages/db/migrations/0011_credentials.sql:/docker-entrypoint-initdb.d/0011_credentials.sql:ro
+      - ./packages/db/migrations/0012_piece_trigger_state.sql:/docker-entrypoint-initdb.d/0012_piece_trigger_state.sql:ro
+      - ./packages/db/migrations/0013_drop_retired_execution_columns.sql:/docker-entrypoint-initdb.d/0013_drop_retired_execution_columns.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agently -d agently"]
       interval: 3s
       timeout: 3s
       retries: 10
 
-  # ── Temporal (durability plane for engine='temporal' runs) ──────────────────
+  # ── Temporal (durability plane for all runs) ────────────────────────────────
   # MIT-licensed. The auto-setup image creates the schema + default namespace on a
   # dedicated Postgres so it never touches the agently app database. Reasoning runs
   # *inside* this: each LangGraph node is a Temporal activity (see apps/reasoner).

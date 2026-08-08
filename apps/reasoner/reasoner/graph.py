@@ -19,13 +19,14 @@ writes are keyed by run id and idempotent enough to survive an activity retry.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from temporalio.common import RetryPolicy
 
-from . import browser, db, engine, llm, obs
+from . import browser, db, engine, llm, nodes, obs
 from .config import CONFIG
 
 GRAPH_NAME = "agently-reason"
@@ -97,10 +98,9 @@ async def plan_node(state: ReasonState) -> dict[str, Any]:
     run_id = state["run_id"]
     inp = state.get("input", {})
     await db.set_run_running(run_id, "Planning")
-    # Only stamp a Langfuse handle when tracing is actually configured, so the UI
-    # never renders a dead "View trace" link.
-    if obs.enabled():
-        await db.set_langfuse_trace(run_id, obs.session_handle(run_id))
+    # Tracing is mandatory now, so the "View trace" link is never dead and this
+    # no longer needs to be conditional.
+    await db.set_langfuse_trace(run_id, obs.session_handle(run_id))
     ids = await _ensure_agents(run_id)
     await db.set_agent_status(ids["plan"], "running")
     await db.append_log(run_id, "info", "agent", "planner", "Decomposing the task")
@@ -168,9 +168,8 @@ async def deliver_node(state: ReasonState) -> dict[str, Any]:
     await db.add_artifact(run_id, "digest.md", "report", "Composer", summary)
     email = inp.get("email")
     if email:
-        # Email delivery is reused from the Go notifier in a later phase; for the
-        # slice we record the intent honestly rather than pretend to send.
-        await db.append_log(run_id, "info", "system", "composer", f"Digest ready — would email to {email}")
+        await asyncio.to_thread(nodes._send_smtp, str(email), "Agently workflow result", summary)
+        await db.append_log(run_id, "success", "system", "composer", f"Emailed digest to {email}")
     await db.set_agent_status(ids["deliver"], "succeeded", summary="Digest produced")
     await db.set_run_progress(run_id, _TOTAL_STEPS, _TOTAL_STEPS, "Completed")
     await db.finish_run(run_id, "succeeded", "Completed")

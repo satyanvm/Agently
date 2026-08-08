@@ -13,6 +13,12 @@ import unittest
 from dataclasses import replace
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
+os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
+os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
+os.environ.setdefault("BROWSERBASE_PROJECT_ID", "test-project")
+os.environ.setdefault("SMTP_HOST", "localhost")
 
 from reasoner import catalog, db, engine, nodes, plan, sandbox  # noqa: E402
 from reasoner.config import CONFIG  # noqa: E402
@@ -40,9 +46,10 @@ class RenderTplTest(unittest.TestCase):
             "he%20said%20%22hi%22%20%26%20left")
         self.assertEqual(
             nodes.render_tpl("Bearer {{credentials.TOK}}", ctx, roots), "Bearer s3cr3t")
-        # Unknown refs stay fail-open.
-        self.assertEqual(nodes.render_tpl("x={{config.nope}}", ctx, roots), "x=")
-        self.assertEqual(nodes.render_tpl("{{json config.nope}}", ctx, roots), '""')
+        with self.assertRaisesRegex(ValueError, "template reference not found"):
+            nodes.render_tpl("x={{config.nope}}", ctx, roots)
+        with self.assertRaisesRegex(ValueError, "template reference not found"):
+            nodes.render_tpl("{{json config.nope}}", ctx, roots)
 
     def test_extra_roots_reach_render(self):
         ctx = ctx_for({"key": "n", "config": {}}, extra={"item": {"title": "T"},
@@ -55,10 +62,10 @@ class CatalogTest(unittest.TestCase):
         self.assertGreater(catalog.size(), 100, "generated catalog should be loaded")
         self.assertIsNotNone(catalog.spec_for("slack.webhookPost"))
         # Builtins stay code-backed; catalog types get the generic executor;
-        # unknown types still pass through.
+        # unknown types fail explicitly.
         self.assertIs(nodes.handler_for("agent.llm"), nodes._agent)
         self.assertIs(nodes.handler_for("slack.webhookPost"), nodes._integration)
-        self.assertIs(nodes.handler_for("totally.unknown"), nodes._passthrough)
+        self.assertIs(nodes.handler_for("totally.unknown"), nodes._unsupported)
 
 
 class IntegrationHandlerTest(unittest.TestCase):
@@ -66,13 +73,12 @@ class IntegrationHandlerTest(unittest.TestCase):
         self.fake = FakeDB()
         self.fake.install()
 
-    def test_missing_credentials_record_intent(self):
+    def test_missing_credentials_fail(self):
         node = {"key": "s", "type": "slack.sendMessage",
                 "config": {"channel": "#g", "text": "hi"}}
         os.environ.pop("SLACK_BOT_TOKEN", None)
-        res = asyncio.run(nodes._integration(ctx_for(node)))
-        self.assertFalse(res.output["executed"])
-        self.assertIn("SLACK_BOT_TOKEN", res.output["missingCredentials"])
+        with self.assertRaisesRegex(RuntimeError, "SLACK_BOT_TOKEN"):
+            asyncio.run(nodes._integration(ctx_for(node)))
 
     def test_http_runtime_renders_and_lifts_outputs(self):
         sent = {}
@@ -145,13 +151,12 @@ class ToolCodeGateTest(unittest.TestCase):
     def tearDown(self):
         nodes.CONFIG = self._orig
 
-    def test_gated_off_records(self):
+    def test_gated_off_fails(self):
         nodes.CONFIG = replace(CONFIG, tool_code_enabled=False)
         node = {"key": "c", "type": "tool.code",
                 "config": {"language": "python", "source": "print('x')"}}
-        res = asyncio.run(nodes._code(ctx_for(node)))
-        self.assertFalse(res.output["executed"])
-        self.assertTrue(any("TOOL_CODE_ENABLED" in m for _, _, m in self.fake.logs))
+        with self.assertRaisesRegex(RuntimeError, "TOOL_CODE_ENABLED"):
+            asyncio.run(nodes._code(ctx_for(node)))
 
     def test_enabled_executes(self):
         nodes.CONFIG = replace(CONFIG, tool_code_enabled=True)
@@ -171,12 +176,11 @@ class ToolDbGateTest(unittest.TestCase):
     def tearDown(self):
         nodes.CONFIG = self._orig
 
-    def test_no_url_records(self):
+    def test_no_url_fails(self):
         nodes.CONFIG = replace(CONFIG, tool_db_url="")
         node = {"key": "q", "type": "tool.db", "config": {"query": "select 1"}}
-        res = asyncio.run(nodes._db_query(ctx_for(node)))
-        self.assertFalse(res.output["executed"])
-        self.assertEqual(res.output["query"], "select 1")
+        with self.assertRaisesRegex(RuntimeError, "TOOL_DB_URL"):
+            asyncio.run(nodes._db_query(ctx_for(node)))
 
 
 class LoopBodyTest(unittest.TestCase):

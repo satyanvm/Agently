@@ -1,6 +1,6 @@
 """Dispatcher: bridge from the Go control plane to Temporal.
 
-The Go API creates a run row with engine='temporal', status='queued'.
+The Go API creates a run row with status='queued'. Temporal is the only runtime.
 This loop polls those rows and starts a Temporal workflow for each, using the run id
 as the workflow id so dispatch is idempotent — a duplicate start (e.g. two reasoner
 instances, or a retry) is rejected by Temporal rather than double-executing. Once a
@@ -35,7 +35,7 @@ async def run_dispatcher(client: Client, stop: asyncio.Event) -> None:
 
 
 async def _dispatch_once(client: Client) -> None:
-    runs = await db.claim_queued_temporal_runs()
+    runs = await db.claim_queued_runs()
     for run in runs:
         run_id = run["id"]
         workflow_id = f"agently-run-{run_id}"

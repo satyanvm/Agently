@@ -3,8 +3,14 @@
 Each LangGraph node runs as its own Temporal activity (often its own process), so a
 single in-process trace can't span all nodes. We therefore group every node's LLM
 spans under one Langfuse *session* keyed by the run id, and store that handle on the
-run row so the UI can deep-link. Tracing degrades to a no-op when Langfuse isn't
-configured — the run still executes and still writes to Postgres.
+run row so the UI can deep-link.
+
+Tracing is REQUIRED, not best-effort. It used to degrade to a no-op whenever
+Langfuse was unconfigured or the client failed to construct, which meant the one
+tool for answering "what did this run actually do?" could be silently absent
+exactly when a run misbehaved. config.py now requires the keys at boot, and the
+two silent `except: return None/{}` paths that used to swallow construction and
+callback failures here now raise.
 """
 from __future__ import annotations
 
@@ -13,17 +19,13 @@ from typing import Any
 from .config import CONFIG
 
 _client = None
-_init_failed = False
 
 
 def _langfuse():
-    """Lazily build a Langfuse client, or return None if unavailable/unconfigured."""
-    global _client, _init_failed
-    if _client is not None or _init_failed:
+    """Build the Langfuse client once, or raise with the reason it could not."""
+    global _client
+    if _client is not None:
         return _client
-    if not CONFIG.langfuse_enabled:
-        _init_failed = True
-        return None
     try:
         from langfuse import Langfuse  # type: ignore
 
@@ -32,41 +34,32 @@ def _langfuse():
             secret_key=CONFIG.langfuse_secret_key,
             host=CONFIG.langfuse_host,
         )
-        return _client
-    except Exception:
-        _init_failed = True
-        return None
+    except Exception as exc:  # noqa: BLE001 — surface the wiring problem
+        raise RuntimeError(
+            f"Langfuse client could not be constructed for {CONFIG.langfuse_host}: {exc}"
+        ) from exc
+    return _client
 
 
 def langchain_config(run_id: str, node: str, *, model: str | None = None) -> dict[str, Any]:
-    """Build a LangChain `config` dict that routes a node's LLM call into Langfuse.
-
-    Returns an empty config (no callbacks) when Langfuse is disabled, so callers can
-    pass it unconditionally.
-    """
-    if _langfuse() is None:
-        return {}
+    """Build a LangChain `config` dict that routes a node's LLM call into Langfuse."""
+    _langfuse()  # constructed for its side effect: the handler reads the global client
     try:
         from langfuse.langchain import CallbackHandler  # type: ignore
 
         handler = CallbackHandler()
-        return {
-            "callbacks": [handler],
-            "run_name": f"{node}",
-            "metadata": {
-                "langfuse_session_id": run_id,
-                "langfuse_tags": ["agently", "reasoner", node],
-                "run_id": run_id,
-                **({"ls_model_name": model} if model else {}),
-            },
-        }
-    except Exception:
-        return {}
-
-
-def enabled() -> bool:
-    """True only when a Langfuse client is configured and constructed."""
-    return _langfuse() is not None
+    except Exception as exc:  # noqa: BLE001 — an untraced run is not an acceptable run
+        raise RuntimeError(f"Langfuse LangChain callback unavailable: {exc}") from exc
+    return {
+        "callbacks": [handler],
+        "run_name": f"{node}",
+        "metadata": {
+            "langfuse_session_id": run_id,
+            "langfuse_tags": ["agently", "reasoner", node],
+            "run_id": run_id,
+            **({"ls_model_name": model} if model else {}),
+        },
+    }
 
 
 def session_handle(run_id: str) -> str:
@@ -75,10 +68,5 @@ def session_handle(run_id: str) -> str:
 
 
 def flush() -> None:
-    """Flush buffered spans (best-effort; safe to call when disabled)."""
-    client = _langfuse()
-    if client is not None:
-        try:
-            client.flush()
-        except Exception:
-            pass
+    """Flush buffered spans. A failure here loses the trace, so it is not swallowed."""
+    _langfuse().flush()
