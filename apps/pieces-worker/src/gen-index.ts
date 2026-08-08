@@ -217,8 +217,9 @@ function repoRoot(): string {
 if (require.main === module) {
   const { nodes, pieceCount, skipped } = buildIndex();
   for (const s of skipped) {
-    console.warn(`skipping piece ${s.packageName}: ${s.error.split('\n')[0]}`);
+    console.error(`piece index generation failed for ${s.packageName}: ${s.error.split('\n')[0]}`);
   }
+  if (skipped.length > 0) throw new Error(`piece index generation aborted: ${skipped.length} package/action errors`);
   const outDir = path.join(repoRoot(), 'packages', 'nodes', 'pieces');
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, 'index.json');

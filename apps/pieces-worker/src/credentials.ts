@@ -5,8 +5,8 @@
  * The reasoner sends only the CREDENTIAL ID over the Temporal payload boundary;
  * this worker reads the secret values straight from the shared Agently Postgres
  * (same DATABASE_URL env the reasoner uses — apps/reasoner/reasoner/config.py).
- * A worker without DATABASE_URL simply cannot resolve ids and falls back to the
- * env-var path in execute.ts.
+ * DATABASE_URL is mandatory: credentials and trigger state must remain durable
+ * and consistent with the API.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -54,15 +54,16 @@ export function loadRepoRootDotEnv(baseDir: string = __dirname): void {
 }
 
 /**
- * Build the Postgres-backed resolver, or null when DATABASE_URL is unset
- * (credential-id resolution then degrades to the env fallback).
+ * Build the Postgres-backed resolver. Missing DATABASE_URL is a startup error.
  *
  * DB ERRORS THROW: a broken connection is infrastructure, so the activity fails
  * and Temporal's retry policy applies — unlike a missing row, which is a
  * business outcome (null → MissingCredential handling in execute.ts).
  */
-export function makeDbCredentialResolver(databaseUrl: string | undefined): CredentialResolver | null {
-  if (!databaseUrl) return null;
+export function makeDbCredentialResolver(databaseUrl: string | undefined): CredentialResolver {
+  if (!databaseUrl?.trim()) {
+    throw new Error('DATABASE_URL is required — the pieces worker resolves stored credentials from Postgres');
+  }
   const pool = new Pool({ connectionString: databaseUrl, max: 3 });
   return async (id: string) => {
     const res = await pool.query('select data from credentials where id = $1', [id]);

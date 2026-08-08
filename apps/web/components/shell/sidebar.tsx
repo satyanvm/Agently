@@ -11,11 +11,9 @@ import {
   Bell,
   Settings,
   ChevronsUpDown,
-  Check,
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { StatusDot } from "@/components/ui/status";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -23,7 +21,7 @@ const NAV = [
   { href: "/runs", label: "Runs", icon: ListTree },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/browser", label: "Browser Sessions", icon: Globe },
-  { href: "/notifications", label: "Notifications", icon: Bell, badge: 3 },
+  { href: "/notifications", label: "Notifications", icon: Bell },
 ] as const;
 
 export function Sidebar() {
@@ -39,10 +37,10 @@ export function Sidebar() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-semibold leading-tight text-fg">
-              Northwind Labs
+              Agently
             </span>
             <span className="block truncate text-[11px] leading-tight text-faint">
-              Pro · 7 workflows
+              Durable workflows
             </span>
           </span>
           <ChevronsUpDown className="size-3.5 text-faint group-hover:text-muted" />
@@ -87,35 +85,12 @@ export function Sidebar() {
                 )}
               />
               <span className="flex-1">{item.label}</span>
-              {"badge" in item && item.badge ? (
-                <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
-                  {item.badge}
-                </span>
-              ) : null}
             </Link>
           );
         })}
       </nav>
 
-      {/* Live status footer */}
-      <div className="mt-auto space-y-2 px-3 pb-3">
-        <div className="rounded-lg border border-border bg-surface/60 p-3">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted">
-              <StatusDot status="running" />
-              2 active runs
-            </span>
-            <span className="text-[11px] tabular-nums text-faint">us-east-1</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-faint">
-            <span>Spend today</span>
-            <span className="tabular-nums text-muted">$38.42</span>
-          </div>
-          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-surface-3">
-            <div className="h-full rounded-full bg-accent" style={{ width: "32%" }} />
-          </div>
-        </div>
-
+      <div className="mt-auto px-3 pb-3">
         <Link
           href="/settings"
           className={cn(

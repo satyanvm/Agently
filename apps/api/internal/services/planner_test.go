@@ -8,58 +8,47 @@ import (
 	"github.com/agently/api/internal/domain"
 )
 
-// The compiler's deterministic floor must be correct with no network/key — with no
-// LLM configured (the test env), CompilePrompt takes the fallback path and must
-// still emit a valid TYPED graph. Structural validation, layout and routing logic
-// are pure and tested directly.
+// A missing provider must be visible to the caller. Structural validation, layout
+// and routing logic remain pure and are tested directly.
+//
+// These replace two tests that asserted the OPPOSITE: that a keyless CompilePrompt
+// still returned a valid runnable graph. It did — a fixed trigger→research→report
+// shape — and that was the bug, not the feature.
 
-func TestCompilePrompt_FallbackIsValidTypedGraph(t *testing.T) {
-	p := CompilePrompt(context.Background(),
-		"Every morning research the latest AI papers and email me at me@example.com", "", "", "")
-
-	if len(p.Nodes) < 3 {
-		t.Fatalf("expected fallback graph (trigger→agent→outputs), got %d nodes", len(p.Nodes))
-	}
-	if errs := validateGraph(p.Nodes, LoadCatalog()); len(errs) > 0 {
-		t.Fatalf("fallback graph failed validation: %v", errs)
-	}
-	for _, n := range p.Nodes {
-		if n.Type == "" {
-			t.Errorf("node %q has no type — fallback must be fully typed", n.Key)
+func TestCompilePrompt_MissingKeyNamesTheKey(t *testing.T) {
+	// Each credential must name ITSELF, so an operator with one of the two set
+	// learns which one is missing rather than "compilation failed".
+	for _, tc := range []struct{ anthropic, voyage, want string }{
+		{"", "vk", "ANTHROPIC_API_KEY"},
+		{"sk-ant-test", "", "VOYAGE_API_KEY"},
+	} {
+		t.Setenv("ANTHROPIC_API_KEY", tc.anthropic)
+		t.Setenv("VOYAGE_API_KEY", tc.voyage)
+		_, err := CompilePrompt(context.Background(),
+			"Every morning research the latest AI papers and email me at me@example.com", "", "", "")
+		if err == nil {
+			t.Fatalf("%s unset: expected an error, got a compiled plan", tc.want)
 		}
-	}
-	// "Every morning" with no explicit time → the default morning slot, 09:00.
-	if p.Schedule == nil || *p.Schedule != "daily 09:00" {
-		t.Errorf("schedule = %v, want daily 09:00", p.Schedule)
-	}
-	if got := p.DefaultInput["email"]; got != "me@example.com" {
-		t.Errorf("email = %v, want me@example.com", got)
-	}
-	// The schedule turns the trigger into trigger.schedule; email adds output.email.
-	types := map[string]bool{}
-	for _, n := range p.Nodes {
-		types[n.Type] = true
-	}
-	if !types["trigger.schedule"] {
-		t.Errorf("scheduled prompt should use trigger.schedule, got types %v", types)
-	}
-	if !types["output.email"] {
-		t.Errorf("email in prompt should add output.email, got types %v", types)
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s unset: error must name it, got %v", tc.want, err)
+		}
 	}
 }
 
-func TestCompilePrompt_AlwaysRunnable(t *testing.T) {
-	// A vague prompt must still yield a runnable graph (never empty), so creation
-	// can never produce a dead workflow.
-	p := CompilePrompt(context.Background(), "keep me informed", "My Flow", "", "")
-	if len(p.Nodes) < 2 {
-		t.Fatalf("expected a fallback graph, got %d nodes", len(p.Nodes))
+func TestCompilePrompt_FailuresAreNotCached(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("VOYAGE_API_KEY", "")
+	const prompt = "keep me informed"
+	if _, err := CompilePrompt(context.Background(), prompt, "My Flow", "", ""); err == nil {
+		t.Fatal("expected a configuration error")
 	}
-	if p.Name != "My Flow" {
-		t.Errorf("explicit name not honored: %q", p.Name)
-	}
-	if errs := validateGraph(p.Nodes, LoadCatalog()); len(errs) > 0 {
-		t.Fatalf("graph failed validation: %v", errs)
+	// A transient failure must not pin itself to the prompt: the same prompt has
+	// to be retried for real once the key is set, not served from cache.
+	planCache.Lock()
+	_, cached := planCache.m[prompt+"\x00My Flow\x00\x00"]
+	planCache.Unlock()
+	if cached {
+		t.Fatal("a failed compile must not populate the plan cache")
 	}
 }
 

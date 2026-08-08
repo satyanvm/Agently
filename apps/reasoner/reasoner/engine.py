@@ -29,8 +29,8 @@ To avoid duplicating logic, both paths call the same helpers:
   - `seed_agents` / `execute_one_node` / `mark_skipped` — the IO steps (DB writes,
     handler dispatch), run inside an activity in both paths.
 
-LLM/browser calls still degrade to mocks when keys are absent, so a dynamic run
-works end-to-end with no external services.
+LLM, browser, delivery, credential, and tool failures propagate to the run; this
+module never manufactures mock output or record-intent success.
 """
 from __future__ import annotations
 
@@ -71,8 +71,8 @@ async def seed_agents(run_id: str, plan: GraphPlan) -> dict[str, str]:
     is `on conflict do nothing`, so it never clobbers a node that already ran.
     """
     await db.set_run_running(run_id, "Starting")
-    if obs.enabled():
-        await db.set_langfuse_trace(run_id, obs.session_handle(run_id))
+    # Tracing is mandatory now, so the handle is always real — no guard needed.
+    await db.set_langfuse_trace(run_id, obs.session_handle(run_id))
     agent_ids: dict[str, str] = {}
     for n in plan.ordered:
         key = n["key"]

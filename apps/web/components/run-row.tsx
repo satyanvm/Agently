@@ -4,8 +4,8 @@ import type { WorkflowRun } from "@/lib/types";
 import { StatusBadge, StatusDot } from "@/components/ui/status";
 import { Avatar } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
-import { LiveTimer, LiveCost } from "@/components/live";
-import { formatCost, formatDuration, timeAgo, NOW } from "@/lib/utils";
+import { LiveTimer } from "@/components/live";
+import { formatCost, formatDuration, timeAgo, nowMs } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 const TRIGGER_ICON = {
@@ -17,7 +17,7 @@ const TRIGGER_ICON = {
 
 function runtime(run: WorkflowRun): number | null {
   if (!run.startedAt) return null;
-  const end = run.finishedAt ? Date.parse(run.finishedAt) : NOW;
+  const end = run.finishedAt ? Date.parse(run.finishedAt) : nowMs();
   return end - Date.parse(run.startedAt);
 }
 
@@ -62,7 +62,7 @@ export function ActiveRunCard({ run }: { run: WorkflowRun }) {
           )}
         </span>
         <span className="tabular-nums text-faint">
-          {run.status === "running" ? <LiveCost base={run.costUsd} /> : formatCost(run.costUsd)}
+          {formatCost(run.costUsd)}
         </span>
         <span className="ml-auto flex items-center gap-1 text-faint">
           <Avatar initials={run.triggeredBy.initials} size="xs" />

@@ -20,6 +20,19 @@ def _clean(url: str | None) -> str | None:
     return url
 
 
+def _require(name: str, because: str) -> str:
+    """Read a mandatory env var or refuse to start, naming what needs it.
+
+    The reasoner no longer has degraded modes to fall into — no mock completions,
+    no simulated browser, no record-intent for undeliverable email — so a missing
+    credential is not something to discover halfway through a user's first run.
+    """
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise SystemExit(f"{name} is required — {because}. Set it in .env.")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
     # Shared Agently Postgres — the single source of truth the Go API serves.
@@ -31,36 +44,35 @@ class Config:
     # Task queue the Node pieces worker (apps/pieces-worker) polls for the
     # cross-queue execute_piece activity (docs/pieces-runtime-contract.md §3).
     pieces_task_queue: str
-    # Langfuse (optional — tracing degrades gracefully if unset).
+    # Langfuse. Required: a run that cannot be traced is a run nobody can debug.
     langfuse_host: str
     langfuse_public_key: str
     langfuse_secret_key: str
-    # Models. Run-time synthesis runs on Google Gemini; unset key ⇒ deterministic mock.
+    # Models. All reasoning uses Claude through one ANTHROPIC_API_KEY.
     model: str
     synthesis_model: str
-    gemini_api_key: str
-    # Browserbase (optional — falls back to a simulated browse if unset).
+    anthropic_api_key: str
+    # Browserbase. Browser nodes fail clearly when it is not configured.
     browserbase_api_key: str
     browserbase_project_id: str
-    # SMTP (optional — output.email falls back to record-intent if unset). Env var
+    # SMTP. output.email fails when delivery is not configured. Env var
     # names mirror the retired Go worker's notifier (archive/worker/internal/notifier).
     smtp_host: str
     smtp_port: str
     smtp_user: str
     smtp_pass: str
     smtp_from: str
-    # tool.code sandbox gate (opt-in — model-authored code runs ONLY where the
-    # operator consciously enabled it; otherwise record-intent).
+    # tool.code sandbox gate (opt-in — disabled execution is an explicit error).
     tool_code_enabled: bool
     # tool.db target (opt-in — SQL runs ONLY against this dedicated URL, never the
-    # platform Postgres; unset means record-intent).
+    # platform Postgres; unset is an explicit error).
     tool_db_url: str
     # How often the dispatcher polls Postgres for queued temporal runs (seconds).
     dispatch_interval_s: float
 
     @property
-    def gemini_enabled(self) -> bool:
-        return bool(self.gemini_api_key)
+    def anthropic_enabled(self) -> bool:
+        return bool(self.anthropic_api_key)
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -76,30 +88,39 @@ class Config:
 
 
 def load() -> Config:
-    db = _clean(os.getenv("DATABASE_URL"))
-    if not db:
-        raise SystemExit(
-            "DATABASE_URL is required — the reasoner writes run state into the "
-            "shared Agently Postgres. Set it in .env."
-        )
     return Config(
-        database_url=db,
+        database_url=_clean(
+            _require(
+                "DATABASE_URL",
+                "the reasoner writes run state into the shared Agently Postgres",
+            )
+        ),
         temporal_hostport=os.getenv("TEMPORAL_HOSTPORT", "localhost:7233"),
         temporal_namespace=os.getenv("TEMPORAL_NAMESPACE", "default"),
         temporal_task_queue=os.getenv("TEMPORAL_TASK_QUEUE", "agently-reasoner"),
         pieces_task_queue=os.getenv("PIECES_TASK_QUEUE", "agently-pieces"),
         langfuse_host=os.getenv("LANGFUSE_HOST", "http://localhost:3001"),
-        langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
-        langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
-        model=os.getenv("REASONER_MODEL", "gemini-2.5-flash"),
-        # Default to Flash for synthesis too — 2.5-pro has near-zero free-tier quota
-        # (429 RESOURCE_EXHAUSTED). Override to gemini-2.5-pro on a paid key.
-        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "gemini-2.5-flash"),
-        # GEMINI_API_KEY is the run-time synthesis key (GOOGLE_API_KEY also accepted).
-        gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
-        browserbase_api_key=os.getenv("BROWSERBASE_API_KEY", ""),
-        browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID", ""),
-        smtp_host=os.getenv("SMTP_HOST", ""),
+        langfuse_public_key=_require(
+            "LANGFUSE_PUBLIC_KEY", "every LLM call is traced to Langfuse"
+        ),
+        langfuse_secret_key=_require(
+            "LANGFUSE_SECRET_KEY", "every LLM call is traced to Langfuse"
+        ),
+        # Reasoning gets the strongest model; synthesis is summarizing work
+        # already done, so it runs a tier down.
+        model=os.getenv("REASONER_MODEL", "claude-opus-4-8"),
+        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "claude-sonnet-4-6"),
+        anthropic_api_key=_require(
+            "ANTHROPIC_API_KEY",
+            "every agent.llm and synthesis node calls Claude",
+        ),
+        browserbase_api_key=_require(
+            "BROWSERBASE_API_KEY", "tool.browser drives a real Browserbase session"
+        ),
+        browserbase_project_id=_require(
+            "BROWSERBASE_PROJECT_ID", "tool.browser drives a real Browserbase session"
+        ),
+        smtp_host=_require("SMTP_HOST", "output.email delivers over SMTP"),
         smtp_port=os.getenv("SMTP_PORT", "587"),
         smtp_user=os.getenv("SMTP_USER", ""),
         smtp_pass=os.getenv("SMTP_PASS", ""),

@@ -6,7 +6,6 @@ import {
   Activity,
   CircleDollarSign,
   Gauge,
-  ArrowUpRight,
   Rocket,
   CheckCircle2,
   XCircle,
@@ -27,7 +26,7 @@ import type { WorkflowRun, Workflow, ActivityItem } from "@/lib/types";
 import { formatCompact, formatCost, timeAgo } from "@/lib/utils";
 
 const EMPTY_STATS: DashboardStats = {
-  activeRuns: 0, runsToday: 0, successRate: 0, spendTodayUsd: 0, spendBudgetUsd: 100,
+  activeRuns: 0, runsToday: 0, successRate: 0, spendTodayUsd: 0, spendBudgetUsd: 0,
   computeHours: 0, tokensToday: 0, runVolume: [], spendSeries: [],
 };
 
@@ -61,8 +60,8 @@ export default function DashboardPage() {
       <TopBar crumbs={[{ label: "Dashboard" }]} actions={<NewRunButton />} />
       <PageContainer>
         <PageTitle
-          title="Good afternoon, Maya"
-          subtitle="Here's what your agents have been doing while you were away."
+          title="Dashboard"
+          subtitle="Live workflow activity from the Agently control plane."
           actions={<LivePill />}
         />
 
@@ -72,28 +71,26 @@ export default function DashboardPage() {
             label="Active runs"
             icon={<Activity className="size-3.5 text-running" />}
             value={s.activeRuns}
-            sub="across 2 workflows"
+            sub={`across ${workflows.length} workflows`}
             visual={<BarChart data={s.runVolume.slice(-12)} height={36} highlightLast />}
           />
           <Stat
             label="Runs today"
             icon={<GitCommitHorizontal className="size-3.5 text-accent-soft" />}
             value={s.runsToday}
-            delta={{ value: "+12%", positive: true }}
             sub={`${formatCompact(s.tokensToday)} tokens`}
           />
           <Stat
             label="Success rate"
             icon={<Gauge className="size-3.5 text-success" />}
             value={`${(s.successRate * 100).toFixed(1)}%`}
-            delta={{ value: "+0.4%", positive: true }}
             sub="last 24 hours"
           />
           <Stat
             label="Spend today"
             icon={<CircleDollarSign className="size-3.5 text-warn" />}
             value={formatCost(s.spendTodayUsd)}
-            sub={`of $${s.spendBudgetUsd} budget`}
+            sub={s.spendBudgetUsd > 0 ? `of $${s.spendBudgetUsd} budget` : "reported by completed runs"}
             visual={<Sparkline data={s.spendSeries} width={90} height={36} stroke="var(--color-warn)" />}
           />
         </div>
@@ -147,9 +144,6 @@ export default function DashboardPage() {
                     <div className="text-2xl font-semibold tabular-nums">{s.computeHours}h</div>
                     <div className="text-[11px] text-faint">compute consumed</div>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded bg-success-bg px-1.5 py-0.5 text-[11px] text-success">
-                    <ArrowUpRight className="size-3" /> 8.2%
-                  </span>
                 </div>
                 <BarChart data={s.runVolume} height={64} className="mt-4" />
                 <div className="mt-2 flex justify-between text-[10px] text-ghost">
@@ -157,10 +151,9 @@ export default function DashboardPage() {
                   <span>12:00</span>
                   <span>now</span>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-4 text-center">
-                  <MiniMetric label="Avg runtime" value="11m" />
-                  <MiniMetric label="Sandboxes" value="6" />
-                  <MiniMetric label="Queue" value="0" />
+                <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 text-center">
+                  <MiniMetric label="Runs today" value={`${s.runsToday}`} />
+                  <MiniMetric label="Active runs" value={`${s.activeRuns}`} />
                 </div>
               </div>
             </Card>

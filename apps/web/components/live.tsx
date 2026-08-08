@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { formatDuration, formatCost } from "@/lib/utils";
+import { formatDuration } from "@/lib/utils";
 
 /** Ticks elapsed time from a fixed start, only after mount (SSR-stable). */
 export function LiveTimer({
@@ -25,28 +25,6 @@ export function LiveTimer({
   return (
     <span className={className} suppressHydrationWarning>
       {formatDuration(ms)}
-    </span>
-  );
-}
-
-/** Slowly accrues cost to feel live, anchored to a base value. */
-export function LiveCost({
-  base,
-  ratePerSec = 0.0021,
-  className,
-}: {
-  base: number;
-  ratePerSec?: number;
-  className?: string;
-}) {
-  const [v, setV] = React.useState(base);
-  React.useEffect(() => {
-    const id = setInterval(() => setV((c) => c + ratePerSec), 1000);
-    return () => clearInterval(id);
-  }, [ratePerSec]);
-  return (
-    <span className={className} suppressHydrationWarning>
-      {formatCost(v)}
     </span>
   );
 }

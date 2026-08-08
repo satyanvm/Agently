@@ -9,8 +9,8 @@ import (
 	"github.com/agently/api/internal/platform"
 )
 
-var fallbackStats = domain.WorkflowStats{
-	SuccessRate: 1, AvgRuntimeMs: 0, AvgCostUsd: 0, TotalRuns: 0, Recent: []int{}, Trend: []float64{},
+var emptyWorkflowStats = domain.WorkflowStats{
+	SuccessRate: 0, AvgRuntimeMs: 0, AvgCostUsd: 0, TotalRuns: 0, Recent: []int{}, Trend: []float64{},
 }
 
 // WorkflowService lists/gets/creates workflows and derives their view fields.
@@ -73,7 +73,7 @@ func (s *WorkflowService) lastRunAt(workflowID domain.WorkflowId) *domain.Timest
 func (s *WorkflowService) ToSummary(wf domain.Workflow) domain.WorkflowSummary {
 	stats, ok := s.deps.SeedStats.WorkflowStats[string(wf.ID)]
 	if !ok {
-		stats = fallbackStats
+		stats = emptyWorkflowStats
 	}
 	return domain.WorkflowSummary{
 		Workflow:  wf,
@@ -105,11 +105,15 @@ func (s *WorkflowService) GetBySlug(slug string) (domain.WorkflowSummary, error)
 	return s.ToSummary(wf), nil
 }
 
-// Create inserts a new workflow. When the input carries a prompt, it compiles that
-// prompt into an agent graph (fetchers → Editor), persists a workflow version, links
-// it as the current version, and stores a default run input — so the workflow is
-// immediately RUNNABLE. Without a prompt it falls back to a name-only graph derived
-// from the name/description (still runnable).
+// Create inserts a new workflow. It compiles the prompt (or, absent one, the
+// name+description as a degenerate prompt) into an agent graph, persists a workflow
+// version, links it as the current version, and stores a default run input — so the
+// workflow is immediately RUNNABLE.
+//
+// A prompt that will not compile is an error, and nothing is persisted. This used to
+// succeed unconditionally by falling back to a fixed graph, which meant a broken LLM
+// configuration produced a library of identical-looking workflows that did not do
+// what they claimed.
 func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.WorkflowSummary, error) {
 	now := domain.Timestamp(s.deps.Clock.ISO())
 
@@ -122,7 +126,10 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	if input.Schedule != nil {
 		schedule = *input.Schedule
 	}
-	plan := CompilePrompt(context.Background(), promptText, input.Name, input.Email, schedule)
+	plan, err := CompilePrompt(context.Background(), promptText, input.Name, input.Email, schedule)
+	if err != nil {
+		return domain.WorkflowSummary{}, domain.Upstream("Could not compile that prompt into a workflow. " + err.Error())
+	}
 
 	name := plan.Name
 	if strings.TrimSpace(input.Name) != "" {
@@ -184,8 +191,12 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 
 // Plan compiles a prompt into a plan WITHOUT persisting anything — the dry-run that
 // powers the "preview the agents before you create" step in the UI.
-func (s *WorkflowService) Plan(prompt, name, email, schedule string) Plan {
-	return CompilePrompt(context.Background(), prompt, name, email, schedule)
+func (s *WorkflowService) Plan(prompt, name, email, schedule string) (Plan, error) {
+	plan, err := CompilePrompt(context.Background(), prompt, name, email, schedule)
+	if err != nil {
+		return Plan{}, domain.Upstream("Could not compile that prompt into a workflow. " + err.Error())
+	}
+	return plan, nil
 }
 
 // GraphNodes returns the workflow's current-version graph (the planned agents),
@@ -248,7 +259,6 @@ func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (doma
 	wf.UpdatedAt = now
 	return s.ToSummary(wf), nil
 }
-
 
 // uniqueSlug returns base if free, else base-2, base-3, … so Create never fails on a
 // slug collision. Bounded so a pathological case can't loop forever.

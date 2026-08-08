@@ -41,9 +41,6 @@ func (s *StatsService) Workspace() domain.WorkspaceStats {
 	stats.SuccessRate = successRate
 	stats.SpendTodayUsd = spend
 	stats.TokensToday = tokens
-	if stats.SpendBudgetUsd == 0 {
-		stats.SpendBudgetUsd = 100
-	}
 	return stats
 }
 

@@ -9,14 +9,21 @@ package services
 // lexical prescreen suffered from).
 //
 // At ~7k vectors the scan is brute-force in memory: no vector store, a few
-// milliseconds. Everything degrades silently — no sidecar, no Gemini key, or
-// an embed-call failure just means the router reads the full directory.
+// milliseconds. Nothing here degrades any more: a missing sidecar, a missing
+// VOYAGE_API_KEY, a sidecar built with a different model or dimension, or a
+// failed embed call are all ERRORS. A stale sidecar quietly scoring a prompt
+// against vectors from another model is precisely the kind of invisible wrong
+// answer this codebase is being cured of.
+//
+// Embeddings are Voyage. Anthropic publishes no embeddings endpoint, which is
+// why this is the one place a second credential is unavoidable.
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -24,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +39,53 @@ import (
 
 const embedTimeout = 8 * time.Second
 
-func embedModel() string { return envOr("PLANNER_EMBED_MODEL", "gemini-embedding-001") }
+const voyageEmbeddingsURL = "https://api.voyageai.com/v1/embeddings"
+
+// Voyage's current line is voyage-4{,-lite,-large}; the 3.x family is legacy.
+// Supported widths are 2048/1024/512/256 — note 768 (the width of the original
+// Gemini-era sidecar) is NOT among them, so a pre-Voyage sidecar can never match.
+func embedModel() string { return envOr("PLANNER_EMBED_MODEL", "voyage-4") }
+
+// RequireVoyageKey is the boot preflight for the embedding prefilter.
+func RequireVoyageKey() error {
+	if strings.TrimSpace(os.Getenv("VOYAGE_API_KEY")) == "" {
+		return errors.New("VOYAGE_API_KEY is required — the piece router prefilters ~700 " +
+			"clusters through the embedding sidecar, and Anthropic publishes no embeddings " +
+			"endpoint. Set it in .env")
+	}
+	return nil
+}
+
+func embedDims() int {
+	if n, err := strconv.Atoi(envOr("PLANNER_EMBED_DIMS", "1024")); err == nil && n > 0 {
+		return n
+	}
+	return 1024
+}
+
+// RequirePieceEmbeddings is the boot preflight for the sidecar itself: present,
+// readable, and built with the model and width this process is configured for.
+func RequirePieceEmbeddings() error {
+	emb, err := loadPieceEmbeddings()
+	if err != nil {
+		return err
+	}
+	return checkSidecarMatches(emb)
+}
+
+// checkSidecarMatches rejects a sidecar built by a different model or at a
+// different width — its vectors are not comparable with the query vectors this
+// process will produce, so scoring them would be meaningless rather than merely
+// degraded.
+func checkSidecarMatches(emb *pieceEmbeddings) error {
+	if emb.Model != embedModel() || emb.Dims != embedDims() {
+		return fmt.Errorf("piece embedding sidecar is stale: built with model %q at %d dims, "+
+			"but this process is configured for %q at %d dims. Rebuild it: "+
+			"cd apps/pieces-worker && npm run gen:embeddings",
+			emb.Model, emb.Dims, embedModel(), embedDims())
+	}
+	return nil
+}
 
 // pieceEmbeddings is the loaded sidecar: ids[i]'s unit-normalized vector is
 // vecs[i*dims : (i+1)*dims].
@@ -54,15 +108,16 @@ type embeddingsManifest struct {
 var (
 	pieceEmbOnce sync.Once
 	pieceEmbVal  *pieceEmbeddings
+	pieceEmbErr  error
 )
 
-// loadPieceEmbeddings loads the sidecar once per process; nil means "not
-// available" and is a valid steady state, never an error.
-func loadPieceEmbeddings() *pieceEmbeddings {
+// loadPieceEmbeddings loads the sidecar once per process. Absence is no longer a
+// valid steady state — the router depends on it, so it is an error.
+func loadPieceEmbeddings() (*pieceEmbeddings, error) {
 	pieceEmbOnce.Do(func() {
-		pieceEmbVal = loadPieceEmbeddingsFrom(piecesEmbeddingsPath())
+		pieceEmbVal, pieceEmbErr = loadPieceEmbeddingsFrom(piecesEmbeddingsPath())
 	})
-	return pieceEmbVal
+	return pieceEmbVal, pieceEmbErr
 }
 
 // piecesEmbeddingsPath resolves the manifest location: PIECES_EMBEDDINGS_PATH
@@ -77,52 +132,63 @@ func piecesEmbeddingsPath() string {
 	return ""
 }
 
-// loadPieceEmbeddingsFrom reads manifest + .bin (same basename). Any
-// inconsistency — missing files, dims/count mismatch — returns nil.
-func loadPieceEmbeddingsFrom(manifestPath string) *pieceEmbeddings {
+// loadPieceEmbeddingsFrom reads manifest + .bin (same basename). Every
+// inconsistency — missing files, unparseable manifest, size mismatch — names
+// itself, because each has a different fix.
+func loadPieceEmbeddingsFrom(manifestPath string) (*pieceEmbeddings, error) {
+	const rebuild = "rebuild it: cd apps/pieces-worker && npm run gen:embeddings"
 	if manifestPath == "" {
-		return nil
+		return nil, fmt.Errorf("piece embedding sidecar not found: no pieces index to sit beside " +
+			"and PIECES_EMBEDDINGS_PATH unset")
 	}
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("piece embedding sidecar %s: %w — %s", manifestPath, err, rebuild)
 	}
 	var m embeddingsManifest
-	if err := json.Unmarshal(raw, &m); err != nil || m.Dims <= 0 || len(m.IDs) == 0 {
-		return nil
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("piece embedding sidecar %s is not valid JSON: %w — %s", manifestPath, err, rebuild)
+	}
+	if m.Dims <= 0 || len(m.IDs) == 0 {
+		return nil, fmt.Errorf("piece embedding sidecar %s is empty (%d ids, %d dims) — %s",
+			manifestPath, len(m.IDs), m.Dims, rebuild)
 	}
 	binPath := strings.TrimSuffix(manifestPath, filepath.Ext(manifestPath)) + ".bin"
 	data, err := os.ReadFile(binPath)
-	if err != nil || len(data) != len(m.IDs)*m.Dims*4 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("piece embedding vectors %s: %w — %s", binPath, err, rebuild)
+	}
+	if want := len(m.IDs) * m.Dims * 4; len(data) != want {
+		return nil, fmt.Errorf("piece embedding vectors %s: %d bytes, want %d (%d ids × %d dims) — %s",
+			binPath, len(data), want, len(m.IDs), m.Dims, rebuild)
 	}
 	vecs := make([]float32, len(m.IDs)*m.Dims)
 	for i := range vecs {
 		vecs[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
 	}
-	return &pieceEmbeddings{Model: m.Model, Dims: m.Dims, IDs: m.IDs, Vecs: vecs}
+	return &pieceEmbeddings{Model: m.Model, Dims: m.Dims, IDs: m.IDs, Vecs: vecs}, nil
 }
 
 // prefilterPieceClusters returns cluster keys ranked by their best action's
 // similarity to the prompt, best first — roughly topN of them (score ties at
 // the boundary are all kept, and clusters absent from the sidecar are appended
-// unranked; see rankPieceClusters). ok=false means the prefilter is
-// unavailable (no sidecar, no key, embed failure) and the caller should
-// proceed with the full set.
-func prefilterPieceClusters(ctx context.Context, cat *Catalog, prompt string, pieceKeys []string, topN int) ([]string, bool) {
-	emb := loadPieceEmbeddings()
-	if emb == nil {
-		return nil, false
-	}
-	key := envOr("GEMINI_API_KEY", os.Getenv("GOOGLE_API_KEY"))
-	if key == "" {
-		return nil, false
-	}
-	qv, err := embedQueryGemini(ctx, key, orStr(emb.Model, embedModel()), emb.Dims, prompt)
+// unranked; see rankPieceClusters).
+func prefilterPieceClusters(ctx context.Context, cat *Catalog, prompt string, pieceKeys []string, topN int) ([]string, error) {
+	emb, err := loadPieceEmbeddings()
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
-	return rankPieceClusters(cat, emb, qv, pieceKeys, topN), true
+	if err := checkSidecarMatches(emb); err != nil {
+		return nil, err
+	}
+	if err := RequireVoyageKey(); err != nil {
+		return nil, err
+	}
+	qv, err := embedQueryVoyage(ctx, os.Getenv("VOYAGE_API_KEY"), emb.Model, emb.Dims, prompt)
+	if err != nil {
+		return nil, err
+	}
+	return rankPieceClusters(cat, emb, qv, pieceKeys, topN), nil
 }
 
 // rankPieceClusters is the pure scoring core (separated for tests): dot every
@@ -180,50 +246,55 @@ func rankPieceClusters(cat *Catalog, emb *pieceEmbeddings, query []float32, piec
 	return append(ranked, unscored...)
 }
 
-// embedQueryGemini embeds one query text (taskType RETRIEVAL_QUERY, matching
-// the sidecar's RETRIEVAL_DOCUMENT side) and unit-normalizes the result —
-// Gemini embeddings below 3072 dims are not pre-normalized, and normalized
-// vectors make dot product equal cosine similarity.
-func embedQueryGemini(ctx context.Context, key, model string, dims int, text string) ([]float32, error) {
+// embedQueryVoyage embeds one query text and unit-normalizes the result, so the
+// dot product in rankPieceClusters equals cosine similarity.
+//
+// input_type matters and must mirror the generator: Voyage prepends a different
+// instruction for "query" than for "document", and the sidecar is built with
+// "document". Getting this backwards costs recall silently, which is why both
+// sides name it explicitly rather than relying on the default.
+func embedQueryVoyage(ctx context.Context, key, model string, dims int, text string) ([]float32, error) {
 	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{
-		"model":                "models/" + model,
-		"content":              map[string]any{"parts": []map[string]string{{"text": text}}},
-		"taskType":             "RETRIEVAL_QUERY",
-		"outputDimensionality": dims,
+		"model":            model,
+		"input":            []string{text},
+		"input_type":       "query",
+		"output_dimension": dims,
 	})
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent", model)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, voyageEmbeddingsURL, bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-goog-api-key", key)
+	req.Header.Set("authorization", "Bearer "+key)
 	resp, err := (&http.Client{Timeout: embedTimeout}).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("voyage embed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini embed status %d", resp.StatusCode)
+		return nil, fmt.Errorf("voyage embed status %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 	var parsed struct {
-		Embedding struct {
-			Values []float32 `json:"values"`
-		} `json:"embedding"`
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("voyage embed: unparseable response: %w", err)
 	}
-	v := parsed.Embedding.Values
+	if len(parsed.Data) == 0 {
+		return nil, fmt.Errorf("voyage embed: no embeddings returned")
+	}
+	v := parsed.Data[0].Embedding
 	if len(v) != dims {
-		return nil, fmt.Errorf("gemini embed: got %d dims, want %d", len(v), dims)
+		return nil, fmt.Errorf("voyage embed: got %d dims, want %d", len(v), dims)
 	}
 	var norm float64
 	for _, x := range v {
 		norm += float64(x) * float64(x)
 	}
 	if norm == 0 {
-		return nil, fmt.Errorf("gemini embed: zero vector")
+		return nil, fmt.Errorf("voyage embed: zero vector")
 	}
 	scale := float32(1 / math.Sqrt(norm))
 	for i := range v {

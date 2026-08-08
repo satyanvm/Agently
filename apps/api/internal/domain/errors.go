@@ -18,6 +18,12 @@ const (
 	CodeRateLimited      ErrorCode = "rate_limited"
 	CodeInternal         ErrorCode = "internal"
 	CodeNotImplemented   ErrorCode = "not_implemented"
+	// CodeUpstreamFailed is a dependency we do not control saying no: the model
+	// provider, the embedding provider, a missing generated artifact. Distinct
+	// from CodeInternal because the message is meant to be READ — it names what
+	// failed and usually what to do about it — where internal errors are
+	// deliberately opaque.
+	CodeUpstreamFailed ErrorCode = "upstream_failed"
 )
 
 // ErrorStatus is the HTTP status mapping for each code — decided in one place.
@@ -31,6 +37,7 @@ var ErrorStatus = map[ErrorCode]int{
 	CodeRateLimited:      429,
 	CodeInternal:         500,
 	CodeNotImplemented:   501,
+	CodeUpstreamFailed:   502,
 }
 
 // ErrorDetail carries field-level validation context.
@@ -59,6 +66,13 @@ func Conflict(message string) *DomainError {
 
 func BadRequest(message string) *DomainError {
 	return &DomainError{Code: CodeBadRequest, Message: message}
+}
+
+// Upstream reports a failed dependency. The message reaches the client verbatim,
+// so it should name what failed and, where possible, the fix — these are the
+// errors an operator debugs a misconfigured install from.
+func Upstream(message string) *DomainError {
+	return &DomainError{Code: CodeUpstreamFailed, Message: message}
 }
 
 // Errorf builds an internal error with a formatted message.

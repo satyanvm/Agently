@@ -14,8 +14,8 @@ import (
 // Postgres polling sits between the API and Temporal.)
 //
 // It is optional: when TEMPORAL_HOSTPORT is unset the API runs without it and
-// engine='temporal' launches fall back to the reasoner's reconciler. The reconciler
-// also covers the rare case where a direct start fails after the run row is written.
+// queued runs are started by the reasoner's dispatcher. The dispatcher also covers
+// the rare case where a direct start fails after the run row is written.
 type TemporalClient struct {
 	c         client.Client
 	taskQueue string

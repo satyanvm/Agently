@@ -28,9 +28,8 @@ export TEMPORAL_HOSTPORT="${TEMPORAL_HOSTPORT:-localhost:7233}"
 export TEMPORAL_TASK_QUEUE="${TEMPORAL_TASK_QUEUE:-agently-reasoner}"
 export PIECES_TASK_QUEUE="${PIECES_TASK_QUEUE:-agently-pieces}"
 
-# LLM/browser creds are auto-loaded from .env by the services themselves:
-# GEMINI_API_KEY (run-time synthesis + planner), BROWSERBASE_* / OPENAI_* / SMTP_*.
-# No proxy base URL — the Gemini SDK talks straight to Google.
+# Credentials are auto-loaded from .env by the services themselves:
+# ANTHROPIC_API_KEY, VOYAGE_API_KEY, LANGFUSE_*, BROWSERBASE_* and SMTP_*.
 
 API_BIN=/tmp/agently-api
 RUNDIR="$ROOT/.agently"
@@ -83,8 +82,7 @@ ensure_reasoner_venv() {
   }
 }
 
-# The pieces worker is OPTIONAL: without it, pieces.* nodes record intent and the
-# rest of the platform is unaffected. We start it only when it has been built.
+# The pieces worker is required for workflows containing pieces.* nodes.
 pieces_built() { [ -f "$ROOT/apps/pieces-worker/dist/worker.js" ]; }
 
 # ---------- infra ----------
@@ -108,15 +106,15 @@ start_reasoner() {
     DATABASE_URL="$DATABASE_URL" TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" TEMPORAL_TASK_QUEUE="$TEMPORAL_TASK_QUEUE" \
     PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
     exec ./.venv/bin/python -m reasoner.worker ) >"$LOGS/reasoner.log" 2>&1 & echo $! >"$(pidfile reasoner)"
-  ok "reasoner → temporal engine          (pid $!)"
+  ok "reasoner → Temporal workflows       (pid $!)"
 }
 start_pieces() {
   pieces_built || {
-    say "  ${c_dim}pieces-worker not built (apps/pieces-worker: npm install && npm run build) — pieces.* nodes will record intent${c_rst}"
-    return 0
+    bad "pieces-worker not built (apps/pieces-worker: npm install && npm run build)"
+    return 1
   }
   ( cd "$ROOT/apps/pieces-worker" && \
-    TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
+    DATABASE_URL="$DATABASE_URL" TEMPORAL_HOSTPORT="$TEMPORAL_HOSTPORT" PIECES_TASK_QUEUE="$PIECES_TASK_QUEUE" \
     exec node dist/worker.js ) >"$LOGS/pieces.log" 2>&1 & echo $! >"$(pidfile pieces)"
   ok "pieces   → activepieces runtime     (pid $!)"
 }
@@ -135,10 +133,13 @@ cmd_start() {
   say "Stopping any previous app processes…"
   for n in web pieces reasoner api; do stop_one "$n"; done
   say "Starting services…"
-  start_api; start_reasoner; start_pieces; start_web
+  start_api || return 1
+  start_reasoner || return 1
+  start_pieces || return 1
+  start_web || return 1
   printf "  waiting for API health"
   if wait_http "http://localhost:${API_PORT}/api/workflows" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
-  grep -qE '^GEMINI_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: GEMINI_API_KEY not set in .env → reasoner/planner fall back to OpenAI(.env) or mock${c_rst}"
+  grep -qE '^ANTHROPIC_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: ANTHROPIC_API_KEY not set in .env${c_rst}"
   echo
   say "${c_grn}Agently is up.${c_rst}  UI: http://localhost:3000   Temporal UI: http://localhost:8080"
   say "  logs: pnpm agently:logs   status: pnpm agently:status   stop: pnpm agently:stop"

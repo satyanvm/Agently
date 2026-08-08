@@ -116,10 +116,6 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	// Created as QUEUED: the control plane (this API) only enqueues; the data
 	// plane claims it and drives execution.
 	//
-	// Engine: always the Temporal + LangGraph reasoner. The native Go worker was
-	// retired (archived under archive/worker) — every run, typed or legacy, is
-	// dispatched to Temporal by the reasoner's dispatcher.
-	engine := "temporal"
 	// The Temporal reasoner is dispatched from a separate poller and reports its
 	// own progress; flag the wait state distinctly so the UI reads honestly.
 	queuedStep := "Queued (temporal)"
@@ -129,7 +125,6 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 		Status: domain.RunQueued, Trigger: input.Trigger, Input: runInput, TriggeredBy: triggeredBy, Region: region,
 		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: queuedStep,
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
-		Engine: engine,
 		QueuedAt: now, StartedAt: nil, FinishedAt: nil,
 	}
 	s.deps.Repos.Runs.Insert(run)

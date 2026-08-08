@@ -59,7 +59,7 @@ _IO_TIMEOUT = timedelta(seconds=60)
 
 # Cross-queue `execute_piece` call (docs/pieces-runtime-contract.md §3): a tight
 # schedule_to_start catches "no pieces worker is polling" quickly so the run can
-# degrade to record-intent instead of hanging for the full node timeout.
+# fail with an actionable reason instead of hanging for the full node timeout.
 _PIECE_PREFIX = "pieces."
 _PIECE_SCHEDULE_TO_START = timedelta(seconds=30)
 _PIECE_TIMEOUT = timedelta(seconds=180)
@@ -292,20 +292,24 @@ class DynamicWorkflow:
     ):
         """prepare (our queue) → execute_piece (pieces queue) → record (our queue).
 
-        The pieces worker being down is an OPERATIONAL state, not a run failure:
-        a schedule_to_start timeout (nobody polling the pieces queue) or exhausted
-        retries degrade to the record-intent shape, mirroring how catalog nodes
-        behave with missing credentials. The run always completes.
+        A missing pieces worker is a run failure. The activity error is converted
+        into the same failed-node result shape as local execution so the run row
+        records the queue/provider reason before the workflow returns.
         """
-        prep = await workflow.execute_activity(
-            activities.prepare_piece_node,
-            activities.PreparePieceInput(
-                run_id=run_id, node=node, agent_id=agent_id,
-                upstream=upstream, run_input=run_input, extra=extra or {},
-            ),
-            start_to_close_timeout=_IO_TIMEOUT,
-            retry_policy=_NODE_RETRY,
-        )
+        try:
+            prep = await workflow.execute_activity(
+                activities.prepare_piece_node,
+                activities.PreparePieceInput(
+                    run_id=run_id, node=node, agent_id=agent_id,
+                    upstream=upstream, run_input=run_input, extra=extra or {},
+                ),
+                start_to_close_timeout=_IO_TIMEOUT,
+                retry_policy=_NODE_RETRY,
+            )
+        except ActivityError as exc:
+            return activities.RunNodeResult(
+                failed=True, error=f"{node.get('type')}: prepare failed: {exc}"
+            )
 
         if prep.mode == "execute":
             try:
@@ -318,16 +322,15 @@ class DynamicWorkflow:
                     retry_policy=_PIECE_RETRY,
                 )
                 mode = "execute"
-            except ActivityError:
-                # Timed out unscheduled (worker down) or failed terminally after
-                # retries (piece not installed, worker bug). Record, don't fail.
+            except ActivityError as exc:
                 result = {
-                    "recorded": True, "executed": False,
-                    "reason": "pieces-worker-unavailable",
+                    "ok": False,
+                    "errorType": "PiecesWorkerUnavailable",
+                    "error": f"execute_piece failed: {exc}",
                 }
-                mode = "record"
+                mode = "execute"
         else:
-            result, mode = prep.result, "record"
+            result, mode = prep.result, "trigger"
 
         return await workflow.execute_activity(
             activities.record_piece_result,

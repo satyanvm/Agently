@@ -63,8 +63,8 @@ async def run_tool_query(url: str, query: str, max_rows: int = 200) -> tuple[lis
 
 # ─────────────────────────── dispatch (claim) ───────────────────────────
 
-async def claim_queued_temporal_runs(limit: int = 10) -> list[dict[str, Any]]:
-    """Return queued temporal runs to dispatch to Temporal.
+async def claim_queued_runs(limit: int = 10) -> list[dict[str, Any]]:
+    """Return queued runs to dispatch to Temporal.
 
     No row-level claim is needed: dispatch is made idempotent by using the run id
     as the Temporal workflow id (duplicate starts are rejected). Once a run's plan
@@ -75,7 +75,7 @@ async def claim_queued_temporal_runs(limit: int = 10) -> list[dict[str, Any]]:
             """
             select r.id, r.workflow_id, w.slug, r.number, r.input
               from runs r join workflows w on w.id = r.workflow_id
-             where r.engine = 'temporal' and r.status = 'queued'
+             where r.status = 'queued'
              order by r.queued_at
              limit %s
             """,

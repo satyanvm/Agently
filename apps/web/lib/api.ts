@@ -37,7 +37,6 @@ interface ApiRun {
   steps: { done: number; total: number };
   currentStep: string;
   browserSessionId: string | null;
-  engine?: string;
   langfuseTraceId?: string | null;
 }
 
@@ -65,7 +64,6 @@ function toWorkflowRun(r: ApiRun): WorkflowRun {
     messages: [],
     artifacts: [],
     browserSessionId: r.browserSessionId ?? undefined,
-    engine: r.engine ?? "native",
     langfuseTraceId: r.langfuseTraceId ?? null,
   };
 }
@@ -245,19 +243,15 @@ export async function fetchRunLogsAfter(runId: string, sinceSeq: number): Promis
 /**
  * Launch a run for a workflow slug; returns the run id.
  *
- * `engine` selects the execution plane: "native" (default, the Go worker — dispatches
- * nodes by name) or "temporal" (the reasoner — executes the composed graph literally,
- * so a builder node like `tool.browser` actually visits its URL). The visual builder's
- * Test-run passes "temporal" so the drawn graph runs exactly as wired.
+ * Runs are executed by the Temporal reasoner, which executes the composed graph
+ * literally. The visual builder's Test-run passes the saved graph to that plane.
  */
 export async function launchRun(
   slug: string,
   input?: Record<string, unknown>,
-  engine?: "native" | "temporal",
 ): Promise<string> {
   const body: Record<string, unknown> = {};
   if (input) body.input = input;
-  if (engine) body.engine = engine;
   const run = await getJSON<{ id: string }>(`/api/workflows/${slug}/runs`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -481,6 +475,7 @@ interface ApiNotification {
   createdAt: string;
   readAt: string | null;
   workflowSlug?: string | null;
+  runId?: string | null;
   runNumber?: number | null;
 }
 
@@ -494,12 +489,17 @@ export async function fetchNotifications(): Promise<AppNotification[]> {
     at: n.createdAt,
     read: n.readAt != null,
     workflowSlug: n.workflowSlug ?? undefined,
+    runId: n.runId ?? undefined,
     runNumber: n.runNumber ?? undefined,
   }));
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
   await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await fetch("/api/notifications/read-all", { method: "POST" });
 }
 
 /* ----------------------------- integrations ----------------------------- */

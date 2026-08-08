@@ -9,8 +9,10 @@ the cross-queue `execute_piece` Temporal activity. This module only answers
 "is this type a piece action, and what does it need?" for the Python-side
 prepare/record activities.
 
-Loaded once at import, like catalog.py. A missing index file is not an error —
-pieces.* nodes then degrade to record-intent ("unknown-piece").
+Loaded once at import, like catalog.py. A missing or unreadable index IS an
+error: it used to mean every pieces.* node quietly recorded intent under the
+reason "unknown-piece", so a forgotten `npm run gen:index` looked identical to a
+workflow that genuinely referenced a piece nobody installed.
 """
 from __future__ import annotations
 
@@ -40,13 +42,15 @@ def _load() -> dict[str, dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     path = _index_path()
     if path is None:
-        log.info("pieces index not found — pieces.* nodes will record intent")
-        return by_id
+        raise SystemExit(
+            "Piece index not found — pieces.* nodes cannot be prepared without it. "
+            "Generate it: cd apps/pieces-worker && npm run gen:index "
+            "(or point PIECES_INDEX_PATH at an existing index.json)."
+        )
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError) as exc:  # a broken index must not kill the worker
-        log.warning("skipping unreadable pieces index %s: %s", path, exc)
-        return by_id
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Piece index {path} is unreadable: {exc}") from exc
     for node in data.get("nodes", []):
         node_id = node.get("id")
         if node_id:

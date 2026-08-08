@@ -1,10 +1,7 @@
-"""Browser infrastructure for the browse node.
+"""Browserbase infrastructure for browser nodes.
 
-Drives a real Browserbase session over CDP (Playwright) when BROWSERBASE_* is set;
-otherwise falls back to a lightweight simulated browse so the slice still runs end
-to end. Either way it writes the browser_* rows the Go UI already renders (sessions,
-actions, shots, console), exactly like the retired Go worker did
-(archive/worker/internal/browser/*).
+Browser work is never simulated. Missing Browserbase configuration and provider
+errors propagate to the node so the run fails with the real reason.
 """
 from __future__ import annotations
 
@@ -33,24 +30,25 @@ async def _create_browserbase_session() -> dict[str, Any]:
 async def run_browse(run_id: str, label: str, urls: list[str], *, max_chars: int = 4000) -> str:
     """Visit each url, extract visible text, persist the session, return findings."""
     if not urls:
-        return ""
+        raise RuntimeError("browser node has no URLs to visit")
+    if not CONFIG.browserbase_enabled:
+        raise RuntimeError(
+            "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID are required for browser nodes"
+        )
     session_id = await db.create_browser_session(run_id, label)
-    provider = "browserbase" if CONFIG.browserbase_enabled else "simulated"
-    await db.record_console(session_id, "info", f"session started ({provider})")
+    await db.record_console(session_id, "info", "session started (browserbase)")
 
     findings: list[str] = []
     ok = True
     try:
-        if CONFIG.browserbase_enabled:
-            findings = await _browse_real(run_id, session_id, urls, max_chars)
-        else:
-            findings = await _browse_simulated(session_id, urls, max_chars)
-    except Exception as exc:  # noqa: BLE001 — surface, don't crash the run
+        findings = await _browse_real(run_id, session_id, urls, max_chars)
+    except Exception as exc:  # noqa: BLE001 - persist failure, then propagate it
         ok = False
         await db.record_console(session_id, "error", f"browse failed: {exc}")
         await db.append_log(
             run_id, "error", "browser", "browser", f"Browse failed: {exc}", reasoning=False
         )
+        raise RuntimeError(f"Browserbase browse failed: {exc}") from exc
     finally:
         await db.finish_browser_session(session_id, "succeeded" if ok else "failed")
     return "\n\n".join(findings)
@@ -80,42 +78,3 @@ async def _browse_real(run_id: str, session_id: str, urls: list[str], max_chars:
             out.append(f"# {title} ({url})\n{text}")
         await browser.close()
     return out
-
-
-async def _browse_simulated(session_id: str, urls: list[str], max_chars: int) -> list[str]:
-    """No Browserbase keys: fetch over HTTP and record the same browser_* trail."""
-    out: list[str] = []
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        for url in urls:
-            t0 = time.monotonic()
-            try:
-                resp = await client.get(url, headers={"User-Agent": "AgentlyReasoner/0.1"})
-                body = resp.text
-            except Exception as exc:  # noqa: BLE001
-                await db.record_action(session_id, "navigate", url, "", "error", 0)
-                out.append(f"# (failed to fetch {url}: {exc})")
-                continue
-            dur = int((time.monotonic() - t0) * 1000)
-            title = _title_from_html(body) or url
-            await db.navigate(session_id, url, title, dur)
-            await db.record_shot(session_id, url, title, "simulated frame")
-            text = _strip_html(body)[:max_chars]
-            await db.record_action(session_id, "extract", url, "page text", "ok", 0)
-            out.append(f"# {title} ({url})\n{text}")
-    return out
-
-
-def _title_from_html(html: str) -> str:
-    lo = html.lower()
-    i, j = lo.find("<title>"), lo.find("</title>")
-    if 0 <= i < j:
-        return html[i + 7 : j].strip()
-    return ""
-
-
-def _strip_html(html: str) -> str:
-    import re
-
-    no_scripts = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
-    text = re.sub(r"(?s)<[^>]+>", " ", no_scripts)
-    return re.sub(r"\s+", " ", text).strip()

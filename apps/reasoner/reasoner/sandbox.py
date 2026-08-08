@@ -3,9 +3,8 @@
 Isolation model — honest scope: this is PROCESS-level containment, not a hardened
 VM. It raises the cost of an accident (runaway loop, memory bomb, secret exfil via
 env), it does not defend against a determined kernel exploit. Accordingly the whole
-feature is OFF unless the operator sets TOOL_CODE_ENABLED=1 — matching the house
-rule that every side-effecting seam degrades to record-intent until explicitly
-configured (SMTP, Slack, Browserbase, TOOL_DB_URL).
+feature is OFF unless the operator sets TOOL_CODE_ENABLED=1. Attempting to use it
+while disabled fails the node explicitly.
 
 What the child process gets:
   - a hard wall-clock timeout (killed on expiry),

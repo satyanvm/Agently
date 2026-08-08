@@ -131,11 +131,12 @@ async function resolveTriggerAuth(
   resolveCredential: CredentialResolver | null,
 ): Promise<unknown> {
   let auth: unknown;
-  if (input.credentialId && resolveCredential) {
+  if (input.credentialId) {
+    if (!resolveCredential) return MISSING_AUTH;
     const data = await resolveCredential(String(input.credentialId));
-    if (data !== null) auth = normalizeDbAuth(data, piece);
-  }
-  if (auth === undefined && input.authEnvKey) {
+    if (data === null) return MISSING_AUTH;
+    auth = normalizeDbAuth(data, piece);
+  } else if (input.authEnvKey) {
     const raw = process.env[String(input.authEnvKey)] ?? '';
     if (raw) auth = normalizeAuth(raw, piece);
   }

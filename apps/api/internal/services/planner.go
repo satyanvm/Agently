@@ -9,11 +9,9 @@ package services
 // large to hand a model whole:
 //
 //   ROUTE  — ALL clusters (~700 pieces.<slug> plus the hand-written dozen) are
-//            first narrowed to a handful by ONE small-model call over the full
-//            cluster directory (piecesrouter.go), optionally prefiltered by the
-//            offline embedding index (piecesembed.go). On router failure we
-//            fall back to mapping every hand-written cluster plus the old
-//            lexical term-overlap piece prescreen.
+//            first narrowed to a handful by ONE small-model call over the
+//            cluster directory (piecesrouter.go), prefiltered by the offline
+//            embedding index (piecesembed.go).
 //   MAP    — for every routed cluster in parallel, a small fast model reads
 //            that cluster's compact index ("id — label — description") plus the
 //            user's request and returns the node ids that could plausibly
@@ -25,11 +23,15 @@ package services
 //
 // The reduce output goes through a VALIDATE → REPAIR loop (structural rules
 // mirrored from reasoner/plan.py in nodecatalog.go); validator errors are fed back
-// to the model verbatim for up to two repair rounds.
+// to the model verbatim for up to two repair rounds. That loop stays — it is a
+// retry, not a fallback.
 //
-// It stays HYBRID and fail-safe like its predecessor: with no LLM key, on timeout,
-// or if every repair fails, we fall back to a deterministic TYPED graph
-// (trigger → research agent → report [→ email]) so creating a workflow never fails.
+// What is GONE is the deterministic floor. This compiler used to guarantee that
+// "creating a workflow never fails": with no key, on timeout, or after every
+// repair failed, it emitted a fixed trigger → research → report graph. That graph
+// was indistinguishable in the UI from one the model actually authored, so a
+// misconfigured install looked like a working one. Every stage now fails with the
+// reason, and the reason reaches the user.
 
 import (
 	"context"
@@ -61,15 +63,11 @@ var (
 	reSubreddit = regexp.MustCompile(`(?i)r/([A-Za-z0-9_]+)`)
 )
 
-// Compilation model tiers. Map wants cheap+fast; reduce wants the strongest
-// available (graph authorship is the hard part). Both env-overridable.
-func mapModel() string    { return envOr("PLANNER_MAP_MODEL", "claude-haiku-4-5") }
-func reduceModel() string { return envOr("PLANNER_MODEL", "claude-opus-4-8") }
-
 // planCache memoizes compiled plans by (prompt,name,email,schedule) so the create
 // dialog's debounced live preview (POST /workflows/plan on every pause in typing)
 // doesn't re-run the full map-reduce for the same text, and Create reuses the
-// preview's work. Small and process-local by design.
+// preview's work. Small and process-local by design. Only SUCCESSFUL compiles are
+// cached — a transient provider error must not pin a failure to a prompt.
 var planCache = struct {
 	sync.Mutex
 	m map[string]Plan
@@ -78,25 +76,32 @@ var planCache = struct {
 const planCacheMax = 64
 
 // CompilePrompt turns a prompt into a Plan. name/schedule, when non-empty, override
-// what the planner infers. Never returns an error — it always falls back to a sane
-// deterministic plan.
-func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) Plan {
+// what the planner infers. An error means the prompt was NOT compiled — there is no
+// deterministic floor beneath this any more, by design.
+func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) (Plan, error) {
+	// Fail on configuration before spending a round trip to discover it.
+	if err := RequireAnthropicKey(); err != nil {
+		return Plan{}, err
+	}
+	if err := RequireVoyageKey(); err != nil {
+		return Plan{}, err
+	}
 	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule
 	planCache.Lock()
 	if p, ok := planCache.m[cacheKey]; ok {
 		planCache.Unlock()
-		return p
+		return p, nil
 	}
 	planCache.Unlock()
 
 	cat := LoadCatalog()
 	p := basePlan(prompt, email)
 
-	if compiled, ok := compileGraphLLM(ctx, cat, prompt, &p); ok {
-		p.Nodes = compiled
-	} else {
-		p.Nodes = fallbackGraph(p)
+	compiled, err := compileGraphLLM(ctx, cat, prompt, &p)
+	if err != nil {
+		return Plan{}, err
 	}
+	p.Nodes = compiled
 
 	if strings.TrimSpace(name) != "" {
 		p.Name = name
@@ -120,11 +125,13 @@ func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) Pl
 	}
 	planCache.m[cacheKey] = p
 	planCache.Unlock()
-	return p
+	return p, nil
 }
 
-// basePlan is the deterministic floor: name/description/schedule/input extracted
-// with regexes, no network. The graph itself comes from the LLM (or fallbackGraph).
+// basePlan fills in the plan metadata the compiler does not need a model for:
+// name/description/schedule/input extracted with regexes, no network. The reduce
+// model overrides any of these it has an opinion about (see overlayMeta). The
+// graph itself always comes from the model.
 func basePlan(prompt, email string) Plan {
 	lower := strings.ToLower(prompt)
 	input := map[string]any{}
@@ -150,9 +157,8 @@ func basePlan(prompt, email string) Plan {
 // map fan-out if each cluster got its own LLM call. ALL of them are narrowed
 // by the semantic ROUTER (piecesrouter.go) — hand-written clusters compete on
 // relevance like everything else — so the map phase stays a handful of calls
-// no matter how large the installed surface grows. Only on router failure do
-// we fall back to mapping every hand-written cluster plus the lexical
-// term-overlap piece prescreen below.
+// no matter how large the installed surface grows. A router failure fails the
+// compile; there is no lexical prescreen behind it any more.
 const maxClusterCalls = 12
 
 // totalCap bounds how many selected node schemas reach the reduce prompt.
@@ -161,83 +167,19 @@ const totalCap = 32
 // mapConcurrency bounds parallel map-phase LLM calls (rate-limit hygiene).
 const mapConcurrency = 8
 
-// promptTokens lowercases and tokenizes the user's request for the FALLBACK
-// prescreen (topPieceClusters).
-func promptTokens(prompt string) map[string]bool {
-	toks := map[string]bool{}
-	for _, w := range strings.FieldsFunc(strings.ToLower(prompt), func(r rune) bool {
-		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
-	}) {
-		if len(w) > 2 {
-			toks[w] = true
-		}
-	}
-	return toks
-}
-
-// topPieceClusters is the FALLBACK piece prescreen, used only when the router
-// (routeClusters) fails — no LLM key, timeout, junk output. It scores each
-// pieces.<slug> cluster by term overlap with the prompt (slug words weigh
-// extra) and returns the best few, alphabetical among ties so the selection —
-// and therefore the compiled prompt — is reproducible. Purely lexical: it
-// cannot see synonyms ("spreadsheet" never finds google-sheets), which is why
-// it is no longer the primary path.
-func topPieceClusters(cat *Catalog, prompt string, keys []string, max int) []string {
-	toks := promptTokens(prompt)
-	if len(toks) == 0 {
-		return nil
-	}
-	type scored struct {
-		key   string
-		score int
-	}
-	var ranked []scored
-	for _, key := range keys {
-		f := cat.Clusters[key]
-		score := 0
-		for _, w := range strings.Split(strings.TrimPrefix(key, "pieces."), "-") {
-			if toks[w] {
-				score += 3 // naming the service is the strongest signal
-			}
-		}
-		seen := map[string]bool{}
-		for _, n := range f.Nodes {
-			for _, w := range strings.Fields(strings.ToLower(n.Search + " " + n.Label)) {
-				if toks[w] && !seen[w] {
-					seen[w] = true
-					score++
-				}
-			}
-		}
-		if score > 0 {
-			ranked = append(ranked, scored{key, score})
-		}
-	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].score != ranked[j].score {
-			return ranked[i].score > ranked[j].score
-		}
-		return ranked[i].key < ranked[j].key
-	})
-	if len(ranked) > max {
-		ranked = ranked[:max]
-	}
-	out := make([]string, len(ranked))
-	for i, r := range ranked {
-		out[i] = r.key
-	}
-	return out
-}
-
 // mapPhase selects candidate node ids for the reduce prompt (builtin is always
 // in the reduce context and never routed). The router picks the relevant
 // clusters — hand-written and pieces alike, most relevant first — and each
-// routed cluster then gets one small-model call over its compact index.
-// Failures and junk are dropped silently — a missed cluster costs recall,
-// never correctness. The union is capped fairly across clusters in the
-// router's relevance order, then stable-sorted so the reduce prompt is
-// reproducible.
-func mapPhase(ctx context.Context, cat *Catalog, prompt string) []string {
+// routed cluster then gets one small-model call over its compact index. The
+// union is capped fairly across clusters in the router's relevance order, then
+// stable-sorted so the reduce prompt is reproducible.
+//
+// A cluster whose map call fails used to be dropped silently on the theory that
+// "a missed cluster costs recall, never correctness." That is only true if you
+// never notice: the dropped cluster is usually the integration the user actually
+// asked for, and its absence shows up as a graph that quietly routes around it.
+// Any failure now fails the compile.
+func mapPhase(ctx context.Context, cat *Catalog, prompt string) ([]string, error) {
 	const system = `You route a user's automation request to integration nodes.
 Given the request and a catalog cluster index (one node per line: "id — label — description"),
 return JSON: {"nodes": ["id", ...]} listing ONLY ids from this index that could plausibly be
@@ -247,9 +189,16 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 	var (
 		mu        sync.Mutex
 		byCluster = map[string][]string{} // cluster → ids in the model's own order (its ranking)
+		failures  []error
 		wg        sync.WaitGroup
 		sem       = make(chan struct{}, mapConcurrency)
 	)
+
+	fail := func(f catalogFile, err error) {
+		mu.Lock()
+		failures = append(failures, fmt.Errorf("cluster %q: %w", f.Cluster, err))
+		mu.Unlock()
+	}
 
 	runCluster := func(f catalogFile) {
 		defer wg.Done()
@@ -259,12 +208,14 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 		user := "Request: " + prompt + "\n\nCluster \"" + f.Label + "\":\n" + clusterIndex(f)
 		raw, err := planLLMWith(ctx, mapModel(), 512, 12*time.Second, system, []llmMsg{{Role: "user", Content: user}})
 		if err != nil {
+			fail(f, err)
 			return
 		}
 		var out struct {
 			Nodes []string `json:"nodes"`
 		}
 		if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
+			fail(f, fmt.Errorf("unparseable JSON: %w", err))
 			return
 		}
 		valid := make([]string, 0, len(out.Nodes))
@@ -276,6 +227,8 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 				break
 			}
 		}
+		// An empty selection is a legitimate answer — the router casts wide on
+		// purpose and expects this stage to narrow. Only a broken CALL is an error.
 		if len(valid) == 0 {
 			return
 		}
@@ -285,22 +238,16 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 	}
 
 	// Every non-builtin cluster — hand-written and pieces alike — competes in
-	// the router on relevance. Only when the router fails do we revert to the
-	// old shape: map every hand-written cluster, lexical-prescreen the pieces.
-	var handWritten, pieceKeys []string
+	// the router on relevance.
+	var clusterKeys []string
 	for _, key := range cat.sortedClusters() {
-		if key == "builtin" {
-			continue
+		if key != "builtin" {
+			clusterKeys = append(clusterKeys, key)
 		}
-		if strings.HasPrefix(key, "pieces.") {
-			pieceKeys = append(pieceKeys, key)
-			continue
-		}
-		handWritten = append(handWritten, key)
 	}
-	routed, ok := routeClusters(ctx, cat, prompt, append(append([]string{}, handWritten...), pieceKeys...), maxClusterCalls)
-	if !ok {
-		routed = append(append([]string{}, handWritten...), topPieceClusters(cat, prompt, pieceKeys, maxClusterCalls)...)
+	routed, err := routeClusters(ctx, cat, prompt, clusterKeys, maxClusterCalls)
+	if err != nil {
+		return nil, err
 	}
 	for _, key := range routed {
 		wg.Add(1)
@@ -308,9 +255,19 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 	}
 	wg.Wait()
 
-	// routed doubles as the relevance order for the cap: most relevant cluster
-	// first (router ranking; fallback: hand-written, then prescreen score).
-	return capFairly(byCluster, routed, totalCap)
+	if len(failures) > 0 {
+		// Deterministic message regardless of goroutine completion order.
+		msgs := make([]string, len(failures))
+		for i, e := range failures {
+			msgs[i] = e.Error()
+		}
+		sort.Strings(msgs)
+		return nil, fmt.Errorf("map phase failed for %d of %d cluster(s): %s",
+			len(failures), len(routed), strings.Join(msgs, "; "))
+	}
+
+	// routed doubles as the relevance order for the cap: most relevant cluster first.
+	return capFairly(byCluster, routed, totalCap), nil
 }
 
 // capFairly trims the union of per-cluster selections to max. Its predecessor
@@ -380,21 +337,36 @@ type reduceGraphSpec struct {
 	} `json:"nodes"`
 }
 
-// compileGraphLLM runs map → reduce → validate → repair. ok=false means the caller
-// must use the deterministic fallback (no key, hard timeout, unrepairable output).
-func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) ([]domain.GraphNode, bool) {
-	selected := mapPhase(ctx, cat, prompt)
+// compileGraphLLM runs map → reduce → validate → repair.
+//
+// The repair loop stays: a model that returns malformed JSON or a graph that
+// fails structural validation gets told exactly what was wrong and asked again,
+// twice. That is a retry with new information, not a fallback. Only when the
+// repairs are exhausted — or the provider itself fails — does this return an
+// error, and it carries the last thing the validator objected to so the failure
+// is actionable rather than "couldn't compile".
+//
+// Reduce gets a larger output budget because graph JSON grows quickly once full
+// integration configuration is included.
+func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) ([]domain.GraphNode, error) {
+	selected, err := mapPhase(ctx, cat, prompt)
+	if err != nil {
+		return nil, err
+	}
 	system := reduceSystemPrompt(cat, selected)
 
 	msgs := []llmMsg{{Role: "user", Content: prompt}}
 	const attempts = 3 // 1 author + 2 repairs
+	var lastComplaint string
 	for i := 0; i < attempts; i++ {
-		raw, err := planLLMWith(ctx, reduceModel(), 4096, 45*time.Second, system, msgs)
+		raw, err := planLLMWith(ctx, reduceModel(), 16000, 90*time.Second, system, msgs)
 		if err != nil {
-			return nil, false // provider-level failure: retrying won't change it
+			// Provider-level failure: retrying won't change it.
+			return nil, fmt.Errorf("reduce phase: %w", err)
 		}
 		var spec reduceGraphSpec
 		if err := json.Unmarshal([]byte(extractJSON(raw)), &spec); err != nil {
+			lastComplaint = "not a single valid JSON object: " + err.Error()
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
 				llmMsg{Role: "user", Content: "That was not a single valid JSON object (" + err.Error() + "). Return the full corrected JSON object and nothing else."},
@@ -403,6 +375,7 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 		}
 		nodes := toGraphNodes(spec)
 		if errs := validateGraph(nodes, cat); len(errs) > 0 {
+			lastComplaint = strings.Join(errs, "; ")
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
 				llmMsg{Role: "user", Content: "Your graph failed validation:\n- " + strings.Join(errs, "\n- ") + "\nReturn the full corrected JSON object and nothing else."},
@@ -410,9 +383,10 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 			continue
 		}
 		overlayMeta(spec, p)
-		return nodes, true
+		return nodes, nil
 	}
-	return nil, false
+	return nil, fmt.Errorf("reduce phase: %s could not author a valid graph in %d attempts; last problem: %s",
+		reduceModel(), attempts, lastComplaint)
 }
 
 // reduceSystemPrompt assembles the node contract: graph rules + full schemas for
@@ -464,9 +438,9 @@ DESIGN GUIDANCE:
 - tool.http can call ANY public API you know of (exact documented URLs only) — the
   integration nodes below are conveniences, not limits. tool.browser reads pages that
   need a real browser.
-- Integration nodes declaring credentials run only where the operator configured those
-  env vars; otherwise they record intent without failing the run. Still use them when
-  they fit — but when a keyless route exists (public API via tool.http), prefer it.
+- Integration nodes declaring credentials require the operator to configure them;
+  missing values fail the node. Prefer a keyless public API when it satisfies the
+  request, but use credentialed integrations when they are the correct capability.
 - Node types prefixed "pieces." are Activepieces-backed actions (full-fidelity vendor
   integrations). When a hand-written node and a pieces.* node cover the same capability,
   prefer the hand-written one; reach for pieces.* when it's the only coverage or when
@@ -492,7 +466,7 @@ NODE TYPES AVAILABLE:
 }
 
 // toGraphNodes converts the model's spec into domain nodes: role derived from the
-// type's kind, model left to per-node config / engine defaults, layout done later.
+// type's kind, model left to per-node config / reasoner defaults, layout done later.
 func toGraphNodes(spec reduceGraphSpec) []domain.GraphNode {
 	nodes := make([]domain.GraphNode, 0, len(spec.Nodes))
 	for _, n := range spec.Nodes {
@@ -532,45 +506,6 @@ func overlayMeta(spec reduceGraphSpec, p *Plan) {
 	for k, v := range spec.DefaultInput {
 		p.DefaultInput[k] = v
 	}
-}
-
-/* ------------------------------ fallback graph ------------------------------ */
-
-// fallbackGraph is the deterministic floor when no LLM is reachable: a small TYPED
-// graph (trigger → research agent → report [→ email]) that the reasoner executes
-// as-is. Replaces the old fixed five-source digest shape.
-func fallbackGraph(p Plan) []domain.GraphNode {
-	trigger := domain.GraphNode{
-		Key: "trigger", Name: "Manual trigger", Role: domain.RoleOrchestrator,
-		Type: "trigger.manual", Config: map[string]any{},
-	}
-	if p.Schedule != nil {
-		trigger.Key = "schedule"
-		trigger.Name = "Schedule"
-		trigger.Type = "trigger.schedule"
-	}
-	research := domain.GraphNode{
-		Key: "research", Name: "Research Agent", Role: domain.RoleOrchestrator,
-		Model: "claude-opus-4-8", DependsOn: []string{trigger.Key}, Type: "agent.llm",
-		Config: map[string]any{
-			"system": "You are a thorough research agent. Produce a well-structured, sourced digest.",
-			"prompt": "Research the following and write a concise, well-organized digest with the most important findings first:\n\nTopic: {{input.topic}}",
-		},
-	}
-	report := domain.GraphNode{
-		Key: "report", Name: "Report", Role: domain.RoleWriter,
-		DependsOn: []string{"research"}, Type: "output.report",
-		Config: map[string]any{"title": p.Name, "format": "markdown"},
-	}
-	nodes := []domain.GraphNode{trigger, research, report}
-	if _, ok := p.DefaultInput["email"]; ok {
-		nodes = append(nodes, domain.GraphNode{
-			Key: "email", Name: "Email digest", Role: domain.RoleWriter,
-			DependsOn: []string{"research"}, Type: "output.email",
-			Config: map[string]any{"to": "{{input.email}}", "subject": p.Name},
-		})
-	}
-	return nodes
 }
 
 /* ------------------------------- small helpers ------------------------------ */
@@ -641,9 +576,10 @@ func titleFrom(topic string) string {
 // captures the FULL time (hour, optional minutes, optional meridiem) so a lead-in like
 // "at" can't truncate "at 9:30pm" to "9". A time must carry at least one signal — a
 // lead-in word, a ":MM", or an am/pm — so stray numbers ("top 5 posts") never match.
-//   branch 1: "at 9:30pm" / "by 8" / "around 17:00"  (lead-in word + time)
-//   branch 2: "9:30pm" / "17:00"                      (HH:MM, optional meridiem)
-//   branch 3: "9 am" / "9am"                          (hour + required meridiem)
+//
+//	branch 1: "at 9:30pm" / "by 8" / "around 17:00"  (lead-in word + time)
+//	branch 2: "9:30pm" / "17:00"                      (HH:MM, optional meridiem)
+//	branch 3: "9 am" / "9am"                          (hour + required meridiem)
 var reTimeOfDay = regexp.MustCompile(`(?i)\b(?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b`)
 
 // parseTimeOfDay pulls a "HH:MM" 24-hour clock time out of the prompt, if one is

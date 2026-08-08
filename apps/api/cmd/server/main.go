@@ -19,34 +19,53 @@ import (
 )
 
 func main() {
-	// Load .env from the repo root (best-effort) so DATABASE_URL, the LLM key the
-	// prompt-planner uses, and SMTP creds are present without manual exporting. Real
-	// env vars always win — godotenv does not overwrite what's already set.
+	// Load .env from the repo root (best-effort) so DATABASE_URL, ANTHROPIC_API_KEY,
+	// VOYAGE_API_KEY and SMTP creds are present without manual exporting. Real env
+	// vars always win — godotenv does not overwrite what's already set.
 	_ = godotenv.Load(".env", "../.env", "../../.env")
 
 	pretty := os.Getenv("ENV") != "production"
 	logger := platform.NewLogger(pretty, "svc", "api")
 
-	// Storage: if DATABASE_URL is set, use Postgres (durable, survives restarts);
-	// otherwise fall back to the in-memory seeded store (zero-setup dev/test).
+	// Preflight. The compiler has no deterministic floor any more, so a missing
+	// credential or a stale embedding sidecar means every POST /workflows/plan
+	// will fail. Refuse to start instead, and name the thing that is wrong —
+	// finding out at boot is cheap, finding out from a user's failed workflow
+	// is not.
+	for _, check := range []func() error{
+		services.RequireAnthropicKey,
+		services.RequireVoyageKey,
+		services.RequireNodeCatalog,
+		services.RequirePiecesIndex,
+		services.RequirePieceEmbeddings,
+	} {
+		if err := check(); err != nil {
+			logger.Error("preflight failed", "error", err.Error())
+			os.Exit(1)
+		}
+	}
+
+	// The server always uses Postgres as the durable source of truth. Tests
+	// construct the platform directly with in-memory repositories.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		logger.Error("DATABASE_URL is required", "reason", "the API must use durable Postgres storage")
+		os.Exit(1)
+	}
 	opts := services.Options{
 		Clock:  platform.SystemClock,
 		Logger: logger,
 	}
-	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		pool, err := platform.Connect(ctx, dbURL)
-		cancel()
-		if err != nil {
-			logger.Error("could not connect to Postgres", "error", err.Error())
-			os.Exit(1)
-		}
-		defer pool.Close()
-		logger.Info("connected to Postgres", "store", "postgres")
-		opts.Pool = pool
-	} else {
-		logger.Info("no DATABASE_URL set", "store", "in-memory")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	pool, err := platform.Connect(ctx, dbURL)
+	cancel()
+	if err != nil {
+		logger.Error("could not connect to Postgres", "error", err.Error())
+		os.Exit(1)
 	}
+	defer pool.Close()
+	logger.Info("connected to Postgres", "store", "postgres")
+	opts.Pool = pool
 
 	plat := services.NewPlatform(opts)
 

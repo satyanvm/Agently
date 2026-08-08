@@ -29,12 +29,12 @@ import { Progress } from "@/components/ui/progress";
 import { StatusBadge, StatusDot, statusMeta } from "@/components/ui/status";
 import { Avatar } from "@/components/ui/avatar";
 import { AgentGlyph } from "@/components/agent-glyph";
-import { LiveTimer, LiveCost, LivePill } from "@/components/live";
+import { LiveTimer, LivePill } from "@/components/live";
 import { LogViewer } from "@/components/log-viewer";
 import { AgentVisualization } from "@/components/agent-visualization";
 import { BrowserSessionView } from "@/components/browser-session";
 import { ArtifactList } from "@/components/artifact-list";
-import { cn, formatCost, formatCompact, formatClock, formatDuration, NOW } from "@/lib/utils";
+import { cn, formatCost, formatCompact, formatClock, formatDuration, nowMs } from "@/lib/utils";
 
 type Tab = "overview" | "logs" | "agents" | "browser" | "artifacts";
 
@@ -51,7 +51,7 @@ const TRIGGER = {
 
 function runtimeOf(run: WorkflowRun): number | null {
   if (!run.startedAt) return null;
-  const end = run.finishedAt ? Date.parse(run.finishedAt) : NOW;
+  const end = run.finishedAt ? Date.parse(run.finishedAt) : nowMs();
   return end - Date.parse(run.startedAt);
 }
 
@@ -107,17 +107,6 @@ export function RunDetail({
             </span>
             <span className="text-ghost">·</span>
             <span>started {formatClock(run.startedAt ?? run.queuedAt)}</span>
-            {run.engine === "temporal" && (
-              <>
-                <span className="text-ghost">·</span>
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-faint"
-                  title="Executed by the Temporal + LangGraph reasoner"
-                >
-                  <GitBranch className="size-3" /> temporal
-                </span>
-              </>
-            )}
             {run.langfuseTraceId && (
               <>
                 <span className="text-ghost">·</span>
@@ -171,7 +160,7 @@ export function RunDetail({
         <Metric
           icon={<CircleDollarSign className="size-3.5 text-warn" />}
           label="Cost"
-          value={isLive ? <LiveCost base={run.costUsd} /> : formatCost(run.costUsd)}
+          value={formatCost(run.costUsd)}
         />
         <Metric
           icon={<ListChecks className="size-3.5 text-success" />}
@@ -365,7 +354,7 @@ function Overview({
           <div className="px-5 pb-4 pt-2">
             <div className="flex items-baseline justify-between">
               <span className="text-[24px] font-semibold tabular-nums text-fg">
-                {run.status === "running" ? <LiveCost base={run.costUsd} /> : formatCost(run.costUsd)}
+                {formatCost(run.costUsd)}
               </span>
               <span className="text-[11px] text-faint">of $6.00 budget</span>
             </div>

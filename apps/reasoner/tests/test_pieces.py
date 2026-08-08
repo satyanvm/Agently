@@ -14,6 +14,12 @@ import unittest
 from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
+os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
+os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
+os.environ.setdefault("BROWSERBASE_PROJECT_ID", "test-project")
+os.environ.setdefault("SMTP_HOST", "localhost")
 
 from reasoner import activities, nodes, pieces  # noqa: E402
 
@@ -88,10 +94,10 @@ class PiecesIndexTest(unittest.TestCase):
         self.assertIsNone(pieces.credential_key_for(noauth))
         self.assertFalse(pieces.auth_required(noauth))
 
-    def test_missing_index_degrades_to_empty(self):
-        _reload_with_fixture(None)
-        self.assertEqual(pieces.size(), 0)
-        self.assertIsNone(pieces.piece_spec_for("pieces.slack.send_channel_message"))
+    def test_missing_index_fails_loading(self):
+        with self.assertRaisesRegex(SystemExit, "Piece index not found"):
+            _reload_with_fixture(None)
+        _reload_with_fixture(FIXTURE_INDEX)
 
     def test_is_piece_type(self):
         self.assertTrue(pieces.is_piece_type("pieces.slack.send_channel_message"))
@@ -100,22 +106,20 @@ class PiecesIndexTest(unittest.TestCase):
 
 
 class HandlerRoutingTest(unittest.TestCase):
-    """pieces.* types must fall through the registry+catalog to _piece_fallback
-    (the workflow, not run_node, owns real piece execution)."""
+    """Misrouted pieces and unknown node types must fail explicitly."""
 
-    def test_piece_type_routes_to_fallback_handler(self):
+    def test_piece_type_routes_to_misroute_handler(self):
         _reload_with_fixture(FIXTURE_INDEX)
-        self.assertIs(nodes.handler_for("pieces.slack.send_channel_message"), nodes._piece_fallback)
+        self.assertIs(nodes.handler_for("pieces.slack.send_channel_message"), nodes._misrouted_piece)
         self.assertIs(nodes.handler_for("agent.llm"), nodes._agent)
-        self.assertIs(nodes.handler_for("totally.unknown"), nodes._passthrough)
+        self.assertIs(nodes.handler_for("totally.unknown"), nodes._unsupported)
 
-    def test_fallback_records_intent(self):
+    def test_misrouted_piece_fails(self):
         FakeDB().install()
         node = {"key": "s", "type": "pieces.slack.send_channel_message", "config": {}}
         ctx = nodes.NodeContext(run_id="r", agent_id="ra_s", node=node, upstream={}, run_input={})
-        res = asyncio.run(nodes._piece_fallback(ctx))
-        self.assertFalse(res.output["executed"])
-        self.assertEqual(res.output["reason"], "fallback-orchestrator")
+        with self.assertRaisesRegex(RuntimeError, "DynamicWorkflow"):
+            asyncio.run(nodes._misrouted_piece(ctx))
 
 
 class PreparePieceNodeTest(unittest.TestCase):
@@ -166,14 +170,12 @@ class PreparePieceNodeTest(unittest.TestCase):
         self.assertEqual(prep.payload["props"], {"first_number": 2, "second_number": 40})
         self.assertIsNone(prep.payload["authEnvKey"])
 
-    def test_missing_credential_records(self):
+    def test_missing_credential_fails(self):
         os.environ.pop("AP_SLACK_AUTH", None)
         node = {"key": "s", "type": "pieces.slack.send_channel_message",
                 "config": {"channel": "#g", "text": "hi"}}
-        prep = self._prepare(node)
-        self.assertEqual(prep.mode, "record")
-        self.assertEqual(prep.result["missingCredentials"], ["AP_SLACK_AUTH"])
-        self.assertFalse(prep.result["executed"])
+        with self.assertRaisesRegex(RuntimeError, "AP_SLACK_AUTH"):
+            self._prepare(node)
 
     def test_credential_id_counts_as_present_and_travels(self):
         """A DB credential selection (config.__credentialId) satisfies the
@@ -201,11 +203,10 @@ class PreparePieceNodeTest(unittest.TestCase):
         self.assertEqual(prep.mode, "execute")
         self.assertIsNone(prep.payload["credentialId"])
 
-    def test_unknown_piece_records(self):
+    def test_unknown_piece_fails(self):
         node = {"key": "x", "type": "pieces.ghost.do_thing", "config": {}}
-        prep = self._prepare(node)
-        self.assertEqual(prep.mode, "record")
-        self.assertEqual(prep.result["reason"], "unknown-piece")
+        with self.assertRaisesRegex(RuntimeError, "not in the pieces index"):
+            self._prepare(node)
 
     def test_undeclared_config_keys_stay_out_of_props(self):
         node = {
@@ -240,25 +241,20 @@ class RecordPieceResultTest(unittest.TestCase):
         res = self._record({"ok": True, "output": [1, 2, 3]}, "execute")
         self.assertEqual(res.output["value"], [1, 2, 3])
 
-    def test_piece_error_recorded_without_failing_run(self):
+    def test_piece_error_fails_node(self):
         res = self._record({"ok": False, "error": "channel_not_found",
                             "errorType": "PieceExecutionError"}, "execute")
-        self.assertEqual(res.output["error"], "channel_not_found")
-        self.assertFalse(res.failed, "piece errors must not fail the workflow")
-        self.assertEqual(self.fake.agents["ra_s"]["status"], "succeeded")
+        self.assertTrue(res.failed)
+        self.assertIn("channel_not_found", res.error)
+        self.assertEqual(self.fake.agents["ra_s"]["status"], "failed")
         self.assertTrue(any("channel_not_found" in m for _, _, m in self.fake.logs))
 
-    def test_record_intent_passthrough(self):
-        res = self._record({"recorded": True, "executed": False,
-                            "missingCredentials": ["AP_SLACK_AUTH"]}, "record")
-        self.assertFalse(res.output["executed"])
-        self.assertIn("AP_SLACK_AUTH", res.output["missingCredentials"])
-
-    def test_worker_unavailable_shape(self):
-        res = self._record({"recorded": True, "executed": False,
-                            "reason": "pieces-worker-unavailable"}, "record")
-        self.assertEqual(res.output["reason"], "pieces-worker-unavailable")
-        self.assertEqual(self.fake.agents["ra_s"]["status"], "succeeded")
+    def test_worker_unavailable_fails_node(self):
+        res = self._record({"ok": False, "error": "schedule-to-start timeout",
+                            "errorType": "PiecesWorkerUnavailable"}, "execute")
+        self.assertTrue(res.failed)
+        self.assertIn("PiecesWorkerUnavailable", res.error)
+        self.assertEqual(self.fake.agents["ra_s"]["status"], "failed")
 
 
 if __name__ == "__main__":

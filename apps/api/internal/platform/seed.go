@@ -13,12 +13,6 @@ import (
 // This is the line between a product demo and a product: launch the AI Digest
 // workflow with real input (sources, topic, email) and the worker does real work.
 
-const (
-	// NowISO anchors any timestamp a stats read-model might need. Kept for the
-	// Platform's clock default; nothing fake hangs off it anymore.
-	NowISO = "2026-06-06T17:42:00Z"
-)
-
 const ws = domain.WorkspaceId("ws_agently")
 
 // Seed bundles the data plus materialized stat read-models (now empty/zero —
@@ -30,15 +24,16 @@ type Seed struct {
 }
 
 // BuildSeed constructs the minimal real bootstrap.
-func BuildSeed(_ Clock) Seed {
+func BuildSeed(clock Clock) Seed {
+	createdAt := domain.Timestamp(clock.ISO())
 	workspace := domain.Workspace{
 		ID: ws, Name: "My Workspace", Slug: "my-workspace", Plan: domain.PlanPro,
-		DefaultRegion: "us-east-1", CreatedAt: "2026-01-01T00:00:00Z",
+		DefaultRegion: "us-east-1", CreatedAt: createdAt,
 	}
 
 	owner := domain.Member{
 		ID: "mem_owner", WorkspaceID: ws, Name: "You", Email: "you@example.com",
-		Initials: "YOU", Role: domain.MemberOwner, CreatedAt: "2026-01-01T00:00:00Z",
+		Initials: "YOU", Role: domain.MemberOwner, CreatedAt: createdAt,
 	}
 	members := []domain.Member{owner}
 
@@ -106,7 +101,7 @@ func BuildSeed(_ Clock) Seed {
 		Data:          data,
 		WorkflowStats: map[string]domain.WorkflowStats{},
 		WorkspaceStats: domain.WorkspaceStats{
-			ActiveRuns: 0, RunsToday: 0, SuccessRate: 0, SpendTodayUsd: 0, SpendBudgetUsd: 100,
+			ActiveRuns: 0, RunsToday: 0, SuccessRate: 0, SpendTodayUsd: 0, SpendBudgetUsd: 0,
 			ComputeHours: 0, TokensToday: 0, RunVolume: []int{}, SpendSeries: []float64{},
 		},
 	}

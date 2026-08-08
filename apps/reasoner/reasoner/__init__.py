@@ -2,7 +2,7 @@
 
 Vertical Slice 1 of the unified platform: reasoning runs *inside* durability.
 
-A run launched with engine='temporal' is executed by a LangGraph StateGraph whose
+A queued run is executed by a LangGraph StateGraph whose
 nodes run as Temporal activities — so every reasoning/tool step is durable and
 resumable (Temporal's event history is the checkpoint). The graph drives a browser
 session (Browserbase) and is traced in self-hosted Langfuse. Crucially, each node

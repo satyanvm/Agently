@@ -3,7 +3,7 @@
 Runs two things side by side on one Temporal connection:
   1. A Temporal Worker that executes ReasoningWorkflow + the LangGraph node activities
      (registered via LangGraphPlugin).
-  2. A dispatcher loop that turns engine='temporal' queued runs into workflow starts.
+  2. A dispatcher loop that turns queued runs into workflow starts.
 
   python -m reasoner.worker
 """
@@ -50,8 +50,9 @@ async def main() -> None:
         plugins=[plugin],
     )
 
-    log.info("reasoner up: gemini=%s langfuse=%s browserbase=%s model=%s",
-             CONFIG.gemini_enabled, CONFIG.langfuse_enabled, CONFIG.browserbase_enabled, CONFIG.model)
+    # No feature flags to report: config.py refuses to load without Claude,
+    # Langfuse, Browserbase and SMTP, so reaching this line means all are present.
+    log.info("reasoner up: model=%s synthesis=%s", CONFIG.model, CONFIG.synthesis_model)
 
     async with worker:
         dispatcher = asyncio.create_task(run_dispatcher(client, stop))
