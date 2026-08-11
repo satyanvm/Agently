@@ -1,6 +1,6 @@
 // Package llm is the worker's model-calling layer, behind a provider interface so
-// the agent runtime doesn't care which model it talks to. Anthropic when
-// ANTHROPIC_API_KEY is set, OpenAI when OPENAI_API_KEY is set; a deterministic
+// the agent runtime doesn't care which model it talks to. OpenAI when
+// OPENAI_API_KEY is set; a deterministic
 // mock otherwise — so the whole system runs and is testable with no key and no
 // network.
 //
@@ -42,8 +42,7 @@ type Provider interface {
 	Name() string
 }
 
-// New picks a provider from the environment: real Anthropic or OpenAI if a key is
-// present, otherwise the mock. Anthropic wins if both keys are set. Returning the
+// New picks OpenAI when OPENAI_API_KEY is present, otherwise the mock. Returning the
 // interface keeps callers provider-agnostic.
 //
 // A real provider is wrapped in withFallback: if the model is unreachable for a
@@ -52,18 +51,10 @@ type Provider interface {
 // the digest, so the run still produces useful output — graceful degradation, the
 // same principle applied to sources and the browser.
 func New() Provider {
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		model := os.Getenv("ANTHROPIC_MODEL")
-		if model == "" {
-			model = "claude-sonnet-4-6"
-		}
-		base := resolveBaseURL("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-		return &withFallback{primary: &anthropic{key: key, model: model, base: base, http: &http.Client{Timeout: 120 * time.Second}}}
-	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		model := os.Getenv("OPENAI_MODEL")
 		if model == "" {
-			model = "gpt-4o"
+			model = "gpt-4o-mini"
 		}
 		base := resolveBaseURL("OPENAI_BASE_URL", "https://api.openai.com")
 		return &withFallback{primary: &openai{key: key, model: model, base: base, http: &http.Client{Timeout: 120 * time.Second}}}

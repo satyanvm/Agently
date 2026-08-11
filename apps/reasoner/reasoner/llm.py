@@ -1,9 +1,8 @@
-"""LLM calls via LangChain ChatGoogleGenerativeAI (Gemini), instrumented with Langfuse.
+"""LLM calls via LangChain ChatOpenAI, instrumented with Langfuse.
 
-Real Gemini when GEMINI_API_KEY (or GOOGLE_API_KEY) is set, otherwise a deterministic
+Real OpenAI when OPENAI_API_KEY is set, otherwise a deterministic
 mock so the slice runs keyless. Returns the text plus token usage + an estimated cost,
-which the caller rolls up onto the run. No third-party proxy: the Gemini SDK talks
-directly to Google's generativelanguage endpoint.
+which the caller rolls up onto the run. The OpenAI SDK uses OPENAI_API_KEY directly.
 """
 from __future__ import annotations
 
@@ -12,10 +11,10 @@ from dataclasses import dataclass
 from . import obs
 from .config import CONFIG
 
-# Gemini 2.5 Flash rates (USD per 1K tokens) — a rough estimate for the run's cost
+# GPT-4o-mini rates (USD per 1K tokens) — a rough estimate for the run's cost
 # display; exact billing depends on the chosen model and context length.
-_RATE_IN = 0.0003
-_RATE_OUT = 0.0025
+_RATE_IN = 0.00015
+_RATE_OUT = 0.0006
 
 
 @dataclass
@@ -32,13 +31,13 @@ def _estimate_cost(tin: int, tout: int) -> float:
 
 async def complete(run_id: str, node: str, system: str, user: str, *, model: str | None = None) -> Completion:
     model = model or CONFIG.model
-    if not CONFIG.gemini_api_key:
+    if not CONFIG.openai_api_key:
         return _mock(node, user)
     try:
-        from langchain_google_genai import ChatGoogleGenerativeAI  # imported lazily
+        from langchain_openai import ChatOpenAI  # imported lazily
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        llm = ChatGoogleGenerativeAI(model=model, google_api_key=CONFIG.gemini_api_key, max_tokens=2048, temperature=0.3)
+        llm = ChatOpenAI(model=model, api_key=CONFIG.openai_api_key, max_tokens=2048, temperature=0.3)
         config = obs.langchain_config(run_id, node, model=model)
         resp = await llm.ainvoke(
             [SystemMessage(content=system), HumanMessage(content=user)], config=config

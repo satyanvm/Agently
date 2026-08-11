@@ -35,10 +35,11 @@ class Config:
     langfuse_host: str
     langfuse_public_key: str
     langfuse_secret_key: str
-    # Models. Run-time synthesis runs on Google Gemini; unset key ⇒ deterministic mock.
+    # Models. Run-time execution uses the small model; prompt-building/synthesis can
+    # be separately pinned, with OPENAI_API_KEY shared across the whole project.
     model: str
     synthesis_model: str
-    gemini_api_key: str
+    openai_api_key: str
     # Browserbase (optional — falls back to a simulated browse if unset).
     browserbase_api_key: str
     browserbase_project_id: str
@@ -59,8 +60,8 @@ class Config:
     dispatch_interval_s: float
 
     @property
-    def gemini_enabled(self) -> bool:
-        return bool(self.gemini_api_key)
+    def openai_enabled(self) -> bool:
+        return bool(self.openai_api_key)
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -91,12 +92,9 @@ def load() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST", "http://localhost:3001"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
-        model=os.getenv("REASONER_MODEL", "gemini-2.5-flash"),
-        # Default to Flash for synthesis too — 2.5-pro has near-zero free-tier quota
-        # (429 RESOURCE_EXHAUSTED). Override to gemini-2.5-pro on a paid key.
-        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "gemini-2.5-flash"),
-        # GEMINI_API_KEY is the run-time synthesis key (GOOGLE_API_KEY also accepted).
-        gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
+        model=os.getenv("REASONER_MODEL", "gpt-4o-mini"),
+        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "gpt-4o-mini"),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         browserbase_api_key=os.getenv("BROWSERBASE_API_KEY", ""),
         browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID", ""),
         smtp_host=os.getenv("SMTP_HOST", ""),

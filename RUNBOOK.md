@@ -74,7 +74,7 @@ Logs live in `.agently/logs/*.log`; PIDs in `.agently/*.pid` (git-ignored).
 
 ## Credentials & env
 
-- **`.env`** (auto-loaded by the services): `GEMINI_API_KEY`, `BROWSERBASE_API_KEY`,
+- **`.env`** (auto-loaded by the services): `OPENAI_API_KEY`, `BROWSERBASE_API_KEY`,
   `BROWSERBASE_PROJECT_ID`, `OPENAI_API_KEY`, `RESEND_API_KEY`, `SMTP_*`.
 - **LLM** — the reasoner (run-time synthesis) and the API planner both run on **Google
   Gemini**. Add one line to `.env` and every start is real, no proxy, no exporting:

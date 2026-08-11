@@ -50,8 +50,8 @@ async def main() -> None:
         plugins=[plugin],
     )
 
-    log.info("reasoner up: gemini=%s langfuse=%s browserbase=%s model=%s",
-             CONFIG.gemini_enabled, CONFIG.langfuse_enabled, CONFIG.browserbase_enabled, CONFIG.model)
+    log.info("reasoner up: openai=%s langfuse=%s browserbase=%s model=%s",
+             CONFIG.openai_enabled, CONFIG.langfuse_enabled, CONFIG.browserbase_enabled, CONFIG.model)
 
     async with worker:
         dispatcher = asyncio.create_task(run_dispatcher(client, stop))

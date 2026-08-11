@@ -18,9 +18,9 @@ never code. Consumed by all three planes:
 
 ### Map-reduce compilation (`apps/api/internal/services/planner.go`)
 - **Map**: one parallel call per cluster with a small fast model
-  (`PLANNER_MAP_MODEL`, default `claude-haiku-4-5`) over that cluster's compact
+  (`PLANNER_MAP_MODEL`, default `gpt-4o-mini`) over that cluster's compact
   index → relevant node ids (≤8/cluster, ≤32 total).
-- **Reduce**: the big model (`PLANNER_MODEL`, default `claude-opus-4-8`) gets the
+- **Reduce**: the big model (`PLANNER_MODEL`, default `gpt-4o`) gets the
   node contract (graph rules, templating semantics, fail-open warning) + full
   schemas of built-ins and selected nodes only → authors the complete graph.
 - **Validate → repair**: structural rules (unknown types, dup keys, bad deps,

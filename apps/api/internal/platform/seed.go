@@ -51,11 +51,11 @@ func BuildSeed(_ Clock) Seed {
 		}
 	}
 	agents := []domain.AgentDefinition{
-		agentDef("agt_arxiv", "arXiv Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", "Pulls latest AI research papers from arXiv.", []string{"fetch.arxiv"}),
-		agentDef("agt_hn", "HN Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", "Pulls top AI/startup stories from Hacker News.", []string{"fetch.hn"}),
-		agentDef("agt_reddit", "Reddit Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", "Pulls hot posts from AI subreddits.", []string{"fetch.reddit"}),
-		agentDef("agt_web", "Web Fetcher", domain.RoleBrowser, "claude-sonnet-4-6", "Fetches arbitrary pages (browser when needed).", []string{"browser.navigate", "fetch.web"}),
-		agentDef("agt_editor", "Editor", domain.RoleWriter, "claude-opus-4-8", "Synthesizes sources into a clean digest and emails it.", []string{"write", "summarize", "email"}),
+		agentDef("agt_arxiv", "arXiv Fetcher", domain.RoleResearcher, "gpt-4o-mini", "Pulls latest AI research papers from arXiv.", []string{"fetch.arxiv"}),
+		agentDef("agt_hn", "HN Fetcher", domain.RoleResearcher, "gpt-4o-mini", "Pulls top AI/startup stories from Hacker News.", []string{"fetch.hn"}),
+		agentDef("agt_reddit", "Reddit Fetcher", domain.RoleResearcher, "gpt-4o-mini", "Pulls hot posts from AI subreddits.", []string{"fetch.reddit"}),
+		agentDef("agt_web", "Web Fetcher", domain.RoleBrowser, "gpt-4o-mini", "Fetches arbitrary pages (browser when needed).", []string{"browser.navigate", "fetch.web"}),
+		agentDef("agt_editor", "Editor", domain.RoleWriter, "gpt-4o-mini", "Synthesizes sources into a clean digest and emails it.", []string{"write", "summarize", "email"}),
 	}
 
 	// The AI Digest workflow: four fetchers run in parallel, the Editor synthesizes
@@ -82,11 +82,11 @@ func BuildSeed(_ Clock) Seed {
 		return domain.GraphNode{Key: key, AgentDefinitionID: nil, Name: name, Role: role, Model: model, Col: col, Row: row, DependsOn: deps}
 	}
 	nodes := []domain.GraphNode{
-		node("arxiv", "arXiv Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", 0, 0, nil),
-		node("hn", "HN Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", 0, 1, nil),
-		node("reddit", "Reddit Fetcher", domain.RoleResearcher, "claude-sonnet-4-6", 0, 2, nil),
-		node("web", "Web Fetcher", domain.RoleBrowser, "claude-sonnet-4-6", 0, 3, nil),
-		node("editor", "Editor", domain.RoleWriter, "claude-opus-4-8", 1, 1, []string{"arxiv", "hn", "reddit", "web"}),
+		node("arxiv", "arXiv Fetcher", domain.RoleResearcher, "gpt-4o-mini", 0, 0, nil),
+		node("hn", "HN Fetcher", domain.RoleResearcher, "gpt-4o-mini", 0, 1, nil),
+		node("reddit", "Reddit Fetcher", domain.RoleResearcher, "gpt-4o-mini", 0, 2, nil),
+		node("web", "Web Fetcher", domain.RoleBrowser, "gpt-4o-mini", 0, 3, nil),
+		node("editor", "Editor", domain.RoleWriter, "gpt-4o-mini", 1, 1, []string{"arxiv", "hn", "reddit", "web"}),
 	}
 	versions := []domain.WorkflowVersion{{
 		ID: "wfv_aidigest_1", WorkflowID: "wf_aidigest", Version: 1, Note: "Initial AI Digest graph",

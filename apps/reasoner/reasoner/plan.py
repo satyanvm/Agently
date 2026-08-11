@@ -231,4 +231,4 @@ def agent_name(node: dict[str, Any], key: str) -> str:
 
 
 def agent_model(node: dict[str, Any]) -> str:
-    return node.get("config", {}).get("model") or node.get("model") or "claude-sonnet-4-6"
+    return node.get("config", {}).get("model") or node.get("model") or "gpt-4o-mini"

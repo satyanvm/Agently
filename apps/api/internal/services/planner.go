@@ -54,10 +54,10 @@ var (
 	reSubreddit = regexp.MustCompile(`(?i)r/([A-Za-z0-9_]+)`)
 )
 
-// Compilation model tiers. Map wants cheap+fast; reduce wants the strongest
-// available (graph authorship is the hard part). Both env-overridable.
-func mapModel() string    { return envOr("PLANNER_MAP_MODEL", "claude-haiku-4-5") }
-func reduceModel() string { return envOr("PLANNER_MODEL", "claude-opus-4-8") }
+// Compilation model tiers. Map is cheap+fast; reduce is the stronger prompt
+// builder that authors the executable graph. Both are environment-overridable.
+func mapModel() string    { return envOr("PLANNER_MAP_MODEL", "gpt-4o-mini") }
+func reduceModel() string { return envOr("PLANNER_MODEL", "gpt-4o") }
 
 // planCache memoizes compiled plans by (prompt,name,email,schedule) so the create
 // dialog's debounced live preview (POST /workflows/plan on every pause in typing)
@@ -570,7 +570,7 @@ func fallbackGraph(p Plan) []domain.GraphNode {
 	}
 	research := domain.GraphNode{
 		Key: "research", Name: "Research Agent", Role: domain.RoleOrchestrator,
-		Model: "claude-opus-4-8", DependsOn: []string{trigger.Key}, Type: "agent.llm",
+		Model: reduceModel(), DependsOn: []string{trigger.Key}, Type: "agent.llm",
 		Config: map[string]any{
 			"system": "You are a thorough research agent. Produce a well-structured, sourced digest.",
 			"prompt": "Research the following and write a concise, well-organized digest with the most important findings first:\n\nTopic: {{input.topic}}",
@@ -660,9 +660,10 @@ func titleFrom(topic string) string {
 // captures the FULL time (hour, optional minutes, optional meridiem) so a lead-in like
 // "at" can't truncate "at 9:30pm" to "9". A time must carry at least one signal — a
 // lead-in word, a ":MM", or an am/pm — so stray numbers ("top 5 posts") never match.
-//   branch 1: "at 9:30pm" / "by 8" / "around 17:00"  (lead-in word + time)
-//   branch 2: "9:30pm" / "17:00"                      (HH:MM, optional meridiem)
-//   branch 3: "9 am" / "9am"                          (hour + required meridiem)
+//
+//	branch 1: "at 9:30pm" / "by 8" / "around 17:00"  (lead-in word + time)
+//	branch 2: "9:30pm" / "17:00"                      (HH:MM, optional meridiem)
+//	branch 3: "9 am" / "9am"                          (hour + required meridiem)
 var reTimeOfDay = regexp.MustCompile(`(?i)\b(?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b`)
 
 // parseTimeOfDay pulls a "HH:MM" 24-hour clock time out of the prompt, if one is

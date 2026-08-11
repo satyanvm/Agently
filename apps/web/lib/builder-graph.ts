@@ -151,7 +151,7 @@ function roleForType(typeId: string): string {
 
 /* ------------------------------- save path ------------------------------- */
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = "gpt-4o-mini";
 
 /** Quantize a canvas coordinate into a nonnegative grid index for the domain's
  *  integer col/row (the read-only run-graph view uses these). The exact float

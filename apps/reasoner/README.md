@@ -27,7 +27,7 @@ re-charging its tokens.
 
 Prereqs (from the repo root): Postgres + Temporal up via `docker compose up -d`,
 migrations applied (incl. `0009_temporal_engine.sql`), and `.env` populated
-(`DATABASE_URL`, `TEMPORAL_*`, optionally `GEMINI_API_KEY`, `BROWSERBASE_*`,
+(`DATABASE_URL`, `TEMPORAL_*`, optionally `OPENAI_API_KEY`, `BROWSERBASE_*`,
 `LANGFUSE_*`). Langfuse is optional: `docker compose -f docker-compose.langfuse.yml up -d`.
 
 ```bash
@@ -51,7 +51,7 @@ in the Temporal UI (http://localhost:8080 → one activity per node), and — if
 configured — in Langfuse (http://localhost:3001, grouped under session = run id).
 
 ## Graceful degradation
-- No `ANTHROPIC_API_KEY` → deterministic mock completions (run still completes).
+- No `OPENAI_API_KEY` → deterministic mock completions (run still completes).
 - No `BROWSERBASE_*` → simulated browse over plain HTTP (still writes browser_* rows).
 - No `LANGFUSE_*` → tracing is a no-op.
 

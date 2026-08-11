@@ -88,7 +88,7 @@ async def _ensure_agents(run_id: str) -> dict[str, str]:
     ids: dict[str, str] = {}
     for key, name, role, col in _NODES:
         ids[key] = await db.upsert_agent(
-            run_id, key, name, role, "claude-sonnet-4-6", _DEPS[key], col, 0
+            run_id, key, name, role, "gpt-4o-mini", _DEPS[key], col, 0
         )
     return ids
 

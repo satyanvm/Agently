@@ -327,12 +327,12 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   "agent.llm": [
     { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },
     { key: "prompt", label: "Prompt", control: "textarea", placeholder: "Use {{input.topic}} and upstream outputs…" },
-    { key: "model", label: "Model", control: "select", options: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] },
+    { key: "model", label: "Model", control: "select", options: ["gpt-4o-mini", "gpt-4o"] },
   ],
   "agent.chat": [
     { key: "system", label: "System prompt", control: "textarea" },
     { key: "prompt", label: "Prompt", control: "textarea" },
-    { key: "model", label: "Model", control: "select", options: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] },
+    { key: "model", label: "Model", control: "select", options: ["gpt-4o-mini", "gpt-4o"] },
   ],
   "tool.browser": [
     { key: "urls", label: "URLs (one per line)", control: "textarea", placeholder: "https://example.com" },

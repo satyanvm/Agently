@@ -65,7 +65,7 @@ func main() {
 
 	q := queue.New(pool)
 
-	// LLM provider: real Anthropic if ANTHROPIC_API_KEY is set, else a mock so the
+	// LLM provider: real OpenAI if OPENAI_API_KEY is set, else a mock so the
 	// system runs with no key. The runtime is provider-agnostic either way.
 	provider := llm.New()
 	log.Info("llm provider selected", "provider", provider.Name())
