@@ -1,8 +1,9 @@
 /**
  * Generate packages/nodes/pieces/embeddings.{json,bin} — the offline half of
  * the planner's embedding prefilter (apps/api piecesembed.go). One vector per
- * index node (action or trigger), embedded with Voyage and unit-normalized so
- * the Go side's dot product equals cosine similarity.
+ * index node (action or trigger), embedded with Gemini and unit-normalized so
+ * the Go side's dot product equals cosine similarity (Gemini vectors below
+ * 3072 dims are NOT pre-normalized — normalization here is load-bearing).
  *
  * Incremental: rows whose (model, dims, text) hash matches the existing
  * manifest are reused without an API call, so re-runs after small catalog
@@ -10,15 +11,23 @@
  * vectors embedded so far are saved to embeddings.partial.{json,bin} — a
  * staging file the Go loader never reads — so re-running after the quota
  * window converges to a complete sidecar instead of starting over. Run via
- * `npm run gen:embeddings` after gen:index; requires VOYAGE_API_KEY.
+ * `npm run gen:embeddings` after gen:index; requires GEMINI_API_KEY, or
+ * OPENAI_API_KEY when PLANNER_EMBED_MODEL is an OpenAI text-embedding-* model,
+ * or a running Ollama (OLLAMA_HOST) when it is ollama/<model>.
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const MODEL = process.env.PLANNER_EMBED_MODEL || 'voyage-4';
-const DIMS = Number(process.env.PLANNER_EMBED_DIMS || 1024);
-const BATCH = 100;
+const MODEL = process.env.PLANNER_EMBED_MODEL || 'gemini-embedding-001';
+const DIMS = Number(process.env.PLANNER_EMBED_DIMS || 768);
+// The provider follows the model name, mirroring the Go query side
+// (piecesembed.go embedProvider): ollama/* is a local Ollama, text-embedding-*
+// is OpenAI, anything else Gemini.
+const OLLAMA = MODEL.startsWith('ollama/');
+const OPENAI = MODEL.startsWith('text-embedding-');
+const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
+const BATCH = 100; // batchEmbedContents caps at 100 requests per call
 const MAX_RETRIES = 8; // waits total ~2min — rides out per-minute quota windows
 
 interface IndexNode {
@@ -63,26 +72,53 @@ function normalize(v: number[]): Float32Array {
 }
 
 async function embedBatch(key: string, texts: string[]): Promise<Float32Array[]> {
-  const body = JSON.stringify({
-    model: MODEL,
-    input: texts,
-    input_type: 'document',
-    output_dimension: DIMS,
+  if (OLLAMA) return embedBatchOllama(texts);
+  return OPENAI ? embedBatchOpenAI(key, texts) : embedBatchGemini(key, texts);
+}
+
+/** Local Ollama. nomic-embed-text style models take task prefixes instead of a
+ * task type: documents are "search_document: ", the Go query side sends
+ * "search_query: " — the same asymmetry Gemini's taskType expresses. */
+async function embedBatchOllama(texts: string[]): Promise<Float32Array[]> {
+  const resp = await fetch(`${OLLAMA_HOST}/api/embed`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL.slice('ollama/'.length),
+      input: texts.map((t) => `search_document: ${t}`),
+      dimensions: DIMS,
+    }),
   });
-  const url = 'https://api.voyageai.com/v1/embeddings';
+  if (!resp.ok) {
+    throw new Error(`ollama embeddings status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  }
+  const parsed = (await resp.json()) as { embeddings?: number[][] };
+  const rows = parsed.embeddings ?? [];
+  if (rows.length !== texts.length) {
+    throw new Error(`batch returned ${rows.length} embeddings for ${texts.length} texts`);
+  }
+  return rows.map((r) => {
+    if (r.length !== DIMS) throw new Error(`embedding has ${r.length} dims, want ${DIMS}`);
+    return normalize(r);
+  });
+}
+
+/** OpenAI has no query/document task type, so both sides embed the same way;
+ * `dimensions` pins the width to DIMS (text-embedding-3-* support shortening). */
+async function embedBatchOpenAI(key: string, texts: string[]): Promise<Float32Array[]> {
+  const body = JSON.stringify({ model: MODEL, input: texts, dimensions: DIMS });
   for (let attempt = 0; ; attempt++) {
     let resp: Response;
     try {
-      resp = await fetch(url, {
+      resp = await fetch('https://api.openai.com/v1/embeddings', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
         body,
       });
     } catch (err) {
-      // Transient network failure — same backoff as a 429.
       if (attempt < MAX_RETRIES) {
         const wait = Math.min(30_000, 1_000 * 2 ** attempt);
-        console.warn(`fetch failed (${String(err).slice(0, 80)}); retrying in ${wait / 1000}s`);
+        console.warn(`openai fetch failed (${(err as Error).message}); retrying in ${wait / 1000}s`);
         await new Promise((r) => setTimeout(r, wait));
         continue;
       }
@@ -101,14 +137,67 @@ async function embedBatch(key: string, texts: string[]): Promise<Float32Array[]>
         return normalize(r.embedding);
       });
     }
-    // 429/5xx are transient (rate limits, hiccups); everything else is fatal.
     if ((resp.status === 429 || resp.status >= 500) && attempt < MAX_RETRIES) {
       const wait = Math.min(30_000, 1_000 * 2 ** attempt);
-      console.warn(`voyage ${resp.status}; retrying in ${wait / 1000}s`);
+      console.warn(`openai ${resp.status}; retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
       continue;
     }
-    throw new Error(`voyage embeddings status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+    throw new Error(`openai embeddings status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  }
+}
+
+async function embedBatchGemini(key: string, texts: string[]): Promise<Float32Array[]> {
+  // taskType MUST mirror the Go query side's RETRIEVAL_QUERY — Gemini embeds
+  // documents and queries differently, and a mismatch costs recall silently.
+  const body = JSON.stringify({
+    requests: texts.map((text) => ({
+      model: `models/${MODEL}`,
+      content: { parts: [{ text }] },
+      taskType: 'RETRIEVAL_DOCUMENT',
+      outputDimensionality: DIMS,
+    })),
+  });
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:batchEmbedContents`;
+  for (let attempt = 0; ; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+        body,
+      });
+    } catch (err) {
+      // Transient network failure — same backoff as a 429.
+      if (attempt < MAX_RETRIES) {
+        const wait = Math.min(30_000, 1_000 * 2 ** attempt);
+        console.warn(`fetch failed (${String(err).slice(0, 80)}); retrying in ${wait / 1000}s`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+    if (resp.ok) {
+      const parsed = (await resp.json()) as { embeddings?: Array<{ values?: number[] }> };
+      const rows = parsed.embeddings ?? [];
+      if (rows.length !== texts.length) {
+        throw new Error(`batch returned ${rows.length} embeddings for ${texts.length} texts`);
+      }
+      return rows.map((r) => {
+        if (!Array.isArray(r.values) || r.values.length !== DIMS) {
+          throw new Error(`embedding has ${r.values?.length ?? 0} dims, want ${DIMS}`);
+        }
+        return normalize(r.values);
+      });
+    }
+    // 429/5xx are transient (rate limits, hiccups); everything else is fatal.
+    if ((resp.status === 429 || resp.status >= 500) && attempt < MAX_RETRIES) {
+      const wait = Math.min(30_000, 1_000 * 2 ** attempt);
+      console.warn(`gemini ${resp.status}; retrying in ${wait / 1000}s`);
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+    throw new Error(`gemini embeddings status ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
   }
 }
 
@@ -162,9 +251,10 @@ function writeSidecar(manifestPath: string, binPath: string, ids: string[], hash
 }
 
 async function main(): Promise<void> {
-  const key = process.env.VOYAGE_API_KEY;
-  if (!key) {
-    console.error('VOYAGE_API_KEY is required to generate embeddings');
+  const keyName = OPENAI ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
+  const key = OLLAMA ? '' : (process.env[keyName] ?? '');
+  if (!OLLAMA && !key) {
+    console.error(`${keyName} is required to generate embeddings with ${MODEL}`);
     process.exit(1);
   }
 

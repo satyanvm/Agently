@@ -6,9 +6,9 @@ package main
 //
 //   lexical    — the retired term-overlap baseline, retained only for comparison
 //   embeddings — the offline sidecar prefilter alone (needs embeddings.json/.bin
-//                next to the pieces index + VOYAGE_API_KEY)
+//                next to the pieces index + GEMINI_API_KEY)
 //   router     — the primary path: small-model call over the piece directory
-//                (needs an LLM key; includes the embedding prefilter when present)
+//                (needs GEMINI_API_KEY; includes the embedding prefilter when present)
 //
 // Expectations are ANY-OF groups: "text me" is satisfied by twilio OR clicksend
 // OR any other SMS piece — the graph only needs one of them. Recall@N =
@@ -169,8 +169,8 @@ func main() {
 		if _, ok := stats[n]; !ok {
 			fmt.Printf("  %-11s (never answered — needs %s)\n", n,
 				map[string]string{
-					"embeddings": "the embeddings sidecar + VOYAGE_API_KEY",
-					"router":     "ANTHROPIC_API_KEY (plus the sidecar it prefilters through)",
+					"embeddings": "the embeddings sidecar + GEMINI_API_KEY",
+					"router":     "GEMINI_API_KEY (plus the sidecar it prefilters through)",
 				}[n])
 		}
 	}

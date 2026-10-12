@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -252,6 +253,8 @@ func (c *Catalog) sortedClusters() []string {
 
 /* ------------------------------ graph validation ------------------------------ */
 
+var validNodeKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // validateGraph applies the structural rules the reasoner enforces at load time
 // (reasoner/plan.py topo_order) plus catalog-type checks, returning human-readable
 // error strings the repair loop can feed back to the model. Empty slice == valid.
@@ -268,6 +271,11 @@ func validateGraph(nodes []domain.GraphNode, cat *Catalog) []string {
 		}
 		if byKey[n.Key] {
 			errs = append(errs, "duplicate node key: "+n.Key)
+		}
+		if !validNodeKey.MatchString(n.Key) {
+			// References are dotted paths (outputs.<key>.<field>), so a key like
+			// "hackernews.fetch" can never be referenced.
+			errs = append(errs, "node key '"+n.Key+"' must use only letters, digits, _ or - (no dots or spaces), e.g. 'fetch_stories'")
 		}
 		byKey[n.Key] = true
 		if n.Type == "" {

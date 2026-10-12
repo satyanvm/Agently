@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
 os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
 os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
@@ -240,6 +240,13 @@ class RecordPieceResultTest(unittest.TestCase):
     def test_non_dict_output_is_wrapped(self):
         res = self._record({"ok": True, "output": [1, 2, 3]}, "execute")
         self.assertEqual(res.output["value"], [1, 2, 3])
+        self.assertEqual(res.output["result"], [1, 2, 3])
+
+    def test_result_holds_whole_output_for_dicts_too(self):
+        # `result` is the one output the catalog advertises for piece actions.
+        res = self._record({"ok": True, "output": {"id": 7, "ok": True}}, "execute")
+        self.assertEqual(res.output["result"], {"id": 7, "ok": True})
+        self.assertEqual(res.output["id"], 7)
 
     def test_piece_error_fails_node(self):
         res = self._record({"ok": False, "error": "channel_not_found",

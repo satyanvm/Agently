@@ -29,7 +29,7 @@ export TEMPORAL_TASK_QUEUE="${TEMPORAL_TASK_QUEUE:-agently-reasoner}"
 export PIECES_TASK_QUEUE="${PIECES_TASK_QUEUE:-agently-pieces}"
 
 # Credentials are auto-loaded from .env by the services themselves:
-# ANTHROPIC_API_KEY, VOYAGE_API_KEY, LANGFUSE_*, BROWSERBASE_* and SMTP_*.
+# GEMINI_API_KEY, MOONSHOT_API_KEY, LANGFUSE_*, BROWSERBASE_* and SMTP_*.
 
 API_BIN=/tmp/agently-api
 RUNDIR="$ROOT/.agently"
@@ -71,7 +71,7 @@ build_go() {
 }
 
 ensure_web_deps() {
-  [ -x "$ROOT/node_modules/.bin/next" ] || { say "Installing web deps (pnpm install)…"; pnpm install >/dev/null; }
+  [ -x "$ROOT/node_modules/.bin/next" ] || [ -x "$ROOT/apps/web/node_modules/.bin/next" ] || { say "Installing web deps (pnpm install)…"; pnpm install >/dev/null; }
 }
 
 ensure_reasoner_venv() {
@@ -88,11 +88,34 @@ pieces_built() { [ -f "$ROOT/apps/pieces-worker/dist/worker.js" ]; }
 # ---------- infra ----------
 start_infra() {
   say "Starting Docker infra (Postgres + Temporal)…"
-  docker info >/dev/null 2>&1 || { bad "Docker daemon not running — start Docker Desktop first."; return 1; }
+  docker info >/dev/null 2>&1 || { bad "Docker daemon not running — start it first (colima start)."; return 1; }
   docker compose up -d >/dev/null 2>&1 || { bad "docker compose up failed"; return 1; }
   printf "  waiting for Postgres"
   for i in $(seq 1 40); do docker exec agently-postgres pg_isready -U agently >/dev/null 2>&1 && break; printf "."; sleep 1; done
   echo; ok "infra up (postgres :5433, temporal :7233, temporal-ui :8080)"
+  # The reasoner refuses to start without Langfuse: every run is traced.
+  docker compose -f docker-compose.langfuse.yml up -d >/dev/null 2>&1 \
+    && ok "langfuse up (http://localhost:3001 — dev@agently.local / agently-dev-pw)" \
+    || { bad "langfuse compose up failed"; return 1; }
+  # Any ollama/<model> (embeddings, planner tiers, reasoner) needs the server
+  # running and the model pulled — check both now rather than mid-compile.
+  local models
+  models="$(grep -E '^(PLANNER_EMBED_MODEL|PLANNER_MAP_MODEL|PLANNER_MODEL|REASONER_MODEL|REASONER_SYNTHESIS_MODEL)=ollama/' "$ROOT/.env" 2>/dev/null \
+    | sed -E 's/^[A-Z_]+=ollama\///' | sort -u)"
+  if [ -n "$models" ]; then
+    curl -sf -o /dev/null http://localhost:11434/api/version \
+      || { command -v brew >/dev/null && brew services start ollama >/dev/null 2>&1; sleep 2; }
+    curl -sf -o /dev/null http://localhost:11434/api/version \
+      || { bad "ollama not reachable on :11434 — run: ollama serve"; return 1; }
+    local have m missing=""
+    have="$(ollama list 2>/dev/null | awk 'NR>1 {print $1}')"
+    for m in $models; do
+      # `ollama list` shows untagged names as name:latest.
+      echo "$have" | grep -qxF "$m" || echo "$have" | grep -qxF "$m:latest" || missing="$missing $m"
+    done
+    [ -z "$missing" ] || { bad "ollama model(s) not pulled:$missing — run: ollama pull <model>"; return 1; }
+    ok "ollama up (:11434) — $(echo $models | tr '\n' ' ')"
+  fi
 }
 
 # ---------- per-service start ----------
@@ -139,7 +162,8 @@ cmd_start() {
   start_web || return 1
   printf "  waiting for API health"
   if wait_http "http://localhost:${API_PORT}/api/workflows" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
-  grep -qE '^ANTHROPIC_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: ANTHROPIC_API_KEY not set in .env${c_rst}"
+  grep -qE '^GEMINI_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: GEMINI_API_KEY not set in .env${c_rst}"
+  grep -qE '^PLANNER_MODEL=(kimi|moonshot)' "$ROOT/.env" 2>/dev/null && ! grep -qE '^(MOONSHOT|KIMI)_API_KEY=.+' "$ROOT/.env" 2>/dev/null && say "  ${c_dim}note: MOONSHOT_API_KEY not set in .env (needed for the kimi-k3 reduce model)${c_rst}"
   echo
   say "${c_grn}Agently is up.${c_rst}  UI: http://localhost:3000   Temporal UI: http://localhost:8080"
   say "  logs: pnpm agently:logs   status: pnpm agently:status   stop: pnpm agently:stop"

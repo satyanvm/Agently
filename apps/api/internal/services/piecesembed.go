@@ -10,13 +10,16 @@ package services
 //
 // At ~7k vectors the scan is brute-force in memory: no vector store, a few
 // milliseconds. Nothing here degrades any more: a missing sidecar, a missing
-// VOYAGE_API_KEY, a sidecar built with a different model or dimension, or a
+// GEMINI_API_KEY, a sidecar built with a different model or dimension, or a
 // failed embed call are all ERRORS. A stale sidecar quietly scoring a prompt
 // against vectors from another model is precisely the kind of invisible wrong
 // answer this codebase is being cured of.
 //
-// Embeddings are Voyage. Anthropic publishes no embeddings endpoint, which is
-// why this is the one place a second credential is unavoidable.
+// Embeddings default to Gemini (gemini-embedding-001), served by the same
+// GEMINI_API_KEY as the compiler. PLANNER_EMBED_MODEL picks the provider by
+// name: text-embedding-* is OpenAI (OPENAI_API_KEY), ollama/<model> is a local
+// Ollama server (OLLAMA_HOST, no key, no quota). The generator follows the same
+// rule, so sidecar and query always agree.
 
 import (
 	"bytes"
@@ -39,28 +42,49 @@ import (
 
 const embedTimeout = 8 * time.Second
 
-const voyageEmbeddingsURL = "https://api.voyageai.com/v1/embeddings"
+// gemini-embedding-001 is the current Gemini embedding model. Vectors below
+// 3072 dims are NOT pre-normalized, so both this file and the generator
+// unit-normalize explicitly — that is what makes dot product == cosine.
+// outputDimensionality is pinned (default 768) so the sidecar and the query
+// vector always agree on width.
+func embedModel() string { return envOr("PLANNER_EMBED_MODEL", "gemini-embedding-001") }
 
-// Voyage's current line is voyage-4{,-lite,-large}; the 3.x family is legacy.
-// Supported widths are 2048/1024/512/256 — note 768 (the width of the original
-// Gemini-era sidecar) is NOT among them, so a pre-Voyage sidecar can never match.
-func embedModel() string { return envOr("PLANNER_EMBED_MODEL", "voyage-4") }
+// embedProvider routes an embedding model id to its provider.
+func embedProvider(model string) string {
+	switch {
+	case strings.HasPrefix(model, "ollama/"):
+		return "ollama"
+	case strings.HasPrefix(model, "text-embedding-"):
+		return "openai"
+	}
+	return "gemini"
+}
 
-// RequireVoyageKey is the boot preflight for the embedding prefilter.
-func RequireVoyageKey() error {
-	if strings.TrimSpace(os.Getenv("VOYAGE_API_KEY")) == "" {
-		return errors.New("VOYAGE_API_KEY is required — the piece router prefilters ~700 " +
-			"clusters through the embedding sidecar, and Anthropic publishes no embeddings " +
-			"endpoint. Set it in .env")
+func ollamaHost() string {
+	return strings.TrimSuffix(envOr("OLLAMA_HOST", "http://localhost:11434"), "/")
+}
+
+// RequireEmbedKey is the preflight for whichever provider embeds queries.
+// Ollama needs no key; an unreachable server surfaces on the first embed call.
+func RequireEmbedKey() error {
+	switch embedProvider(embedModel()) {
+	case "ollama":
+		return nil
+	case "gemini":
+		return RequireGeminiKey()
+	}
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+		return errors.New("OPENAI_API_KEY is required — PLANNER_EMBED_MODEL=" + embedModel() +
+			" embeds every prompt for the piece prefilter. Set it in .env")
 	}
 	return nil
 }
 
 func embedDims() int {
-	if n, err := strconv.Atoi(envOr("PLANNER_EMBED_DIMS", "1024")); err == nil && n > 0 {
+	if n, err := strconv.Atoi(envOr("PLANNER_EMBED_DIMS", "768")); err == nil && n > 0 {
 		return n
 	}
-	return 1024
+	return 768
 }
 
 // RequirePieceEmbeddings is the boot preflight for the sidecar itself: present,
@@ -181,10 +205,10 @@ func prefilterPieceClusters(ctx context.Context, cat *Catalog, prompt string, pi
 	if err := checkSidecarMatches(emb); err != nil {
 		return nil, err
 	}
-	if err := RequireVoyageKey(); err != nil {
+	if err := RequireEmbedKey(); err != nil {
 		return nil, err
 	}
-	qv, err := embedQueryVoyage(ctx, os.Getenv("VOYAGE_API_KEY"), emb.Model, emb.Dims, prompt)
+	qv, err := embedQuery(ctx, emb.Model, emb.Dims, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -246,33 +270,82 @@ func rankPieceClusters(cat *Catalog, emb *pieceEmbeddings, query []float32, piec
 	return append(ranked, unscored...)
 }
 
-// embedQueryVoyage embeds one query text and unit-normalizes the result, so the
+// embedQueryGemini embeds one query text and unit-normalizes the result, so the
 // dot product in rankPieceClusters equals cosine similarity.
 //
-// input_type matters and must mirror the generator: Voyage prepends a different
-// instruction for "query" than for "document", and the sidecar is built with
-// "document". Getting this backwards costs recall silently, which is why both
-// sides name it explicitly rather than relying on the default.
-func embedQueryVoyage(ctx context.Context, key, model string, dims int, text string) ([]float32, error) {
+// taskType matters and must mirror the generator: Gemini embeds a
+// RETRIEVAL_QUERY differently from a RETRIEVAL_DOCUMENT, and the sidecar is
+// built with DOCUMENT. Getting this backwards costs recall silently, which is
+// why both sides name it explicitly rather than relying on the default.
+func embedQueryGemini(ctx context.Context, key, model string, dims int, text string) ([]float32, error) {
 	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{
-		"model":            model,
-		"input":            []string{text},
-		"input_type":       "query",
-		"output_dimension": dims,
+		"model":                "models/" + model,
+		"content":              map[string]any{"parts": []map[string]string{{"text": text}}},
+		"taskType":             "RETRIEVAL_QUERY",
+		"outputDimensionality": dims,
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, voyageEmbeddingsURL, bytes.NewReader(body))
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent", model)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("authorization", "Bearer "+key)
+	req.Header.Set("x-goog-api-key", key)
 	resp, err := (&http.Client{Timeout: embedTimeout}).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("voyage embed: %w", err)
+		return nil, fmt.Errorf("gemini embed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("voyage embed status %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return nil, fmt.Errorf("gemini embed status %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+	var parsed struct {
+		Embedding struct {
+			Values []float32 `json:"values"`
+		} `json:"embedding"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("gemini embed: unparseable response: %w", err)
+	}
+	v := parsed.Embedding.Values
+	if len(v) == 0 {
+		return nil, fmt.Errorf("gemini embed: no embedding returned")
+	}
+	if len(v) != dims {
+		return nil, fmt.Errorf("gemini embed: got %d dims, want %d", len(v), dims)
+	}
+	var norm float64
+	for _, x := range v {
+		norm += float64(x) * float64(x)
+	}
+	if norm == 0 {
+		return nil, fmt.Errorf("gemini embed: zero vector")
+	}
+	scale := float32(1 / math.Sqrt(norm))
+	for i := range v {
+		v[i] *= scale
+	}
+	return v, nil
+}
+
+// embedQueryOpenAI is the OpenAI twin of embedQueryGemini. OpenAI has no
+// query/document task type, so the generator and this side embed identically;
+// `dimensions` pins the width to the sidecar's.
+func embedQueryOpenAI(ctx context.Context, key, model string, dims int, text string) ([]float32, error) {
+	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{"model": model, "input": []string{text}, "dimensions": dims})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/embeddings", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("authorization", "Bearer "+key)
+	resp, err := (&http.Client{Timeout: embedTimeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai embed: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openai embed status %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 	var parsed struct {
 		Data []struct {
@@ -280,21 +353,71 @@ func embedQueryVoyage(ctx context.Context, key, model string, dims int, text str
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("voyage embed: unparseable response: %w", err)
+		return nil, fmt.Errorf("openai embed: unparseable response: %w", err)
 	}
 	if len(parsed.Data) == 0 {
-		return nil, fmt.Errorf("voyage embed: no embeddings returned")
+		return nil, fmt.Errorf("openai embed: no embedding returned")
 	}
-	v := parsed.Data[0].Embedding
+	return unitNormalize("openai", parsed.Data[0].Embedding, dims)
+}
+
+// embedQuery embeds one prompt with the sidecar's provider.
+func embedQuery(ctx context.Context, model string, dims int, text string) ([]float32, error) {
+	switch embedProvider(model) {
+	case "ollama":
+		return embedQueryOllama(ctx, model, dims, text)
+	case "openai":
+		return embedQueryOpenAI(ctx, os.Getenv("OPENAI_API_KEY"), model, dims, text)
+	}
+	return embedQueryGemini(ctx, os.Getenv("GEMINI_API_KEY"), model, dims, text)
+}
+
+// embedQueryOllama embeds against a local Ollama server. nomic-embed-text style
+// models take a task prefix instead of a task type; the generator embeds
+// documents as "search_document: ", so queries must say "search_query: ".
+func embedQueryOllama(ctx context.Context, model string, dims int, text string) ([]float32, error) {
+	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{
+		"model":      strings.TrimPrefix(model, "ollama/"),
+		"input":      []string{"search_query: " + text},
+		"dimensions": dims,
+	})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ollamaHost()+"/api/embed", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	resp, err := (&http.Client{Timeout: embedTimeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama embed (is `ollama serve` running at %s?): %w", ollamaHost(), err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama embed status %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+	var parsed struct {
+		Embeddings [][]float32 `json:"embeddings"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("ollama embed: unparseable response: %w", err)
+	}
+	if len(parsed.Embeddings) == 0 {
+		return nil, fmt.Errorf("ollama embed: no embedding returned")
+	}
+	return unitNormalize("ollama", parsed.Embeddings[0], dims)
+}
+
+// unitNormalize checks the width and scales v to unit length, so the dot
+// product in rankPieceClusters equals cosine similarity.
+func unitNormalize(provider string, v []float32, dims int) ([]float32, error) {
 	if len(v) != dims {
-		return nil, fmt.Errorf("voyage embed: got %d dims, want %d", len(v), dims)
+		return nil, fmt.Errorf("%s embed: got %d dims, want %d", provider, len(v), dims)
 	}
 	var norm float64
 	for _, x := range v {
 		norm += float64(x) * float64(x)
 	}
 	if norm == 0 {
-		return nil, fmt.Errorf("voyage embed: zero vector")
+		return nil, fmt.Errorf("%s embed: zero vector", provider)
 	}
 	scale := float32(1 / math.Sqrt(norm))
 	for i := range v {

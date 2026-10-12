@@ -27,10 +27,12 @@ Generate planner metadata after package changes:
 
 ```bash
 npm run gen:index
-VOYAGE_API_KEY=... npm run gen:embeddings
+npm run gen:embeddings   # reads PLANNER_EMBED_MODEL; with ollama/* just keep `ollama serve` running
 ```
 
-Embedding generation defaults to `voyage-4` with 1024 dimensions and writes the
+Embedding generation uses `PLANNER_EMBED_MODEL` (`ollama/nomic-embed-text` in
+`.env.example` — local, no quota; also `gemini-embedding-001` or
+`text-embedding-3-small`) at 768 dimensions and writes the
 manifest/binary sidecar under `packages/nodes/pieces`.
 
 ## Test

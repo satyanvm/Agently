@@ -323,7 +323,10 @@ async def record_piece_result(inp: RecordPieceInput) -> RunNodeResult:
         summary = "Trigger event received"
     elif res.get("ok"):
         raw = res.get("output")
-        output = raw if isinstance(raw, dict) else {"value": raw}
+        output = dict(raw) if isinstance(raw, dict) else {"value": raw}
+        # The catalog advertises `result` as every piece action's output (pieces
+        # declare no schema), so the whole return value is always there.
+        output.setdefault("result", raw)
         output.setdefault("executed", True)
         summary = _clip_summary(json.dumps(raw)) if raw is not None else "Ran"
     else:

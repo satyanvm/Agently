@@ -46,7 +46,7 @@
       "config": [
         { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
         { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true, "help": "Supports {{input.x}} and {{outputs.key.field}}" },
-        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] }
+        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"], "help": "Leave unset to use the deployment default (REASONER_MODEL). Set only when the user names a specific model." }
       ],
       "outputs": ["text", "model"],
       "credentials": []
@@ -61,7 +61,7 @@
       "config": [
         { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
         { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true },
-        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] }
+        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"], "help": "Leave unset to use the deployment default (REASONER_MODEL). Set only when the user names a specific model." }
       ],
       "outputs": ["text", "model"],
       "credentials": []

@@ -50,7 +50,7 @@ async def main() -> None:
         plugins=[plugin],
     )
 
-    # No feature flags to report: config.py refuses to load without Claude,
+    # No feature flags to report: config.py refuses to load without Gemini,
     # Langfuse, Browserbase and SMTP, so reaching this line means all are present.
     log.info("reasoner up: model=%s synthesis=%s", CONFIG.model, CONFIG.synthesis_model)
 

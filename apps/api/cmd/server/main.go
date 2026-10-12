@@ -19,8 +19,8 @@ import (
 )
 
 func main() {
-	// Load .env from the repo root (best-effort) so DATABASE_URL, ANTHROPIC_API_KEY,
-	// VOYAGE_API_KEY and SMTP creds are present without manual exporting. Real env
+	// Load .env from the repo root (best-effort) so DATABASE_URL, GEMINI_API_KEY
+	// and SMTP creds are present without manual exporting. Real env
 	// vars always win — godotenv does not overwrite what's already set.
 	_ = godotenv.Load(".env", "../.env", "../../.env")
 
@@ -33,8 +33,7 @@ func main() {
 	// finding out at boot is cheap, finding out from a user's failed workflow
 	// is not.
 	for _, check := range []func() error{
-		services.RequireAnthropicKey,
-		services.RequireVoyageKey,
+		services.RequirePlannerKeys,
 		services.RequireNodeCatalog,
 		services.RequirePiecesIndex,
 		services.RequirePieceEmbeddings,

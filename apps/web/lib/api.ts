@@ -391,7 +391,7 @@ export async function fetchBuilderGraph(slug: string): Promise<BuilderNode[]> {
     type: n.type || "agent.llm",
     name: n.name ?? "",
     role: n.role ?? "orchestrator",
-    model: n.model ?? "claude-sonnet-4-6",
+    model: n.model ?? "gemini-3.5-flash-lite",
     col: n.col ?? 0,
     row: n.row ?? 0,
     dependsOn: n.dependsOn ?? [],

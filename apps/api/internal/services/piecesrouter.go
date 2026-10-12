@@ -32,7 +32,8 @@ const routerPrefilterTop = 100
 
 // routerTimeout allows for the larger directory prompt (~35k tokens full,
 // ~5k prefiltered) while keeping plan latency interactive.
-const routerTimeout = 20 * time.Second
+// Generous enough to wait out one free-tier per-minute rate limit (geminiPost).
+const routerTimeout = 75 * time.Second
 
 // customAPICall is boilerplate present in most pieces; stated once in the
 // directory header instead of repeated ~455 times.

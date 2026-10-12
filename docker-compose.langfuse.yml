@@ -115,18 +115,20 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio
+    # minio/minio is no longer published on Docker Hub; upstream Langfuse's
+    # compose uses the Chainguard build (no curl inside, hence `mc ready`).
+    image: cgr.dev/chainguard/minio
     container_name: agently-langfuse-minio
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: miniosecret
     # Create the bucket on first boot, then start MinIO.
     entrypoint: sh
-    command: -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     volumes:
       - agently-langfuse-minio:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 10

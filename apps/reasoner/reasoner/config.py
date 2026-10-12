@@ -48,10 +48,13 @@ class Config:
     langfuse_host: str
     langfuse_public_key: str
     langfuse_secret_key: str
-    # Models. All reasoning uses Claude through one ANTHROPIC_API_KEY.
+    # Models. The provider follows the name: ollama/<model> runs on a local
+    # Ollama server (no key), anything else on Gemini (GEMINI_API_KEY).
     model: str
     synthesis_model: str
-    anthropic_api_key: str
+    gemini_api_key: str
+    ollama_host: str
+    ollama_num_ctx: int
     # Browserbase. Browser nodes fail clearly when it is not configured.
     browserbase_api_key: str
     browserbase_project_id: str
@@ -71,8 +74,8 @@ class Config:
     dispatch_interval_s: float
 
     @property
-    def anthropic_enabled(self) -> bool:
-        return bool(self.anthropic_api_key)
+    def gemini_enabled(self) -> bool:
+        return bool(self.gemini_api_key)
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -87,7 +90,24 @@ class Config:
         return bool(self.smtp_host)
 
 
+def is_ollama_model(model: str) -> bool:
+    return model.startswith("ollama/")
+
+
+def _gemini_key(*models: str) -> str:
+    """GEMINI_API_KEY is mandatory only when a configured model runs on Gemini.
+
+    A node may still name a Gemini model explicitly; llm.complete() reports the
+    missing key for that node rather than letting it fail obscurely.
+    """
+    if all(is_ollama_model(m) for m in models):
+        return os.getenv("GEMINI_API_KEY", "").strip()
+    return _require("GEMINI_API_KEY", "REASONER_MODEL / REASONER_SYNTHESIS_MODEL run on Gemini")
+
+
 def load() -> Config:
+    model = os.getenv("REASONER_MODEL", "gemini-3.5-flash-lite")
+    synthesis_model = os.getenv("REASONER_SYNTHESIS_MODEL", "gemini-3.5-flash-lite")
     return Config(
         database_url=_clean(
             _require(
@@ -107,13 +127,15 @@ def load() -> Config:
             "LANGFUSE_SECRET_KEY", "every LLM call is traced to Langfuse"
         ),
         # Reasoning gets the strongest model; synthesis is summarizing work
-        # already done, so it runs a tier down.
-        model=os.getenv("REASONER_MODEL", "claude-opus-4-8"),
-        synthesis_model=os.getenv("REASONER_SYNTHESIS_MODEL", "claude-sonnet-4-6"),
-        anthropic_api_key=_require(
-            "ANTHROPIC_API_KEY",
-            "every agent.llm and synthesis node calls Claude",
-        ),
+        # already done, so it runs a tier down. Free-tier keys hit
+        # 429 at 5 req/min on the non-lite flash models; lite tiers allow more.
+        model=model,
+        synthesis_model=synthesis_model,
+        gemini_api_key=_gemini_key(model, synthesis_model),
+        ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"),
+        # Ollama's default context is a few thousand tokens and it truncates
+        # silently; agent prompts carry whole upstream outputs, so ask for more.
+        ollama_num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "16384")),
         browserbase_api_key=_require(
             "BROWSERBASE_API_KEY", "tool.browser drives a real Browserbase session"
         ),

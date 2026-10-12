@@ -80,10 +80,7 @@ const planCacheMax = 64
 // deterministic floor beneath this any more, by design.
 func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) (Plan, error) {
 	// Fail on configuration before spending a round trip to discover it.
-	if err := RequireAnthropicKey(); err != nil {
-		return Plan{}, err
-	}
-	if err := RequireVoyageKey(); err != nil {
+	if err := RequirePlannerKeys(); err != nil {
 		return Plan{}, err
 	}
 	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule
@@ -206,7 +203,7 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 		defer func() { <-sem }()
 
 		user := "Request: " + prompt + "\n\nCluster \"" + f.Label + "\":\n" + clusterIndex(f)
-		raw, err := planLLMWith(ctx, mapModel(), 512, 12*time.Second, system, []llmMsg{{Role: "user", Content: user}})
+		raw, err := planLLMWith(ctx, mapModel(), 512, 75*time.Second, system, []llmMsg{{Role: "user", Content: user}})
 		if err != nil {
 			fail(f, err)
 			return
@@ -374,7 +371,20 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 			continue
 		}
 		nodes := toGraphNodes(spec)
-		if errs := validateGraph(nodes, cat); len(errs) > 0 {
+		inputKeys := map[string]bool{}
+		for k := range p.DefaultInput {
+			inputKeys[k] = true
+		}
+		for k := range spec.DefaultInput {
+			inputKeys[k] = true
+		}
+		errs := validateGraph(nodes, cat)
+		if len(errs) == 0 {
+			// Only once the structure holds: reference checks on a broken graph
+			// would bury the real problem under follow-on noise.
+			errs = validateRefs(nodes, cat, inputKeys)
+		}
+		if len(errs) > 0 {
 			lastComplaint = strings.Join(errs, "; ")
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
@@ -420,11 +430,13 @@ GRAPH RULES (validated mechanically — violations are returned to you to fix):
 - End with output node(s) matching how the user wants results delivered (email, slack,
   report). When in doubt, finish with output.report.
 
-DATA FLOW (exactness matters — unknown references resolve to EMPTY STRING, silently):
+DATA FLOW (exactness matters — an unknown reference FAILS the run):
 - Config strings support {{input.x}} (run input; put user-tunable values like topic or
   email into defaultInput and reference them this way) and {{outputs.<key>.<field>}}
   where <key> is an upstream node's key and <field> is one of ITS listed outputs.
-  Only reference fields listed in the upstream node's "outputs".
+  Only reference fields listed in the upstream node's "outputs". Activepieces nodes
+  (pieces.*) expose their whole JSON return value as "result" — e.g.
+  {{outputs.fetch_stories.result}} — never invent sub-fields for them.
 - logic.branch / logic.filter conditions: "<lhs> <op> <rhs>" with == != > < >= <=,
   each side a dotted ref (outputs.fetch.status) or literal — e.g. "outputs.fetch.status == 200".
 - logic.loop fans out its downstream branch once per item: config.items is a dotted ref
