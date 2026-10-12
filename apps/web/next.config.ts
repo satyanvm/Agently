@@ -7,6 +7,12 @@ import type { NextConfig } from "next";
 const API_TARGET = process.env.API_PROXY_TARGET ?? "http://localhost:8080";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Compiling a prompt is several LLM round trips (route, map fan-out,
+    // reduce) and takes ~4-5 min on a local 8B model (Ollama). The dev
+    // proxy's default (~30s) hung up mid-compile and surfaced as a 500.
+    proxyTimeout: 15 * 60 * 1000,
+  },
   async rewrites() {
     return [
       {

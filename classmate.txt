@@ -1,0 +1,288 @@
+CLASSMATE.TXT — a study guide to Agently
+=========================================
+
+Read this top to bottom once. Each step says WHAT to open and WHAT TO LOOK FOR,
+so you never read a file without knowing why. Paths are relative to the repo root.
+Rough time: 1 hour for Part 1, 3–4 hours for Part 2, Part 3 when you need it.
+
+
+0. THE PROJECT IN ONE PARAGRAPH
+--------------------------------
+Agently turns a plain-English prompt ("every morning, research AI papers and email
+me a digest") into a typed DAG (graph) of nodes — LLM agents, tools, logic, and
+700+ third-party integrations — and runs that graph durably on Temporal. If a
+worker dies mid-run, Temporal's event history lets the run resume at the exact
+node it was on. Durability is the whole point; lead with it when explaining.
+
+Four apps, one Postgres, one Temporal:
+
+    web (Next.js) ──► api (Go)  ──► Postgres (workflows, runs, queued work)
+                          │                 │
+                  prompt compiler           ▼  dispatcher picks queued runs
+              (route → map → reduce, reasoner (Python, Temporal workflow)
+               all on local Ollama)         │  one Temporal activity per node
+                                 ┌──────────┼───────────────┐
+                              Ollama   Browserbase   pieces-worker (Node,
+                              (LLM)    (browser)     runs Activepieces packages)
+
+    Langfuse traces every LLM call.
+
+Models (as configured in your .env right now — everything local, no API keys):
+  - Planner route + map phases:    PLANNER_MAP_MODEL   = ollama/qwen3:8b
+  - Planner reduce (writes graph): PLANNER_MODEL       = ollama/qwen3:8b
+  - Catalog embeddings:            PLANNER_EMBED_MODEL = ollama/nomic-embed-text
+  - Runtime agent nodes:           REASONER_MODEL      = ollama/qwen3:8b
+  The provider is always picked from the model NAME (llm.go, piecesembed.go,
+  gen-embeddings.ts, reasoner/llm.py) — change a model in .env and the right
+  API is used:
+    ollama/<model>        local Ollama (no key, no quota; slow on a laptop)
+    gemini-*              Gemini (GEMINI_API_KEY; free tier is rate limited)
+    kimi-* / moonshot-*   Moonshot (MOONSHOT_API_KEY)
+    text-embedding-*      OpenAI, embeddings only (OPENAI_API_KEY)
+  Good hybrid if local graphs are too weak: PLANNER_MODEL=gemini-3.5-flash and
+  keep everything else on Ollama — only the graph-writing step uses Gemini.
+
+
+PART 1 — READING LIST FOR INFO (docs, in order)
+================================================
+
+ 1. README.md
+    The design in 70 lines: the four apps, the "no fake success" rule, models,
+    local dev commands. Read it all.
+
+ 2. docs/architecture.md
+    Short, current architecture: request flow, the map/reduce compiler steps,
+    failure policy (missing key / stale embeddings = hard error, never a silent
+    fallback).
+
+ 3. understand.md
+    Interview-prep map: the pitch, the "two planes, three workers" model, and
+    why each decision was made. NOTE: written before the model switch — where it
+    says Anthropic/Claude/Voyage, read Gemini (LLM) + Ollama (embeddings).
+
+ 4. RUNBOOK.md
+    How to actually run it: docker compose, gen:index, gen:embeddings, commands.
+
+ 5. docs/pieces-runtime-contract.md
+    How Activepieces integrations become nodes: index.json, the embeddings
+    sidecar, and how a piece node is executed by the Node worker.
+
+ 6. docs/credentials-contract.md
+    How credentials are stored in the DB and attached to nodes (__credentialId).
+
+ 7. packages/nodes/README.md
+    The node catalog: hand-written catalog/*.json vs generated pieces/*.
+
+ 8. architecture.md (repo root, ~1500 lines — a build log, NOT for one sitting)
+    Read only: §0 (the one sentence), §3 (mental models), §19 (code-reading
+    guide: Pass A/B/C), §20 (reasoner + visual builder), §21 (pieces as Temporal
+    activities), §22 (credentials). Skip the chunk-by-chunk history unless you
+    want the story of how it evolved.
+
+ Optional background: product.md (what it is for), DEMO.md (demo script),
+ BACKEND.md (history: the API was ported from TypeScript to Go 1:1 — older, some
+ details are stale), plan_for_prompt_to_workflow.md and plan_intelligent_dag.md
+ (design notes behind the compiler).
+
+
+PART 2 — CODE FILES, IN READING ORDER
+======================================
+
+Pass A — The nouns (what things ARE)
+------------------------------------
+ A1. apps/api/internal/domain/entities.go, enums.go
+     Workflow, Run, Agent, GraphNode, statuses. Every other file speaks these words.
+ A2. packages/db/migrations/  (read the filenames, then 0001 and the latest few)
+     The real schema. 0010_retire_native_engine.sql and 0013 tell you what was
+     removed and why Temporal is now the only executor.
+ A3. packages/nodes/catalog/builtin.json
+     The ~15 core node types (trigger.*, agent.llm, logic, http, email...). Look at
+     one node definition: type, config fields, runtime.
+ A4. packages/contracts/src/
+     Shared TypeScript types the web app consumes — mirror of the Go domain.
+
+Pass B — The control plane: how a prompt becomes a graph (Go, apps/api)
+------------------------------------------------------------------------
+ B1. apps/api/cmd/server/main.go
+     Boot: loads .env, runs preflight checks (RequirePlannerKeys,
+     RequireNodeCatalog, RequirePieceEmbeddings...), wires router + services.
+     Notice: the server REFUSES to start if config is wrong. That's deliberate.
+ B2. apps/api/internal/handler/router.go, then workflows.go and runs.go
+     HTTP routes → services. Thin layer; just see where requests go.
+ B3. apps/api/internal/services/planner.go   <-- THE most important Go file
+     Start at CompilePrompt (line ~81). Then follow:
+       mapPhase        — picks candidate node ids per cluster
+       capFairly       — caps the candidate list fairly across clusters
+                         (fixed an old alphabetical-bias bug)
+       compileGraphLLM — the REDUCE call: the strong model writes the whole graph
+       reduceSystemPrompt / toGraphNodes / overlayMeta — prompt + parsing
+ B4. apps/api/internal/services/piecesembed.go
+     Embedding prefilter: brute-force cosine search over ~6.7k pre-computed
+     vectors (embeddings.json/.bin). Look at checkSidecarMatches (model/dims must
+     match) and embedQuery, which dispatches to Ollama / Gemini / OpenAI. Each
+     provider has its own query-vs-document asymmetry (nomic's "search_query: "
+     prefix, Gemini's RETRIEVAL_QUERY task type) that MUST match the generator.
+ B5. apps/api/internal/services/piecesrouter.go
+     routeClusters: the small model chooses which integration clusters are
+     relevant from the prefiltered directory. Then piecesrouter_test.go.
+ B6. apps/api/internal/services/llm.go
+     The model client. planLLMWith picks the provider from the model name
+     (llmProvider): ollama/* → planLLMOllama, kimi-* → Moonshot, else Gemini.
+     Things worth noticing:
+       - planLLMOllama always sets num_ctx (Ollama's default context silently
+         TRUNCATES long prompts) and turns qwen3 "thinking" off for speed.
+       - geminiPost retries 429s after the delay Gemini suggests.
+       - Truncation is reported as "hit the token cap", not a parse error.
+     Then llm_test.go for the key-preflight rules (all-Ollama needs no keys).
+ B7. apps/api/internal/services/nodecatalog.go, piecesindex.go
+     Loading/validating the catalog and the Activepieces index. validateGraph
+     is the structural check (unknown types, missing config, cycles, node keys
+     must not contain dots). Piece actions advertise one output: `result`.
+ B7b. apps/api/internal/services/graphrefs.go (+ graphrefs_test.go)
+     Checks every {{...}} reference in a compiled graph against what the
+     reasoner will actually have at run time. Written after a local 8B model kept
+     inventing references; the test cases are the real mistakes it made.
+ B8. apps/api/internal/services/workflow_service.go, run_service.go
+     Saving a compiled workflow; creating a queued run row in Postgres.
+ B9. apps/api/internal/services/scheduler.go, piecetriggers.go, piecespoller.go
+     Cron schedules and webhook/polling triggers that create runs automatically.
+ B10. apps/api/internal/services/credential_service.go
+     DB credential store used by piece nodes.
+ B11. apps/api/cmd/planeval/main.go
+     Recall eval harness: measures whether the router/embeddings find the right
+     integrations for test prompts. Good for understanding "how do we know the
+     planner works".
+
+Pass C — The data plane: how a graph RUNS (Python, apps/reasoner)
+-----------------------------------------------------------------
+ C1. apps/reasoner/reasoner/config.py
+     Every required env var and why (_require). Fails loudly when one is missing.
+ C2. apps/reasoner/reasoner/worker.py
+     Starts the Temporal worker + the dispatcher loop.
+ C3. apps/reasoner/reasoner/dispatcher.py
+     Polls Postgres for queued runs and starts a Temporal workflow for each.
+ C4. apps/reasoner/reasoner/workflow.py   <-- core of durability
+     ReasoningWorkflow / DynamicWorkflow. Workflow code must be deterministic;
+     all side effects happen in activities. This is why a crash can resume.
+ C5. apps/reasoner/reasoner/activities.py
+     The @activity.defn functions: load_graph, run_node, skip_node, finish_run,
+     prepare_piece_node / record_piece_result (hand-off to the Node worker).
+ C6. apps/reasoner/reasoner/plan.py, engine.py
+     Graph planning helpers (topological order, conditions, agent_model) and the
+     fan-out loop that runs ready nodes in parallel.
+ C7. apps/reasoner/reasoner/graph.py
+     The LangGraph graph; `route` chooses dynamic (user graph) vs fixed path.
+ C8. apps/reasoner/reasoner/nodes.py   <-- what each node type actually does
+     Search for @handles(...). agent.llm calls llm.complete; http, code
+     (sandbox.py), browser (browser.py), pieces (pieces.py) each have handlers.
+ C9. apps/reasoner/reasoner/llm.py, obs.py
+     ChatOllama or Gemini via LangChain (so Langfuse callbacks see every call),
+     cost estimates (local = $0). _content_text flattens Gemini 3's content
+     blocks. Note: errors RAISE — a failed model call never becomes a fake success.
+ C10. apps/reasoner/reasoner/db.py
+     All Postgres reads/writes from the reasoner.
+ Tests: apps/reasoner/tests/test_engine.py, test_dynamic_nodes.py, test_pieces.py,
+        test_llm.py
+
+Pass D — Integrations (Node, apps/pieces-worker)
+------------------------------------------------
+ D1. apps/pieces-worker/src/worker.ts — Temporal activity worker on queue
+     "agently-pieces".
+ D2. apps/pieces-worker/src/execute.ts, pieces.ts — load a real Activepieces
+     package and run an action with props + credentials.
+ D3. apps/pieces-worker/src/trigger-runtime.ts, trigger-store.ts — webhook and
+     polling triggers.
+ D4. apps/pieces-worker/src/options-server.ts — HTTP server (:7391) that resolves
+     dynamic dropdown options for the builder UI.
+ D5. apps/pieces-worker/src/gen-index.ts, gen-embeddings.ts — offline scripts
+     that build packages/nodes/pieces/index.json and the embeddings sidecar.
+
+Pass E — The UI (Next.js, apps/web)
+-----------------------------------
+ E1. apps/web/lib/api.ts, lib/types.ts — every call to the Go API.
+ E2. apps/web/components/create-workflow-dialog.tsx — the prompt box (front door).
+ E3. apps/web/components/builder/workflow-builder.tsx, node-inspector.tsx,
+     node-catalog.ts — the visual DAG editor. lib/builder-graph.ts converts
+     between the UI graph and the API graph.
+ E4. apps/web/components/run-detail.tsx, live.tsx, log-viewer.tsx — live run view
+     (SSE from apps/api/internal/handler/events.go).
+
+
+PART 3 — ONE TRACE THAT TIES IT ALL TOGETHER
+=============================================
+Follow one prompt end to end; open each file as you go:
+
+  1. User types a prompt  →  web: create-workflow-dialog.tsx → lib/api.ts
+  2. POST /api/workflows/plan (preview) then POST /api/workflows (save)
+                            →  api: handler/workflows.go → workflow_service.go
+                               → services/planner.go CompilePrompt
+  3. Prefilter integrations → piecesembed.go (nomic-embed-text, cosine)
+  4. Route clusters         → piecesrouter.go routeClusters (PLANNER_MAP_MODEL)
+  5. Map node ids           → planner.go mapPhase (PLANNER_MAP_MODEL, ~12 calls)
+  6. Reduce: write graph    → planner.go compileGraphLLM (PLANNER_MODEL)
+  7. Validate + repair      → nodecatalog.go validateGraph + graphrefs.go
+                               validateRefs; errors go back to the model (up to
+                               2 repair rounds)
+  8. Save                   → workflow_service.go → Postgres
+  9. Run it                 → POST /api/workflows/{slug}/runs → run_service.go
+                               (run row with status = queued)
+ 10. Pick up the run        → reasoner: dispatcher.py → starts Temporal workflow
+ 11. Execute the DAG        → workflow.py → activities.py run_node → nodes.py
+ 12. Integration node       → prepare_piece_node → pieces-worker execute.ts
+                               → record_piece_result stores output.result
+ 13. Watch it live          → handler/events.go (SSE) → web run-detail.tsx
+ 14. Kill the worker at step 11, restart it: the run continues. That's the demo.
+
+
+PART 4 — HOW TO RUN AND TEST
+============================
+  ALREADY SET UP ON THIS MAC. Day to day you only need:
+    colima start              # Docker VM (if the Mac rebooted)
+    pnpm agently              # starts Postgres, Temporal, Langfuse, Ollama
+                              # check, API, reasoner, pieces worker, web
+    pnpm agently:status       # what's running
+    pnpm agently:logs reasoner   # tail one service (api|reasoner|pieces|web)
+    pnpm agently:stop         # stop the apps (Docker keeps running)
+
+  Open:  http://localhost:3000  Agently UI (try "New workflow")
+         http://localhost:8080  Temporal UI — every run is a workflow here
+         http://localhost:3001  Langfuse — every LLM call traced
+                                (login dev@agently.local / agently-dev-pw)
+
+  Try the durability demo: start a run, `pnpm agently:stop`, then
+  `pnpm agently` again — the run finishes where it left off.
+
+  Tests:   cd apps/api && go test ./...
+           cd apps/reasoner && ./.venv/bin/python -m unittest discover -s tests
+
+  Timing on this MacBook Air (qwen3:8b): compiling a prompt takes 5–8 min,
+  running it ~1 min. The UI waits up to 15 min (apps/web/next.config.ts). On
+  Gemini's free tier a compile takes 20–60s instead.
+
+  Fresh clone? The embeddings sidecar is generated, not committed:
+    ollama pull nomic-embed-text && ollama pull qwen3:8b
+    cd apps/pieces-worker && npm run build && npm run gen:embeddings  (~90s)
+
+  Writing good prompts: integration nodes often return METADATA, not content.
+  "Summarize the top 5 HN stories" fetches titles + links only, so the model
+  summarizes the headlines. Ask for the content explicitly: "...for each
+  story, open its URL and scrape the article, then summarize the article".
+
+
+PART 5 — DESIGN RULES TO REMEMBER (likely interview questions)
+===============================================================
+  * No degraded paths. Missing key, stale embeddings, model error → a clear error
+    to the user, never a fake "success". (See comments at top of llm.go/llm.py.)
+  * Temporal is the only executor; the old Go-native lease/heartbeat engine was
+    retired (migration 0010, commit a606c847).
+  * Tiered models: cheap model for selection (route/map), strongest for graph
+    authorship (reduce). Provider is picked from the model name.
+  * Embeddings: documents and queries embedded with different task types; both
+    sides unit-normalize so dot product == cosine.
+  * The planner validates every {{...}} reference before saving a graph
+    (services/graphrefs.go): a node may only read input.<field> from
+    defaultInput or outputs.<direct dependency>.<declared output>. Bad
+    references go back to the model in the repair loop instead of failing a
+    run. Activepieces nodes expose their whole return value as `result`.
+  * n8n nodes are off-limits (Sustainable Use License); integrations come from
+    MIT-licensed Activepieces pieces. third_party/ vendor code is reference-only.

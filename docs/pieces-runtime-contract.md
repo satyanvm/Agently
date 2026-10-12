@@ -11,11 +11,19 @@ the package, version, action/trigger name, props, auth shape, categories, and
 search text consumed by the API planner and web builder.
 
 `npm run gen:embeddings` writes `embeddings.json` and `embeddings.bin` using
-Voyage (`voyage-4`, 1024 dimensions by default). Documents use
-`input_type=document`; planner queries use `input_type=query`. The binary contains
-unit-normalized little-endian float32 rows in manifest id order.
+`PLANNER_EMBED_MODEL` at `PLANNER_EMBED_DIMS` (768). The provider follows the
+model name, identically in the generator and the Go query side:
 
-The embeddings sidecar is required. A missing `VOYAGE_API_KEY`, missing or stale
+| Model | Provider | Document / query asymmetry |
+|---|---|---|
+| `ollama/<model>` (e.g. `ollama/nomic-embed-text`) | local Ollama, `OLLAMA_HOST` | `search_document: ` / `search_query: ` prefixes |
+| `gemini-embedding-001` | Gemini, `GEMINI_API_KEY` | `taskType=RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY` |
+| `text-embedding-*` | OpenAI, `OPENAI_API_KEY` | none (symmetric) |
+
+The binary contains unit-normalized little-endian float32 rows in manifest id
+order (both sides normalize explicitly, since not every provider does).
+
+The embeddings sidecar is required. A missing provider key, missing or stale
 sidecar, model/dimension mismatch, malformed response, or provider failure aborts
 planner startup/compilation with the reason.
 

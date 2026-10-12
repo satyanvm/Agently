@@ -16,28 +16,21 @@ import (
 // shape — and that was the bug, not the feature.
 
 func TestCompilePrompt_MissingKeyNamesTheKey(t *testing.T) {
-	// Each credential must name ITSELF, so an operator with one of the two set
-	// learns which one is missing rather than "compilation failed".
-	for _, tc := range []struct{ anthropic, voyage, want string }{
-		{"", "vk", "ANTHROPIC_API_KEY"},
-		{"sk-ant-test", "", "VOYAGE_API_KEY"},
-	} {
-		t.Setenv("ANTHROPIC_API_KEY", tc.anthropic)
-		t.Setenv("VOYAGE_API_KEY", tc.voyage)
-		_, err := CompilePrompt(context.Background(),
-			"Every morning research the latest AI papers and email me at me@example.com", "", "", "")
-		if err == nil {
-			t.Fatalf("%s unset: expected an error, got a compiled plan", tc.want)
-		}
-		if !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("%s unset: error must name it, got %v", tc.want, err)
-		}
+	// The one credential must name ITSELF, so an operator learns what is missing
+	// rather than "compilation failed".
+	t.Setenv("GEMINI_API_KEY", "")
+	_, err := CompilePrompt(context.Background(),
+		"Every morning research the latest AI papers and email me at me@example.com", "", "", "")
+	if err == nil {
+		t.Fatal("GEMINI_API_KEY unset: expected an error, got a compiled plan")
+	}
+	if !strings.Contains(err.Error(), "GEMINI_API_KEY") {
+		t.Fatalf("GEMINI_API_KEY unset: error must name it, got %v", err)
 	}
 }
 
 func TestCompilePrompt_FailuresAreNotCached(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
 	const prompt = "keep me informed"
 	if _, err := CompilePrompt(context.Background(), prompt, "My Flow", "", ""); err == nil {
 		t.Fatal("expected a configuration error")

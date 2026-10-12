@@ -20,11 +20,13 @@ web -> Go API -> Postgres (queued run)
 Workflow creation is a strict map/reduce compiler over the hand-written catalog
 and generated Activepieces index:
 
-1. Voyage embeddings prefilter the piece directory.
-2. Anthropic routes clusters and maps selected node ids using the small
-   `PLANNER_MAP_MODEL` model.
-3. Anthropic reduce uses `PLANNER_MODEL` to author the complete graph, including
-   config, dependencies, and templates.
+1. Embeddings (`PLANNER_EMBED_MODEL`: local Ollama, Gemini or OpenAI) prefilter
+   the piece directory.
+2. Gemini routes clusters and maps selected node ids using the small
+   `PLANNER_MAP_MODEL` model (flash-lite: it fans out ~13 calls per prompt).
+3. Reduce uses `PLANNER_MODEL` (Gemini, or Kimi via the Moonshot API when the
+   model is `kimi-*`) to author the complete graph, including config,
+   dependencies, and templates.
 4. Structural validation and bounded repair run before persistence.
 
 Missing keys, stale embeddings, timeouts, malformed responses, or provider errors

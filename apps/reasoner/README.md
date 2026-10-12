@@ -9,7 +9,7 @@ DAG node as a separately checkpointed Temporal activity.
 The worker refuses to start when any required dependency is missing:
 
 - `DATABASE_URL`
-- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
 - `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
 - `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`
 - `SMTP_HOST`

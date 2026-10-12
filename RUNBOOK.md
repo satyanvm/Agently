@@ -10,7 +10,17 @@ Agently runs four application processes against Postgres and Temporal:
 | Web (`apps/web`) | 3000 | User interface |
 
 Docker Compose provides Agently Postgres on `5433`, Temporal on `7233`, and the
-Temporal UI on `8080`.
+Temporal UI on `8080`; `docker-compose.langfuse.yml` provides Langfuse on `3001`.
+Ollama (`:11434`) serves catalog embeddings when
+`PLANNER_EMBED_MODEL=ollama/...`. `pnpm agently` starts all of it.
+
+On a Mac without Docker Desktop, Colima works:
+
+```bash
+brew install colima docker docker-compose ollama
+colima start --cpu 4 --memory 8
+brew services start ollama && ollama pull nomic-embed-text
+```
 
 ## Prerequisites
 
@@ -34,8 +44,11 @@ npm run gen:index
 npm run gen:embeddings
 ```
 
-Embedding generation requires `VOYAGE_API_KEY`. The API refuses to start when
-the sidecar is absent, malformed, or built with a different model/dimension.
+Embedding generation uses `PLANNER_EMBED_MODEL` — with the default
+`ollama/nomic-embed-text` it needs only a running Ollama and takes ~90s for the
+whole catalog (Gemini's free tier would take days at ~1k embeds/day). The API
+refuses to start when the sidecar is absent, malformed, or built with a
+different model/dimension.
 
 ## Commands
 

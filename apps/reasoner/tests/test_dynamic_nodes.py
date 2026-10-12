@@ -13,7 +13,7 @@ import unittest
 from dataclasses import replace
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
 os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
 os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
@@ -240,6 +240,32 @@ class LoopFanOutTest(unittest.TestCase):
         self.assertTrue(out["done"], out)
         self.assertEqual(self.echoed, [])
         self.assertEqual(self.fake.agents["ra_echo"]["status"], plan._SKIPPED_STATUS)
+
+
+class RenderConfigTest(unittest.TestCase):
+    """Integration config values are templates too; they must be resolved before
+    the catalog template embeds them, or "{{input.topic}}" reaches the API."""
+
+    def _ctx(self, config):
+        return nodes.NodeContext(
+            run_id="r", agent_id="a", node={"key": "k", "config": config},
+            upstream={"prev": {"text": "hello"}}, run_input={"topic": "AI agents"},
+        )
+
+    def test_resolves_run_references(self):
+        cfg = {"query": "{{input.topic}}", "note": "{{ outputs.prev.text }}!", "n": 3}
+        out = nodes._render_config(cfg, self._ctx(cfg))
+        self.assertEqual(out, {"query": "AI agents", "note": "hello!", "n": 3})
+
+    def test_leaves_other_templates_verbatim(self):
+        cfg = {"body": "{{item.name}} for {{input.topic}}"}
+        out = nodes._render_config(cfg, self._ctx(cfg))
+        self.assertEqual(out["body"], "{{item.name}} for AI agents")
+
+    def test_unknown_run_reference_raises(self):
+        cfg = {"query": "{{input.missing}}"}
+        with self.assertRaises(ValueError):
+            nodes._render_config(cfg, self._ctx(cfg))
 
 
 if __name__ == "__main__":

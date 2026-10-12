@@ -143,6 +143,14 @@ func mergePiecesIndex(cat *Catalog, path string) {
 			Config:      piecePropsToFields(n.Props),
 			Cluster:     cluster,
 		}
+		if node.Kind == "action" {
+			// Activepieces actions declare no output schema, so without this the
+			// graph author has to GUESS field names ("outputs.x.stories") and the
+			// run fails on the reference. The runtime stores every piece's whole
+			// return value under `result` (activities.record_piece_result), so
+			// that is the one field advertised.
+			node.Outputs = []string{"result"}
+		}
 		if n.Auth != nil && n.Auth.Type != "" && n.Auth.Type != "none" && n.Auth.CredentialKey != "" {
 			node.Credentials = []CatalogCredential{{
 				Key:  n.Auth.CredentialKey,

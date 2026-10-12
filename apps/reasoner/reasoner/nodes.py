@@ -171,6 +171,26 @@ def _cfg(ctx: NodeContext, key: str, default: str = "") -> str:
     return default if val is None else str(val)
 
 
+def _render_config(cfg: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
+    """Resolve {{input.*}} / {{outputs.*}} references inside string config values.
+
+    Only run references are resolved; any other {{...}} (e.g. a template meant
+    for a later stage) is left verbatim. Unknown run references still raise via
+    render(), so a typo never collapses into an empty query.
+    """
+    def one(val: Any) -> Any:
+        if not isinstance(val, str) or "{{" not in val:
+            return val
+        return _TOKEN.sub(
+            lambda m: render(m.group(0), ctx)
+            if m.group(1).strip().split(".", 1)[0] in ("input", "outputs")
+            else m.group(0),
+            val,
+        )
+
+    return {k: one(v) for k, v in cfg.items()}
+
+
 # Reserved config key naming the DB credential a node uses
 # (docs/credentials-contract.md §6). Never a template value: it is stripped from
 # config before any prop/template rendering.
@@ -484,7 +504,11 @@ async def _integration(ctx: NodeContext) -> NodeResult:
             f"{ctx.node.get('type')} is missing credential(s): {', '.join(missing)}"
         )
 
-    roots = {"config": cfg, "credentials": creds}
+    # Config values are themselves often templates ("query": "{{input.topic}}"),
+    # and the integration template then embeds them ({{urlencode config.query}}).
+    # Resolve those run references first, or the literal "{{input.topic}}" is
+    # what reaches the API.
+    roots = {"config": _render_config(cfg, ctx), "credentials": creds}
 
     if runtime == "browser":
         raw = render_tpl(_cfg(ctx, "urls"), ctx, roots)

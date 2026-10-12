@@ -17,7 +17,7 @@ Next.js web -> Go API -> Postgres
                            |
                one activity per DAG node
                   /          |          \
-             Anthropic   Browserbase   pieces worker
+              Gemini     Browserbase   pieces worker
 ```
 
 - `apps/api`: workflow planner, CRUD, schedules, triggers, logs, credentials, and
@@ -39,7 +39,7 @@ lease columns.
 Agently does not manufacture successful-looking work:
 
 - Planner router/map/reduce failures return the provider error.
-- Missing Anthropic or Voyage credentials prevent planning.
+- Missing Gemini or Moonshot (Kimi) credentials prevent planning.
 - Missing or stale piece embeddings prevent API startup.
 - Missing Browserbase, Langfuse, SMTP, database, or integration credentials fail
   startup or the selected node.
@@ -48,11 +48,16 @@ Agently does not manufacture successful-looking work:
 
 ## Models
 
-The planner uses `PLANNER_MAP_MODEL` (default `claude-haiku-4-5`) for routing and
-map selection, and `PLANNER_MODEL` (default `claude-opus-4-8`) for graph creation
-and repair. Voyage `voyage-4` embeddings provide catalog recall. The reasoner uses
-`REASONER_MODEL` (default `claude-opus-4-8`) and
-`REASONER_SYNTHESIS_MODEL` (default `claude-sonnet-4-6`).
+The planner uses `PLANNER_MAP_MODEL` (default `gemini-3.1-flash-lite`) for
+routing and map selection, and `PLANNER_MODEL` for graph creation and repair
+(code default `kimi-k3` via the Moonshot API; `.env.example` uses
+`gemini-3.5-flash` so a single Gemini key runs everything). The provider is
+inferred from the model name, and any tier can run locally as `ollama/<model>`
+(e.g. `ollama/qwen3:8b`): no keys or quotas, slower on a laptop. `PLANNER_EMBED_MODEL` provides catalog recall —
+`ollama/nomic-embed-text` locally, or `gemini-embedding-001` /
+`text-embedding-3-small`. The reasoner uses `REASONER_MODEL` and
+`REASONER_SYNTHESIS_MODEL` (default `gemini-3.5-flash-lite`). Gemini 429s are
+retried after the server-suggested delay, so free-tier keys work, just slower.
 
 ## Local development
 

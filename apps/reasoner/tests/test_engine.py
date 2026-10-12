@@ -14,7 +14,7 @@ import unittest
 from dataclasses import replace
 
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "test-public")
 os.environ.setdefault("LANGFUSE_SECRET_KEY", "test-secret")
 os.environ.setdefault("BROWSERBASE_API_KEY", "test-browserbase")
