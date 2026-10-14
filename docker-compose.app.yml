@@ -1,0 +1,58 @@
+# The four Agently services as containers, layered on docker-compose.yml's
+# Postgres + Temporal:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+#
+# Reads secrets from .env (see .env.example). Before the first build, generate
+# the catalog embeddings the API requires:
+#   cd apps/pieces-worker && npm install && npm run build && npm run gen:embeddings
+#
+# Models served by Ollama on the host are reachable at
+# OLLAMA_HOST=http://host.docker.internal:11434.
+x-app-env: &app-env
+  DATABASE_URL: postgresql://agently:agently@postgres:5432/agently
+  TEMPORAL_HOSTPORT: temporal:7233
+  PIECES_WORKER_URL: http://pieces:7391
+
+services:
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment:
+      <<: *app-env
+      API_ADDR: ":8090"
+    depends_on:
+      postgres: { condition: service_healthy }
+      temporal: { condition: service_started }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["8090:8090"]
+    restart: unless-stopped
+
+  reasoner:
+    build: { context: ., dockerfile: apps/reasoner/Dockerfile }
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      temporal: { condition: service_started }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    restart: unless-stopped
+
+  pieces:
+    build: { context: ., dockerfile: apps/pieces-worker/Dockerfile }
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      temporal: { condition: service_started }
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args: { API_PROXY_TARGET: "http://api:8090" }
+    env_file: .env
+    depends_on: [api]
+    ports: ["3000:3000"]
+    restart: unless-stopped

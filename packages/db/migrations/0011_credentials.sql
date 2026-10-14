@@ -12,7 +12,7 @@ create table if not exists credentials (
   workspace_id  text not null references workspaces(id) on delete cascade,
   type          text not null,                -- credential type id (§3)
   name          text not null,
-  data          jsonb not null default '{}'::jsonb,  -- secret values; MVP plaintext, TODO encrypt at rest
+  data          jsonb not null default '{}'::jsonb,  -- secret values; AES-GCM sealed by the API when AGENTLY_CREDENTIALS_KEY is set
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );

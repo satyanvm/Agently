@@ -30,6 +30,10 @@ export PIECES_TASK_QUEUE="${PIECES_TASK_QUEUE:-agently-pieces}"
 
 # Credentials are auto-loaded from .env by the services themselves:
 # GEMINI_API_KEY, MOONSHOT_API_KEY, LANGFUSE_*, BROWSERBASE_* and SMTP_*.
+# Next.js only reads apps/web/.env, so the web's access settings come from here.
+env_value() { grep -E "^$1=" "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2-; }
+export AGENTLY_API_TOKEN="${AGENTLY_API_TOKEN:-$(env_value AGENTLY_API_TOKEN)}"
+export AGENTLY_WEB_PASSWORD="${AGENTLY_WEB_PASSWORD:-$(env_value AGENTLY_WEB_PASSWORD)}"
 
 API_BIN=/tmp/agently-api
 RUNDIR="$ROOT/.agently"
@@ -161,7 +165,7 @@ cmd_start() {
   start_pieces || return 1
   start_web || return 1
   printf "  waiting for API health"
-  if wait_http "http://localhost:${API_PORT}/api/workflows" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
+  if wait_http "http://localhost:${API_PORT}/api/health" 40; then echo; ok "API healthy"; else echo; bad "API didn't answer — see $LOGS/api.log"; fi
   grep -qE '^GEMINI_API_KEY=.+' "$ROOT/.env" 2>/dev/null || say "  ${c_dim}note: GEMINI_API_KEY not set in .env${c_rst}"
   grep -qE '^PLANNER_MODEL=(kimi|moonshot)' "$ROOT/.env" 2>/dev/null && ! grep -qE '^(MOONSHOT|KIMI)_API_KEY=.+' "$ROOT/.env" 2>/dev/null && say "  ${c_dim}note: MOONSHOT_API_KEY not set in .env (needed for the kimi-k3 reduce model)${c_rst}"
   echo

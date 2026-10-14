@@ -1,8 +1,8 @@
 # Agently demo
 
 This demo exercises the current Temporal-only architecture. It requires real
-Postgres, Anthropic, Voyage, Langfuse, Browserbase, SMTP, and Temporal
-configuration; it never replaces a missing dependency with mock output.
+Postgres, model (Gemini, Moonshot, or local Ollama), Langfuse, Browserbase,
+SMTP, and Temporal configuration; it never replaces a missing dependency with mock output.
 
 ## Start
 

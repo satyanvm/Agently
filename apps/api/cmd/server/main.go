@@ -27,6 +27,25 @@ func main() {
 	pretty := os.Getenv("ENV") != "production"
 	logger := platform.NewLogger(pretty, "svc", "api")
 
+	// Production must not expose the API (credentials, workflow launches) without
+	// the shared token the web proxy attaches (handler/auth.go).
+	if !pretty && os.Getenv("AGENTLY_API_TOKEN") == "" {
+		logger.Error("AGENTLY_API_TOKEN is required", "reason", "ENV=production refuses to serve an unauthenticated API")
+		os.Exit(1)
+	}
+
+	// Stored third-party credentials are sealed with AGENTLY_CREDENTIALS_KEY
+	// (platform/secretbox.go). Production refuses to keep them in plaintext.
+	if hasKey, err := platform.CredentialsKeyConfigured(); err != nil {
+		logger.Error("invalid AGENTLY_CREDENTIALS_KEY", "error", err.Error())
+		os.Exit(1)
+	} else if !hasKey && !pretty {
+		logger.Error("AGENTLY_CREDENTIALS_KEY is required", "reason", "ENV=production refuses to store credentials in plaintext")
+		os.Exit(1)
+	} else if !hasKey {
+		logger.Warn("AGENTLY_CREDENTIALS_KEY is not set; credentials are stored in plaintext")
+	}
+
 	// Preflight. The compiler has no deterministic floor any more, so a missing
 	// credential or a stale embedding sidecar means every POST /workflows/plan
 	// will fail. Refuse to start instead, and name the thing that is wrong —
@@ -64,6 +83,16 @@ func main() {
 	}
 	defer pool.Close()
 	logger.Info("connected to Postgres", "store", "postgres")
+	sealCtx, sealCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	sealed, err := platform.EncryptPlaintextCredentials(sealCtx, pool)
+	sealCancel()
+	if err != nil {
+		logger.Error("could not encrypt stored credentials", "error", err.Error())
+		os.Exit(1)
+	}
+	if sealed > 0 {
+		logger.Info("encrypted plaintext credentials", "count", sealed)
+	}
 	opts.Pool = pool
 
 	plat := services.NewPlatform(opts)

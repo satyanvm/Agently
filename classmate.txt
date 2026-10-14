@@ -254,6 +254,9 @@ PART 4 — HOW TO RUN AND TEST
 
   Tests:   cd apps/api && go test ./...
            cd apps/reasoner && ./.venv/bin/python -m unittest discover -s tests
+           cd apps/pieces-worker && npm run build && npm test
+  CI runs all of these (plus the web build and Docker image builds) on every
+  pull request: .github/workflows/ci.yml.
 
   Timing on this MacBook Air (qwen3:8b): compiling a prompt takes 5–8 min,
   running it ~1 min. The UI waits up to 15 min (apps/web/next.config.ts). On
@@ -286,3 +289,34 @@ PART 5 — DESIGN RULES TO REMEMBER (likely interview questions)
     run. Activepieces nodes expose their whole return value as `result`.
   * n8n nodes are off-limits (Sustainable Use License); integrations come from
     MIT-licensed Activepieces pieces. third_party/ vendor code is reference-only.
+
+
+PART 6 — LAUNCH HARDENING (access control, encryption, deploy)
+===============================================================
+  Added for the public launch. Read in this order:
+
+  * API access token — apps/api/internal/handler/auth.go
+      Every /api route needs `Authorization: Bearer $AGENTLY_API_TOKEN`, except
+      /api/health and webhook ingress /api/hooks/* (providers call those
+      directly). Constant-time compare. main.go refuses to start with
+      ENV=production and no token. CORS origins come from CORS_ORIGINS.
+  * Web password + token injection — apps/web/middleware.ts
+      AGENTLY_WEB_PASSWORD turns on HTTP Basic auth for the whole UI (Basic
+      auth is used because it rides along on SSE streams and downloads). The
+      middleware then swaps in the API token on proxied /api requests, so the
+      browser never sees it.
+  * Credential encryption — apps/api/internal/platform/secretbox.go
+      credentials.data is sealed with AES-256-GCM under AGENTLY_CREDENTIALS_KEY
+      and stored as {"$enc": "v1:<base64(nonce||ciphertext)>"} in the same
+      jsonb column (no schema change). The API seals on write and opens on
+      read; the reasoner (reasoner/db.py open_credential_data) and pieces
+      worker (src/credentials.ts openCredentialData) open the same envelope.
+      Old plaintext rows still read and are sealed when the API starts
+      (EncryptPlaintextCredentials). Required with ENV=production.
+      Interview angle: why GCM (authenticated: a tampered row fails to open),
+      why a random nonce per write, and what happens if the key is lost
+      (every stored credential is unreadable — back it up).
+  * Containers — apps/*/Dockerfile (build context = repo root) and
+      docker-compose.app.yml (the four services on top of docker-compose.yml).
+      RUNBOOK.md "Deploying" has the launch checklist.
+
