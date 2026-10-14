@@ -11,11 +11,16 @@ volume a single run produces.
 """
 from __future__ import annotations
 
+import base64
+import json
+import os
 import secrets
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import psycopg
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .config import CONFIG
 
@@ -105,7 +110,41 @@ async def fetch_credential_data(credential_id: str) -> dict[str, Any] | None:
         if not row:
             return None
         data = row[0]
-        return dict(data) if isinstance(data, dict) else {}
+        return open_credential_data(data) if isinstance(data, dict) else {}
+
+
+def open_credential_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Decrypt a credentials.data value sealed by the API (platform/secretbox.go).
+
+    Sealed rows are ``{"$enc": "v1:<base64(nonce || ciphertext)>"}`` under
+    AES-256-GCM with AGENTLY_CREDENTIALS_KEY; anything else is legacy plaintext.
+    """
+    enc = data.get("$enc")
+    if not isinstance(enc, str):
+        return dict(data)
+    if not enc.startswith("v1:"):
+        raise RuntimeError("credential envelope is malformed")
+    key = _credentials_key()
+    sealed = base64.b64decode(enc[3:])
+    try:
+        plain = AESGCM(key).decrypt(sealed[:12], sealed[12:], None)
+    except InvalidTag as exc:
+        raise RuntimeError("credential could not be decrypted — wrong AGENTLY_CREDENTIALS_KEY?") from exc
+    return json.loads(plain)
+
+
+def _credentials_key() -> bytes:
+    raw = os.getenv("AGENTLY_CREDENTIALS_KEY", "").strip()
+    if not raw:
+        raise RuntimeError("credential is encrypted but AGENTLY_CREDENTIALS_KEY is not set")
+    for decode in (bytes.fromhex, base64.b64decode):
+        try:
+            key = decode(raw)
+        except ValueError:
+            continue
+        if len(key) == 32:
+            return key
+    raise RuntimeError("AGENTLY_CREDENTIALS_KEY must be 32 bytes, hex or base64 encoded")
 
 
 # ──────────────────────────── graph fetch ────────────────────────────

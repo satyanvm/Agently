@@ -1185,8 +1185,11 @@ func scanCredential(row pgx.Row) (domain.Credential, error) {
 	c.ID = domain.CredentialId(id)
 	c.WorkspaceID = domain.WorkspaceId(ws)
 	c.Type, c.Name = typ, name
-	c.Data = map[string]any{}
-	jsonInto(data, &c.Data)
+	opened, err := openCredentialData(data)
+	if err != nil {
+		return c, err
+	}
+	c.Data = opened
 	c.CreatedAt, c.UpdatedAt = anyTs(created), anyTs(updated)
 	return c, nil
 }
@@ -1223,10 +1226,15 @@ func (r *pgCredentialRepo) GetByID(id domain.CredentialId) (domain.Credential, b
 }
 
 func (r *pgCredentialRepo) Insert(c domain.Credential) domain.Credential {
-	_, err := r.s.pool.Exec(bg(),
+	data, err := sealCredentialData(orEmptyMap(c.Data))
+	if err != nil {
+		r.s.fail("credential.Insert seal", err)
+		return c
+	}
+	_, err = r.s.pool.Exec(bg(),
 		`insert into credentials (`+credentialCols+`) values ($1,$2,$3,$4,$5,$6,$7)`,
 		string(c.ID), string(c.WorkspaceID), c.Type, c.Name,
-		jsonArg(orEmptyMap(c.Data)), tsArg(c.CreatedAt), tsArg(c.UpdatedAt))
+		data, tsArg(c.CreatedAt), tsArg(c.UpdatedAt))
 	r.s.fail("credential.Insert", err)
 	return c
 }
@@ -1237,7 +1245,11 @@ func (r *pgCredentialRepo) Update(id domain.CredentialId, patch CredentialPatch)
 		b.add("name", *patch.Name)
 	}
 	if patch.Data != nil {
-		b.add("data", jsonArg(orEmptyMap(*patch.Data)))
+		data, err := sealCredentialData(orEmptyMap(*patch.Data))
+		if err != nil {
+			return domain.Credential{}, err
+		}
+		b.add("data", data)
 	}
 	if patch.UpdatedAt != nil {
 		b.add("updated_at", tsArg(*patch.UpdatedAt))

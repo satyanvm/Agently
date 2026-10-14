@@ -9,6 +9,10 @@ refer to them through `credentialType`.
 
 Migration `0011_credentials.sql` creates workspace-scoped credential rows. Secret
 values are write-only through the API; responses expose only the set key names.
+With `AGENTLY_CREDENTIALS_KEY` set (required in production) the API stores `data`
+as `{"$enc": "v1:<base64(nonce || ciphertext)>"}`, sealed with AES-256-GCM; the
+reasoner and pieces worker open it with the same key
+(`apps/api/internal/platform/secretbox.go`).
 
 ```text
 GET    /api/credentials

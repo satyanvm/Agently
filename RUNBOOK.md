@@ -109,6 +109,9 @@ Before exposing the app:
 
 - `ENV=production` makes the API refuse to start without `AGENTLY_API_TOKEN`.
   The web proxy attaches the token, so browsers never see it.
+- `ENV=production` also requires `AGENTLY_CREDENTIALS_KEY`, which encrypts
+  stored credentials. The API encrypts any existing plaintext rows when it
+  starts. Back the key up: without it stored credentials cannot be read.
 - `AGENTLY_WEB_PASSWORD` puts the whole UI and API behind a password prompt.
   Serve it over HTTPS (a reverse proxy such as Caddy or a platform load
   balancer) so the password is not sent in clear text.

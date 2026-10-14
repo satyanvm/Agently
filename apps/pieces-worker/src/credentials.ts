@@ -8,6 +8,7 @@
  * DATABASE_URL is mandatory: credentials and trigger state must remain durable
  * and consistent with the API.
  */
+import { createDecipheriv } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Pool } from 'pg';
@@ -69,6 +70,42 @@ export function makeDbCredentialResolver(databaseUrl: string | undefined): Crede
     const res = await pool.query('select data from credentials where id = $1', [id]);
     if (res.rowCount === 0) return null;
     const data = res.rows[0]?.data;
-    return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+    return data && typeof data === 'object' ? openCredentialData(data as Record<string, unknown>) : {};
   };
+}
+
+/**
+ * Decrypt a credentials.data value sealed by the API (platform/secretbox.go):
+ * `{"$enc": "v1:<base64(nonce || ciphertext || tag)>"}` under AES-256-GCM with
+ * AGENTLY_CREDENTIALS_KEY. Anything else is legacy plaintext.
+ */
+export function openCredentialData(
+  data: Record<string, unknown>,
+  rawKey: string | undefined = process.env.AGENTLY_CREDENTIALS_KEY,
+): Record<string, unknown> {
+  const enc = data['$enc'];
+  if (typeof enc !== 'string') return data;
+  if (!enc.startsWith('v1:')) throw new Error('credential envelope is malformed');
+  const key = credentialsKey(rawKey);
+  const sealed = Buffer.from(enc.slice(3), 'base64');
+  const nonce = sealed.subarray(0, 12);
+  const tag = sealed.subarray(sealed.length - 16);
+  const ciphertext = sealed.subarray(12, sealed.length - 16);
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return JSON.parse(plain.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    throw new Error('credential could not be decrypted — wrong AGENTLY_CREDENTIALS_KEY?');
+  }
+}
+
+function credentialsKey(raw: string | undefined): Buffer {
+  const value = raw?.trim();
+  if (!value) throw new Error('credential is encrypted but AGENTLY_CREDENTIALS_KEY is not set');
+  if (/^[0-9a-fA-F]{64}$/.test(value)) return Buffer.from(value, 'hex');
+  const b64 = Buffer.from(value, 'base64');
+  if (b64.length === 32) return b64;
+  throw new Error('AGENTLY_CREDENTIALS_KEY must be 32 bytes, hex or base64 encoded');
 }

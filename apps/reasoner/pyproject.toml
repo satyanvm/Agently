@@ -25,6 +25,8 @@ dependencies = [
     # Write back into the shared Agently Postgres (async).
     "psycopg[binary]>=3.2.0",
     "python-dotenv>=1.0.0",
+    # AES-GCM for credentials sealed by the API (reasoner/db.py).
+    "cryptography>=42.0.0",
 ]
 
 [tool.setuptools.packages.find]
