@@ -27,6 +27,13 @@ func main() {
 	pretty := os.Getenv("ENV") != "production"
 	logger := platform.NewLogger(pretty, "svc", "api")
 
+	// Production must not expose the API (credentials, workflow launches) without
+	// the shared token the web proxy attaches (handler/auth.go).
+	if !pretty && os.Getenv("AGENTLY_API_TOKEN") == "" {
+		logger.Error("AGENTLY_API_TOKEN is required", "reason", "ENV=production refuses to serve an unauthenticated API")
+		os.Exit(1)
+	}
+
 	// Preflight. The compiler has no deterministic floor any more, so a missing
 	// credential or a stale embedding sidecar means every POST /workflows/plan
 	// will fail. Refuse to start instead, and name the thing that is wrong —

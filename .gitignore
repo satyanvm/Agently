@@ -42,3 +42,7 @@ packages/nodes/pieces/embeddings.partial.bin
 # Python
 .venv/
 __pycache__/
+
+# build output and local logs
+/bin/
+/logs/

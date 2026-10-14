@@ -89,3 +89,37 @@ cd apps/reasoner && .venv/bin/python -m pytest -q
 cd apps/pieces-worker && npm run build && npm test
 cd apps/web && pnpm build
 ```
+
+## Deploying
+
+Each service has a Dockerfile (build context: repo root). The full stack runs
+with Compose on one host:
+
+```bash
+cp .env.example .env            # fill credentials; set ENV=production,
+                                # AGENTLY_API_TOKEN and AGENTLY_WEB_PASSWORD
+cd apps/pieces-worker && npm install && npm run build && npm run gen:embeddings && cd -
+docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+```
+
+Inside containers, services the host provides need `host.docker.internal`
+instead of `localhost` (for example `OLLAMA_HOST` and `LANGFUSE_HOST`).
+
+Before exposing the app:
+
+- `ENV=production` makes the API refuse to start without `AGENTLY_API_TOKEN`.
+  The web proxy attaches the token, so browsers never see it.
+- `AGENTLY_WEB_PASSWORD` puts the whole UI and API behind a password prompt.
+  Serve it over HTTPS (a reverse proxy such as Caddy or a platform load
+  balancer) so the password is not sent in clear text.
+- `APP_BASE_URL` must be the public web URL: webhook URLs registered with
+  providers and the Google OAuth redirect are built from it. Webhook ingress
+  (`/api/hooks/*`) stays reachable without the password.
+- Change the Compose Postgres passwords, or point `DATABASE_URL` at a managed
+  Postgres and apply `packages/db/migrations` in order (skipping the
+  Supabase-only `0002_rls.sql` and `0004_realtime.sql`).
+- Run one API instance with `SCHEDULER=1` and `PIECES_POLLER=1`; set both to 0
+  on any additional instances.
+
+CI (`.github/workflows/ci.yml`) runs the four test suites below and builds the
+API, reasoner, and web images on every pull request.

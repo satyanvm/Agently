@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"os"
+
 	"github.com/agently/api/internal/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -13,6 +15,7 @@ func NewRouter(p *services.Platform) chi.Router {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(corsMiddleware())
+	r.Use(authMiddleware(os.Getenv("AGENTLY_API_TOKEN")))
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api", func(r chi.Router) {

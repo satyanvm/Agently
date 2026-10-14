@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/api } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: apps/api/go.mod, cache-dependency-path: apps/api/go.sum }
+      - run: go vet ./...
+      - run: go test ./...
+
+  reasoner:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/reasoner } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -e . pytest
+      - run: python -m pytest -q
+
+  pieces-worker:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/pieces-worker } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/pieces-worker/package-lock.json }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @agently/web build
+
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, reasoner, web]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f apps/${{ matrix.service }}/Dockerfile -t agently-${{ matrix.service }} .
