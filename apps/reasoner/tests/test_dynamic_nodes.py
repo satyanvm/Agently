@@ -118,6 +118,7 @@ class IntegrationHandlerTest(unittest.TestCase):
         self.assertEqual(sent["url"], "https://hooks.slack.com/services/X")
         self.assertEqual(json.loads(sent["content"]), {"text": "deploy done"})
         self.assertEqual(res.output["status"], 200)
+        self.assertTrue(sent["headers"]["User-Agent"].startswith("Agently/"))
 
 
 class SandboxTest(unittest.TestCase):
