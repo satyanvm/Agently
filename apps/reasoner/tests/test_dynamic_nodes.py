@@ -155,6 +155,41 @@ class IntegrationHandlerTest(unittest.TestCase):
 
         self.assertTrue(sent["url"].endswith("&mailto="))
 
+    def test_absent_mapped_output_is_empty_and_default_applies(self):
+        sent = {}
+
+        class FakeResp:
+            status_code = 200
+            text = "{}"  # GDELT's answer when nothing matches
+
+            def json(self):
+                return {}
+
+        class FakeClient:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, headers=None, content=None, auth=None):
+                sent.update(url=url)
+                return FakeResp()
+
+        orig = nodes.httpx.AsyncClient
+        nodes.httpx.AsyncClient = FakeClient
+        try:
+            node = {"key": "g", "type": "gdelt.searchDocs", "config": {"query": "ai agents"}}
+            res = asyncio.run(nodes._integration(ctx_for(node)))
+        finally:
+            nodes.httpx.AsyncClient = orig
+
+        self.assertEqual(res.output["articles"], "")
+        self.assertTrue(sent["url"].endswith("&timespan=7d"))
+
 
 class SandboxTest(unittest.TestCase):
     def test_python_happy_path_and_stdin_payload(self):

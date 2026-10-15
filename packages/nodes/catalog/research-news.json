@@ -310,7 +310,7 @@
       "search": "gdelt news global coverage monitoring articles world events media search",
       "config": [
         { "key": "query", "label": "Query", "control": "text", "required": true, "placeholder": "\"climate change\" sourcelang:english", "help": "GDELT query syntax; supports sourcelang:, domain:, sourcecountry: operators" },
-        { "key": "timespan", "label": "Timespan", "control": "text", "required": false, "placeholder": "24h", "help": "How far back to search, e.g. 1h, 24h, 7d, 3m" }
+        { "key": "timespan", "label": "Timespan", "control": "text", "required": false, "default": "7d", "placeholder": "7d", "help": "How far back to search, e.g. 1h, 24h, 7d, 3m" }
       ],
       "outputs": ["articles", "status", "body"],
       "credentials": [],
