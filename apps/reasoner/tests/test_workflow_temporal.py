@@ -90,6 +90,12 @@ class Recorder:
                 output["items"] = rec.items[key]
             return acts.RunNodeResult(output=output, gate_open=key not in rec.closed_gates)
 
+        @activity.defn(name="prepare_piece_node")
+        async def prepare_piece_node(inp: acts.PreparePieceInput) -> acts.PreparePieceResult:
+            from temporalio.exceptions import ApplicationError
+            rec.events.append(("start", inp.node["key"]))
+            raise ApplicationError("pieces.slack.x is missing credential AP_SLACK_AUTH", non_retryable=True)
+
         @activity.defn(name="skip_node")
         async def skip_node(inp: acts.SkipNodeInput) -> None:
             rec.skipped.append(inp.key)
@@ -106,7 +112,7 @@ class Recorder:
         async def finish_run(inp: acts.FinishInput) -> None:
             rec.finished.append((inp.status, inp.error))
 
-        return [load_graph, run_node, skip_node, add_edge, set_progress, finish_run]
+        return [load_graph, run_node, prepare_piece_node, skip_node, add_edge, set_progress, finish_run]
 
     def started(self) -> list[str]:
         return [k for e, k in self.events if e == "start"]
@@ -226,6 +232,16 @@ class DynamicWorkflowTemporalTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rec.started().count("body"), 3)
         self.assertEqual(rec.started()[-1], "after")
         await self.assertReplays(history)
+
+    async def test_piece_config_error_reason_reaches_the_run(self):
+        graph = [node("start", type_="trigger.manual"), node("post", ["start"], type_="pieces.slack.x")]
+        rec = Recorder(graph)
+        result, _ = await run_workflow(self.env, rec, {})
+        self.assertEqual(result["failed_node"], "post")
+        self.assertEqual(rec.started().count("post"), 1)  # not retried
+        self.assertEqual(
+            rec.finished, [("failed", "pieces.slack.x: pieces.slack.x is missing credential AP_SLACK_AUTH")]
+        )
 
     async def test_resumed_nodes_are_not_rerun(self):
         graph = [node("start", type_="trigger.manual"), node("a", ["start"]), node("b", ["a"])]

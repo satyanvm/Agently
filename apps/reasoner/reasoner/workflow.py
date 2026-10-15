@@ -75,6 +75,16 @@ _PARALLEL_PATCH = "parallel-nodes-v1"
 _DEFAULT_MAX_PARALLEL = 8
 
 
+def _activity_reason(exc: ActivityError) -> str:
+    """The underlying reason of a failed activity. ActivityError's own message
+    is just "Activity task failed"; the activity's error (or the timeout) is
+    its cause."""
+    cause = exc.cause
+    if cause is None:
+        return str(exc)
+    return getattr(cause, "message", "") or str(cause) or type(cause).__name__
+
+
 @workflow.defn
 class ReasoningWorkflow:
     @workflow.run
@@ -434,7 +444,7 @@ class DynamicWorkflow:
         try:
             return await self._run_one(run_id, node, agent_id, upstream, run_input, extra=extra)
         except ActivityError as exc:
-            return activities.RunNodeResult(failed=True, error=f"{node.get('type')}: {exc}")
+            return activities.RunNodeResult(failed=True, error=f"{node.get('type')}: {_activity_reason(exc)}")
 
     async def _run_one(
         self,
@@ -492,7 +502,7 @@ class DynamicWorkflow:
             )
         except ActivityError as exc:
             return activities.RunNodeResult(
-                failed=True, error=f"{node.get('type')}: prepare failed: {exc}"
+                failed=True, error=f"{node.get('type')}: {_activity_reason(exc)}"
             )
 
         if prep.mode == "execute":
@@ -510,7 +520,7 @@ class DynamicWorkflow:
                 result = {
                     "ok": False,
                     "errorType": "PiecesWorkerUnavailable",
-                    "error": f"execute_piece failed: {exc}",
+                    "error": f"execute_piece failed: {_activity_reason(exc)}",
                 }
                 mode = "execute"
         else:
