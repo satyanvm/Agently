@@ -182,7 +182,7 @@ func planLLMOllama(ctx context.Context, model string, maxTokens int, timeout tim
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("%s: timed out", model)
+			return "", fmt.Errorf("%s: timed out: %w", model, errTimedOut)
 		}
 		return "", fmt.Errorf("%s (is `ollama serve` running at %s?): %w", model, ollamaHost(), err)
 	}
@@ -307,7 +307,7 @@ func geminiPost(ctx context.Context, model string, body []byte) ([]byte, error) 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-				return nil, fmt.Errorf("%s: timed out", model)
+				return nil, fmt.Errorf("%s: timed out: %w", model, errTimedOut)
 			}
 			return nil, fmt.Errorf("%s: %w", model, err)
 		}
@@ -398,7 +398,7 @@ func planLLMMoonshot(ctx context.Context, model string, maxTokens int, timeout t
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return "", fmt.Errorf("%s: timed out", model)
+			return "", fmt.Errorf("%s: timed out: %w", model, errTimedOut)
 		}
 		return "", fmt.Errorf("%s: %w", model, err)
 	}
