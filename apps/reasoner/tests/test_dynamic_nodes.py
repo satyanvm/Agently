@@ -341,3 +341,62 @@ class RenderConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HttpResilienceTest(unittest.TestCase):
+    """Retries on 429/503 and soft-fails reads from flaky public sources."""
+
+    def _run(self, node, statuses):
+        calls = []
+
+        class FakeResp:
+            def __init__(self, code):
+                self.status_code = code
+                self.text = "{}" if code == 200 else "slow down"
+                self.headers = {}
+
+            def json(self):
+                return {}
+
+        class FakeClient:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kw):
+                calls.append(method)
+                return FakeResp(statuses[min(len(calls), len(statuses)) - 1])
+
+        async def no_sleep(_):
+            return None
+
+        orig_client, orig_sleep = nodes.httpx.AsyncClient, nodes.asyncio.sleep
+        nodes.httpx.AsyncClient, nodes.asyncio.sleep = FakeClient, no_sleep
+        try:
+            return asyncio.run(nodes._integration(ctx_for(node))), calls
+        finally:
+            nodes.httpx.AsyncClient, nodes.asyncio.sleep = orig_client, orig_sleep
+
+    gdelt = {"key": "g", "type": "gdelt.searchDocs", "config": {"query": "ai"}}
+
+    def test_rate_limit_is_retried(self):
+        res, calls = self._run(self.gdelt, [429, 429, 200])
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn("error", res.output)
+
+    def test_failed_read_continues_with_empty_outputs(self):
+        res, calls = self._run(self.gdelt, [500])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("HTTP 500", res.output["error"])
+        self.assertEqual(res.output["articles"], "")
+
+    def test_failed_write_still_fails(self):
+        node = {"key": "s", "type": "slack.webhookPost",
+                "config": {"webhookUrl": "https://hooks.slack.com/services/X", "text": "hi"}}
+        with self.assertRaises(RuntimeError):
+            self._run(node, [500])
