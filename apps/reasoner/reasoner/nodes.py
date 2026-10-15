@@ -29,6 +29,20 @@ import httpx
 from . import browser, catalog, db, llm, pieces, sandbox
 from .config import CONFIG
 
+HTTP_TIMEOUT_S = float(os.environ.get("HTTP_TIMEOUT_S", "") or 60)
+HTTP_RETRIES = 3  # extra attempts on 429/503 (and transport errors on GETs)
+# HTTP_SOFT_FAIL=0 makes a failed catalog GET fail the run instead of continuing.
+HTTP_SOFT_FAIL = os.environ.get("HTTP_SOFT_FAIL", "1").strip() != "0"
+
+
+def _retry_wait(resp: Any, attempt: int) -> float:
+    """Seconds to wait before retrying: Retry-After when sent, else backoff."""
+    try:
+        return min(float(resp.headers.get("retry-after", "")), 30.0)
+    except (TypeError, ValueError, AttributeError):
+        return float(2 ** (attempt + 1))  # 2s, 4s, 8s
+
+
 HTTP_USER_AGENT = (
     os.environ.get("HTTP_USER_AGENT", "").strip()
     or "Agently/1.0 (+https://github.com/satyanvm/Agently)"
@@ -575,17 +589,38 @@ async def _integration(ctx: NodeContext) -> NodeResult:
             render_tpl(http_spec["auth"].get("username", ""), ctx, roots),
             render_tpl(http_spec["auth"].get("password", ""), ctx, roots),
         )
-    try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
-    except Exception as exc:  # noqa: BLE001 - fail with the upstream reason
-        await db.append_log(ctx.run_id, "error", "tool", key, f"{method} {url} failed: {exc}")
-        raise RuntimeError(f"{ctx.node.get('type')} request failed: {exc}") from exc
+    ntype = ctx.node.get("type")
+    resp = None
+    failure = ""
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, follow_redirects=True) as client:
+                resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
+        except Exception as exc:  # noqa: BLE001 - fail with the upstream reason
+            resp, failure = None, f"request failed: {type(exc).__name__}: {exc}".rstrip(": ")
+            await db.append_log(ctx.run_id, "error", "tool", key, f"{method} {url} {failure}")
+            if method != "GET":
+                break  # the write may have landed; never resend it
+        else:
+            if 200 <= resp.status_code < 300:
+                break
+            failure = f"returned HTTP {resp.status_code}: {resp.text[:300]}"
+            if resp.status_code not in (429, 503):
+                break
+        if attempt < HTTP_RETRIES:
+            await asyncio.sleep(_retry_wait(resp, attempt))
 
-    if resp.status_code < 200 or resp.status_code >= 300:
-        raise RuntimeError(
-            f"{ctx.node.get('type')} returned HTTP {resp.status_code}: {resp.text[:300]}"
-        )
+    if resp is None or not (200 <= resp.status_code < 300):
+        # Public data sources are flaky (rate limits, outages). A failed read
+        # leaves this node's outputs empty and the run continues, so one dead
+        # source doesn't sink a large research graph. Writes still fail loudly.
+        if method == "GET" and HTTP_SOFT_FAIL:
+            await db.append_log(ctx.run_id, "warn", "tool", key, f"{method} {url} {failure}; continuing without it")
+            output = {"status": resp.status_code if resp is not None else 0, "body": "", "error": failure}
+            for field_name in http_spec.get("outputMap") or {}:
+                output.setdefault(field_name, "")
+            return NodeResult(output=output, summary=f"Skipped: {_clip(failure, 120)}")
+        raise RuntimeError(f"{ntype} {failure}")
 
     text = resp.text[:8000]
     output: dict[str, Any] = {"status": resp.status_code, "body": text}
