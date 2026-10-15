@@ -29,6 +29,11 @@ import httpx
 from . import browser, catalog, db, llm, pieces, sandbox
 from .config import CONFIG
 
+HTTP_USER_AGENT = (
+    os.environ.get("HTTP_USER_AGENT", "").strip()
+    or "Agently/1.0 (+https://github.com/satyanvm/Agently)"
+)
+
 
 @dataclass
 class NodeContext:
@@ -553,6 +558,10 @@ async def _integration(ctx: NodeContext) -> NodeResult:
         for hk, hv in (http_spec.get("headers") or {}).items()
     }
     headers = {k: v for k, v in headers.items() if v}  # drop headers that resolved empty
+    # Public APIs (Wikipedia, arXiv, Crossref, Reddit) reject or throttle the
+    # bare httpx user-agent; send an identifying one unless the spec sets its own.
+    if not any(k.lower() == "user-agent" for k in headers):
+        headers["User-Agent"] = HTTP_USER_AGENT
     body = render_tpl(http_spec.get("body", ""), ctx, roots)
     auth = None
     if isinstance(http_spec.get("auth"), dict) and http_spec["auth"].get("type") == "basic":
