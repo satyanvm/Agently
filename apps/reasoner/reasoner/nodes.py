@@ -513,6 +513,12 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     # and the integration template then embeds them ({{urlencode config.query}}).
     # Resolve those run references first, or the literal "{{input.topic}}" is
     # what reaches the API.
+    # Optional fields the planner left out render as empty (or their declared
+    # default) instead of failing the node; required ones still raise.
+    for f in spec.get("config") or []:
+        fkey = f.get("key")
+        if fkey and not f.get("required") and cfg.get(fkey) is None:
+            cfg[fkey] = f.get("default", "")
     roots = {"config": _render_config(cfg, ctx), "credentials": creds}
 
     if runtime == "browser":
