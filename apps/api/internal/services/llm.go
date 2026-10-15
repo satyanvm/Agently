@@ -201,7 +201,7 @@ func planLLMOllama(ctx context.Context, model string, maxTokens int, timeout tim
 		return "", fmt.Errorf("%s: unparseable response: %w", model, err)
 	}
 	if parsed.DoneReason == "length" {
-		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON", model, maxTokens)
+		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON: %w", model, maxTokens, errOutputCapped)
 	}
 	if strings.TrimSpace(parsed.Message.Content) == "" {
 		return "", fmt.Errorf("%s returned no text (done reason %q)", model, parsed.DoneReason)
@@ -280,7 +280,7 @@ func planLLMGemini(ctx context.Context, model string, maxTokens int, timeout tim
 	if cand.FinishReason == "MAX_TOKENS" {
 		// The JSON is truncated. Say so plainly rather than letting the caller
 		// report a confusing parse error several frames down.
-		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON", model, maxTokens)
+		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON: %w", model, maxTokens, errOutputCapped)
 	}
 	var b strings.Builder
 	for _, p := range cand.Content.Parts {
@@ -423,7 +423,7 @@ func planLLMMoonshot(ctx context.Context, model string, maxTokens int, timeout t
 	}
 	choice := parsed.Choices[0]
 	if choice.FinishReason == "length" {
-		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON", model, maxTokens)
+		return "", fmt.Errorf("%s hit the %d-token output cap before finishing its JSON: %w", model, maxTokens, errOutputCapped)
 	}
 	out := choice.Message.Content
 	if strings.TrimSpace(out) == "" {

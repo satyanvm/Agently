@@ -219,7 +219,10 @@ Follow one prompt end to end; open each file as you go:
   3. Prefilter integrations → piecesembed.go (nomic-embed-text, cosine)
   4. Route clusters         → piecesrouter.go routeClusters (PLANNER_MAP_MODEL)
   5. Map node ids           → planner.go mapPhase (PLANNER_MAP_MODEL, ~12 calls)
-  6. Reduce: write graph    → planner.go compileGraphLLM (PLANNER_MODEL)
+  6. Reduce: write graph    → planner.go compileGraphLLM (PLANNER_MODEL); the model
+                               sizes the graph: >25 nodes comes back as an outline
+                               and is written one section per call
+                               (planner_sections.go)
   7. Validate + repair      → nodecatalog.go validateGraph + graphrefs.go
                                validateRefs; errors go back to the model (up to
                                2 repair rounds)
