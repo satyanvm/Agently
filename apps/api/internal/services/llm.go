@@ -333,6 +333,11 @@ func geminiPost(ctx context.Context, model string, body []byte) ([]byte, error) 
 				return nil, fmt.Errorf("%s: reading response: %w", model, readErr)
 			}
 		}
+		if resp.StatusCode == http.StatusTooManyRequests && geminiDailyQuota(raw) {
+			// A per-day cap does not lift in seconds: waiting out the
+			// suggested delay only burns the caller's deadline.
+			return nil, fmt.Errorf("%s: gemini daily request quota used up for this API key (resets at midnight Pacific; raise it by enabling billing, or set PLANNER_FALLBACK_MODEL): %w", model, errQuotaExhausted)
+		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			wait := geminiRetryDelay(raw, attempt)
 			if dl, ok := ctx.Deadline(); !ok || time.Until(dl) > wait {
@@ -359,6 +364,33 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// errQuotaExhausted marks a provider quota that will not reset within a call.
+var errQuotaExhausted = errors.New("quota exhausted")
+
+// geminiDailyQuota reports whether a 429 body names a per-day quota.
+func geminiDailyQuota(raw []byte) bool {
+	var e struct {
+		Error struct {
+			Details []struct {
+				Violations []struct {
+					QuotaID string `json:"quotaId"`
+				} `json:"violations"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) != nil {
+		return false
+	}
+	for _, d := range e.Error.Details {
+		for _, v := range d.Violations {
+			if strings.Contains(v.QuotaID, "PerDay") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // geminiRetryDelay reads the RetryInfo delay ("17s") Gemini attaches to a 429,

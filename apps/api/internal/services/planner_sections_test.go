@@ -243,3 +243,29 @@ func TestAuthorGraph_SectionTimeoutIsRetried(t *testing.T) {
 		t.Fatalf("got %d nodes in %d calls, want 80 in 9", len(nodes), calls)
 	}
 }
+
+func TestGeminiDailyQuota(t *testing.T) {
+	daily := `{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure",
+		"violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]},
+		{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"40s"}]}}`
+	perMinute := `{"error":{"code":429,"details":[{"violations":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]}]}}`
+	if !geminiDailyQuota([]byte(daily)) || geminiDailyQuota([]byte(perMinute)) {
+		t.Fatal("daily quota misdetected")
+	}
+}
+
+func TestWithQuotaFallback(t *testing.T) {
+	t.Setenv("PLANNER_FALLBACK_MODEL", "backup")
+	var models []string
+	call := withQuotaFallback(func(_ context.Context, model string, _ int, _ time.Duration, _ string, _ []llmMsg) (string, error) {
+		models = append(models, model)
+		if model == "primary" {
+			return "", fmt.Errorf("primary: %w", errQuotaExhausted)
+		}
+		return "ok", nil
+	})
+	out, err := call(context.Background(), "primary", 1, time.Second, "", nil)
+	if err != nil || out != "ok" || strings.Join(models, ",") != "primary,backup" {
+		t.Fatalf("got %q, %v after %v", out, err, models)
+	}
+}

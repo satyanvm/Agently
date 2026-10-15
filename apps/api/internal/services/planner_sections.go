@@ -29,7 +29,22 @@ import (
 )
 
 // reduceLLM is the reduce-model call; tests replace it.
-var reduceLLM = planLLMWith
+var reduceLLM = withQuotaFallback(planLLMWith)
+
+type llmCall = func(ctx context.Context, model string, maxTokens int, timeout time.Duration, system string, msgs []llmMsg) (string, error)
+
+// withQuotaFallback retries a call on PLANNER_FALLBACK_MODEL when the requested
+// model's provider quota is used up for the day.
+func withQuotaFallback(call llmCall) llmCall {
+	return func(ctx context.Context, model string, maxTokens int, timeout time.Duration, system string, msgs []llmMsg) (string, error) {
+		out, err := call(ctx, model, maxTokens, timeout, system, msgs)
+		fallback := strings.TrimSpace(os.Getenv("PLANNER_FALLBACK_MODEL"))
+		if errors.Is(err, errQuotaExhausted) && fallback != "" && fallback != model {
+			return call(ctx, fallback, maxTokens, timeout, system, msgs)
+		}
+		return out, err
+	}
+}
 
 func envInt(name string, def int) int {
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name))); err == nil && v > 0 {
