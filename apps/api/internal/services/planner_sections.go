@@ -3,16 +3,16 @@ package services
 // planner_sections.go — writing large graphs section by section.
 //
 // One reduce call has to fit the whole graph JSON in its output budget, which
-// caps a single-shot graph at roughly 30 nodes. So the first reduce call lets
-// the model size the graph itself: it either returns the whole graph, or — when
-// it needs more than sectionThreshold nodes — an OUTLINE (plan metadata plus
-// ordered sections, each with a goal and a rough node count). Small graphs cost
-// one call, as before. For an outline the planner writes ONE SECTION PER CALL,
+// caps a single-shot graph at roughly 30 nodes. So the reduce model first writes
+// a short OUTLINE (plan metadata plus ordered sections, each with a goal and a
+// rough node count) — sized by the graph it needs, not by the prompt's length.
+// Up to sectionThreshold nodes the graph is then written in one call, as
+// before. Above it the planner writes ONE SECTION PER CALL,
 // seeing the nodes already written so it can depend on and reference them.
 // Each section is validated against the accumulated graph and repaired on its
 // own, so a mistake in section 5 never re-emits sections 1–4. A graph the model
-// misjudged as small and that overflows the output budget (errOutputCapped) is
-// re-planned the same way.
+// misjudged as small and that overflows the output budget or times out is
+// re-planned in sections.
 
 import (
 	"context"
@@ -44,32 +44,16 @@ func reduceTimeout() time.Duration {
 	return time.Duration(envInt("PLANNER_REDUCE_TIMEOUT_S", 180)) * time.Second
 }
 
-// errOutputCapped marks a model response cut off by its output-token budget.
-var errOutputCapped = errors.New("output token cap reached")
+// errOutputCapped marks a model response cut off by its output-token budget;
+// errTimedOut one that ran past its timeout.
+var (
+	errOutputCapped = errors.New("output token cap reached")
+	errTimedOut     = errors.New("deadline exceeded")
+)
 
-// sectionThreshold is the node count above which the model must outline
-// instead of writing the graph in one call.
+// sectionThreshold is the estimated node count above which the graph is
+// written section by section.
 func sectionThreshold() int { return envInt("PLANNER_SECTION_THRESHOLD", 25) }
-
-// sizeGateInstructions is appended to the first reduce call.
-func sizeGateInstructions() string {
-	return fmt.Sprintf(`
-
-GRAPH SIZE — first decide how many nodes the complete graph needs. If it is %d or
-fewer, return the graph object above. If it is MORE than %d, do not write any
-nodes: return ONLY {"outline": <outline>} where <outline> is:%s`, sectionThreshold(), sectionThreshold(), outlineShape)
-}
-
-// parseOutline recognizes a first-call answer that chose outline mode.
-func parseOutline(raw string) (graphOutline, bool) {
-	var wrapped struct {
-		Outline *graphOutline `json:"outline"`
-	}
-	if err := json.Unmarshal([]byte(extractJSON(raw)), &wrapped); err != nil || wrapped.Outline == nil {
-		return graphOutline{}, false
-	}
-	return *wrapped.Outline, len(wrapped.Outline.Sections) > 0
-}
 
 type graphOutline struct {
 	Name           string         `json:"name"`
@@ -90,9 +74,7 @@ func (o graphOutline) sectioned() bool {
 
 const outlineInstructions = `
 
-OUTLINE MODE — for THIS call do not write any nodes. Return ONE JSON object:` + outlineShape
-
-const outlineShape = `
+OUTLINE MODE — for THIS call do not write any nodes. Return ONE JSON object:
 {
   "name": "short title",
   "description": "one sentence",
@@ -107,15 +89,23 @@ ends with the output node(s). Aim for 8–15 nodes per section. defaultInput lis
 every run-input field any section will reference as {{input.x}}.`
 
 // outlineGraph asks the reduce model for the plan metadata and section list.
-func outlineGraph(ctx context.Context, system, prompt string) (graphOutline, error) {
+// forceSplit is set after a single-call attempt proved too large.
+func outlineGraph(ctx context.Context, system, prompt string, forceSplit bool) (graphOutline, error) {
+	instructions := outlineInstructions
+	if forceSplit {
+		instructions += "\nThis graph proved too large to write in one call: split it into at least 3 sections."
+	}
 	msgs := []llmMsg{{Role: "user", Content: prompt}}
 	var out graphOutline
 	for attempt := 0; attempt < 2; attempt++ {
-		raw, err := reduceLLM(ctx, reduceModel(), 4096, reduceTimeout(), system+outlineInstructions, msgs)
+		raw, err := reduceLLM(ctx, reduceModel(), 4096, reduceTimeout(), system+instructions, msgs)
 		if err != nil {
 			return out, fmt.Errorf("outline phase: %w", err)
 		}
 		if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err == nil {
+			if forceSplit && len(out.Sections) < 2 {
+				return out, fmt.Errorf("outline phase: %s could not split an oversized graph into sections", reduceModel())
+			}
 			return out, nil
 		} else {
 			msgs = append(msgs,
