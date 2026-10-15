@@ -156,10 +156,12 @@ func basePlan(prompt, email string) Plan {
 // relevance like everything else — so the map phase stays a handful of calls
 // no matter how large the installed surface grows. A router failure fails the
 // compile; there is no lexical prescreen behind it any more.
-const maxClusterCalls = 12
+// PLANNER_MAX_CLUSTERS overrides it; raise it for requests spanning many apps.
+func maxClusterCalls() int { return envInt("PLANNER_MAX_CLUSTERS", 12) }
 
-// totalCap bounds how many selected node schemas reach the reduce prompt.
-const totalCap = 32
+// totalCap bounds how many selected node schemas reach the reduce prompt
+// (PLANNER_MAX_NODE_TYPES). A graph may use each type many times.
+func totalCap() int { return envInt("PLANNER_MAX_NODE_TYPES", 32) }
 
 // mapConcurrency bounds parallel map-phase LLM calls (rate-limit hygiene).
 const mapConcurrency = 8
@@ -242,7 +244,7 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 			clusterKeys = append(clusterKeys, key)
 		}
 	}
-	routed, err := routeClusters(ctx, cat, prompt, clusterKeys, maxClusterCalls)
+	routed, err := routeClusters(ctx, cat, prompt, clusterKeys, maxClusterCalls())
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +266,7 @@ used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if
 	}
 
 	// routed doubles as the relevance order for the cap: most relevant cluster first.
-	return capFairly(byCluster, routed, totalCap), nil
+	return capFairly(byCluster, routed, totalCap()), nil
 }
 
 // capFairly trims the union of per-cluster selections to max. Its predecessor
@@ -343,8 +345,8 @@ type reduceGraphSpec struct {
 // error, and it carries the last thing the validator objected to so the failure
 // is actionable rather than "couldn't compile".
 //
-// Reduce gets a larger output budget because graph JSON grows quickly once full
-// integration configuration is included.
+// Reduce gets a larger output budget (PLANNER_REDUCE_MAX_TOKENS) because graph
+// JSON grows quickly once full integration configuration is included.
 func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) ([]domain.GraphNode, error) {
 	selected, err := mapPhase(ctx, cat, prompt)
 	if err != nil {
@@ -352,11 +354,28 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 	}
 	system := reduceSystemPrompt(cat, selected)
 
+	// Large requests are written section by section (planner_sections.go): one
+	// reduce call cannot emit an 80-node graph inside its output budget.
+	if len([]rune(prompt)) >= sectionMinPromptChars() {
+		outline, err := outlineGraph(ctx, system, prompt)
+		if err != nil {
+			return nil, err
+		}
+		if outline.sectioned() {
+			return authorGraphSections(ctx, cat, system, prompt, outline, p)
+		}
+	}
+	return authorGraphSingle(ctx, cat, system, prompt, p)
+}
+
+// authorGraphSingle has the reduce model write the whole graph in one call,
+// then validates and repairs it.
+func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string, p *Plan) ([]domain.GraphNode, error) {
 	msgs := []llmMsg{{Role: "user", Content: prompt}}
 	const attempts = 3 // 1 author + 2 repairs
 	var lastComplaint string
 	for i := 0; i < attempts; i++ {
-		raw, err := planLLMWith(ctx, reduceModel(), 16000, 90*time.Second, system, msgs)
+		raw, err := reduceLLM(ctx, reduceModel(), reduceMaxTokens(), reduceTimeout(), system, msgs)
 		if err != nil {
 			// Provider-level failure: retrying won't change it.
 			return nil, fmt.Errorf("reduce phase: %w", err)
@@ -378,13 +397,7 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 		for k := range spec.DefaultInput {
 			inputKeys[k] = true
 		}
-		errs := validateGraph(nodes, cat)
-		if len(errs) == 0 {
-			// Only once the structure holds: reference checks on a broken graph
-			// would bury the real problem under follow-on noise.
-			errs = validateRefs(nodes, cat, inputKeys)
-		}
-		if len(errs) > 0 {
+		if errs := graphProblems(nodes, cat, inputKeys); len(errs) > 0 {
 			lastComplaint = strings.Join(errs, "; ")
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
@@ -397,6 +410,16 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 	}
 	return nil, fmt.Errorf("reduce phase: %s could not author a valid graph in %d attempts; last problem: %s",
 		reduceModel(), attempts, lastComplaint)
+}
+
+// graphProblems runs the structural checks, then — only once the structure
+// holds — the reference checks: reference checks on a broken graph would bury
+// the real problem under follow-on noise.
+func graphProblems(nodes []domain.GraphNode, cat *Catalog, inputKeys map[string]bool) []string {
+	if errs := validateGraph(nodes, cat); len(errs) > 0 {
+		return errs
+	}
+	return validateRefs(nodes, cat, inputKeys)
 }
 
 // reduceSystemPrompt assembles the node contract: graph rules + full schemas for
