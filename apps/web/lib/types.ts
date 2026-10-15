@@ -130,6 +130,8 @@ export interface WorkflowRun {
   browserSessionId?: string;
   /** Langfuse session/trace handle for deep-linking. */
   langfuseTraceId?: string | null;
+  /** Why the run failed (set when status is failed). */
+  error?: string | null;
 }
 
 export interface LogEntry {

@@ -38,6 +38,7 @@ interface ApiRun {
   currentStep: string;
   browserSessionId: string | null;
   langfuseTraceId?: string | null;
+  error?: string | null;
 }
 
 /** Normalize an API run into the UI's WorkflowRun (flatten usage, default lists). */
@@ -65,6 +66,7 @@ function toWorkflowRun(r: ApiRun): WorkflowRun {
     artifacts: [],
     browserSessionId: r.browserSessionId ?? undefined,
     langfuseTraceId: r.langfuseTraceId ?? null,
+    error: r.error ?? null,
   };
 }
 
@@ -249,14 +251,60 @@ export async function fetchRunLogsAfter(runId: string, sinceSeq: number): Promis
 export async function launchRun(
   slug: string,
   input?: Record<string, unknown>,
+  opts?: { skipCredentialCheck?: boolean },
 ): Promise<string> {
   const body: Record<string, unknown> = {};
   if (input) body.input = input;
+  if (opts?.skipCredentialCheck) body.skipCredentialCheck = true;
   const run = await getJSON<{ id: string }>(`/api/workflows/${slug}/runs`, {
     method: "POST",
     body: JSON.stringify(body),
   });
   return run.id;
+}
+
+/** One graph node that cannot run as configured (GET /preflight). */
+export interface PreflightNode {
+  key: string;
+  name: string;
+  type: string;
+  /** not_connected | credential_deleted | incomplete */
+  problem: string;
+  missingKeys?: string[];
+  credentialId?: string;
+}
+
+/** Nodes that need the same account. Empty credentialType = a server env var. */
+export interface PreflightAccount {
+  credentialType: string;
+  label: string;
+  authType?: string;
+  envKeys: string[];
+  nodes: PreflightNode[];
+}
+
+export interface RunPreflight {
+  ready: boolean;
+  accounts: PreflightAccount[];
+}
+
+/** Which accounts a workflow still needs before it can run. */
+export async function fetchPreflight(slug: string): Promise<RunPreflight> {
+  return getJSON<RunPreflight>(`/api/workflows/${slug}/preflight`);
+}
+
+/**
+ * Use one stored credential on every node of the workflow that needs its type
+ * and has none that works. Saves a new graph version; returns the new preflight.
+ */
+export async function applyWorkflowCredential(
+  slug: string,
+  credentialId: string,
+): Promise<RunPreflight> {
+  return getJSON<RunPreflight>(`/api/workflows/${slug}/credentials`, {
+    method: "POST",
+    body: JSON.stringify({ credentialId }),
+  });
 }
 
 /** A node in a compiled workflow graph, as returned by the planner. */

@@ -371,6 +371,9 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
+	// SkipCredentialCheck launches even when the preflight finds nodes without
+	// an account (the operator knows the runtime env provides them).
+	SkipCredentialCheck bool
 }
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
@@ -384,6 +387,9 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	out := LaunchRunInput{
 		Input:   getMap(body, "input"),
 		Trigger: domain.TriggerType(trigger),
+	}
+	if b, ok := body["skipCredentialCheck"].(bool); ok {
+		out.SkipCredentialCheck = b
 	}
 	if hasKey(body, "region") {
 		r := getString(body, "region")

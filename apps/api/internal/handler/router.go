@@ -29,6 +29,10 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/workflows/{slug}/graph", graphWorkflow(p))
 		r.Put("/workflows/{slug}/graph", saveWorkflowGraph(p))
 		r.Post("/workflows/{slug}/runs", launchRun(p))
+		// Run preflight: which accounts the graph still needs, and a one-step
+		// "use this credential on every node that needs it".
+		r.Get("/workflows/{slug}/preflight", runPreflight(p))
+		r.Post("/workflows/{slug}/credentials", applyWorkflowCredential(p))
 		r.Get("/workflows/{slug}/runs", listWorkflowRuns(p))
 
 		// Piece trigger lifecycle + webhook ingress (pieces-runtime-contract,
