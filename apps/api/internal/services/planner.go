@@ -157,11 +157,15 @@ func basePlan(prompt, email string) Plan {
 // no matter how large the installed surface grows. A router failure fails the
 // compile; there is no lexical prescreen behind it any more.
 // PLANNER_MAX_CLUSTERS overrides it; raise it for requests spanning many apps.
-func maxClusterCalls() int { return envInt("PLANNER_MAX_CLUSTERS", 12) }
+func maxClusterCalls() int { return envInt("PLANNER_MAX_CLUSTERS", 16) }
 
 // totalCap bounds how many selected node schemas reach the reduce prompt
 // (PLANNER_MAX_NODE_TYPES). A graph may use each type many times.
-func totalCap() int { return envInt("PLANNER_MAX_NODE_TYPES", 32) }
+func totalCap() int { return envInt("PLANNER_MAX_NODE_TYPES", 48) }
+
+// perClusterCap bounds how many node ids one cluster's map call may select
+// (PLANNER_MAX_NODES_PER_CLUSTER).
+func perClusterCap() int { return envInt("PLANNER_MAX_NODES_PER_CLUSTER", 12) }
 
 // mapConcurrency bounds parallel map-phase LLM calls (rate-limit hygiene).
 const mapConcurrency = 8
@@ -179,11 +183,11 @@ const mapConcurrency = 8
 // asked for, and its absence shows up as a graph that quietly routes around it.
 // Any failure now fails the compile.
 func mapPhase(ctx context.Context, cat *Catalog, prompt string) ([]string, error) {
-	const system = `You route a user's automation request to integration nodes.
+	perCluster := perClusterCap()
+	system := fmt.Sprintf(`You route a user's automation request to integration nodes.
 Given the request and a catalog cluster index (one node per line: "id — label — description"),
 return JSON: {"nodes": ["id", ...]} listing ONLY ids from this index that could plausibly be
-used to fulfill the request. Be selective — at most 8. Return {"nodes": []} if none apply.`
-	const perCluster = 8
+used to fulfill the request. Be selective — at most %d. Return {"nodes": []} if none apply.`, perCluster)
 
 	var (
 		mu        sync.Mutex

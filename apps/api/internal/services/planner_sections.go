@@ -37,9 +37,9 @@ func envInt(name string, def int) int {
 }
 
 // reduceMaxTokens / reduceTimeout bound one reduce call (whole graph or one section).
-func reduceMaxTokens() int { return envInt("PLANNER_REDUCE_MAX_TOKENS", 16000) }
+func reduceMaxTokens() int { return envInt("PLANNER_REDUCE_MAX_TOKENS", 32000) }
 func reduceTimeout() time.Duration {
-	return time.Duration(envInt("PLANNER_REDUCE_TIMEOUT_S", 90)) * time.Second
+	return time.Duration(envInt("PLANNER_REDUCE_TIMEOUT_S", 180)) * time.Second
 }
 
 // sectionMinPromptChars is the prompt length at which the planner outlines
