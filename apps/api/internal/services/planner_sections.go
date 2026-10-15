@@ -151,8 +151,16 @@ func authorSection(ctx context.Context, cat *Catalog, system, prompt string, out
 	msgs := []llmMsg{{Role: "user", Content: sectionRequest(cat, prompt, outline, idx, prior, inputKeys)}}
 	const attempts = 3 // 1 author + 2 repairs
 	var lastComplaint string
+	timeouts := 0
 	for i := 0; i < attempts; i++ {
 		raw, err := reduceLLM(ctx, reduceModel(), reduceMaxTokens(), reduceTimeout(), system+sectionInstructions, msgs)
+		if errors.Is(err, errTimedOut) && timeouts < 1 && ctx.Err() == nil {
+			// One slow response is not a verdict on the section: ask again
+			// without spending a repair attempt.
+			timeouts++
+			i--
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("reduce phase (section %q): %w", sec.Key, err)
 		}

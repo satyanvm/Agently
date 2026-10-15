@@ -219,3 +219,27 @@ func TestAuthorGraph_SmallGraphIsWrittenWhole(t *testing.T) {
 		t.Fatalf("got %d nodes in %d calls, want 3 in 2", len(nodes), calls)
 	}
 }
+
+func TestAuthorGraph_SectionTimeoutIsRetried(t *testing.T) {
+	calls, timedOut := 0, false
+	inner := routedModel(t, &calls,
+		func(bool) string { return sixSectionOutline },
+		func() (string, error) { t.Fatal("a large graph must not be written in one call"); return "", nil })
+	useModel(t, func(ctx context.Context, model string, max int, to time.Duration, system string, msgs []llmMsg) (string, error) {
+		if strings.Contains(system, "SECTION MODE") && !timedOut {
+			timedOut = true
+			calls++
+			return "", fmt.Errorf("gemini: timed out: %w", errTimedOut)
+		}
+		return inner(ctx, model, max, to, system, msgs)
+	})
+
+	p := basePlan("x", "")
+	nodes, err := authorGraph(context.Background(), LoadCatalog(), "system", "big graph, slow first section", &p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 80 || calls != 9 { // outline + timeout + six sections + one repair
+		t.Fatalf("got %d nodes in %d calls, want 80 in 9", len(nodes), calls)
+	}
+}

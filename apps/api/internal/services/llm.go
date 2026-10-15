@@ -300,6 +300,7 @@ func planLLMGemini(ctx context.Context, model string, maxTokens int, timeout tim
 // prompt trips the limit. A limit that outlasts the deadline is still an error.
 func geminiPost(ctx context.Context, model string, body []byte) ([]byte, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	transient := 0
 	for attempt := 0; ; attempt++ {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		req.Header.Set("content-type", "application/json")
@@ -309,12 +310,28 @@ func geminiPost(ctx context.Context, model string, body []byte) ([]byte, error) 
 			if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 				return nil, fmt.Errorf("%s: timed out: %w", model, errTimedOut)
 			}
+			// A dropped connection (reset, EOF, TLS hiccup) on a long call is
+			// transient: retry a few times before giving up.
+			if transient < 3 && sleepCtx(ctx, time.Duration(transient+1)*2*time.Second) {
+				transient++
+				continue
+			}
 			return nil, fmt.Errorf("%s: %w", model, err)
 		}
-		raw, _ := io.ReadAll(resp.Body)
+		raw, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
+		if resp.StatusCode == http.StatusOK && readErr == nil {
 			return raw, nil
+		}
+		if readErr != nil || resp.StatusCode == http.StatusInternalServerError ||
+			resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusGatewayTimeout {
+			if transient < 3 && sleepCtx(ctx, time.Duration(transient+1)*2*time.Second) {
+				transient++
+				continue
+			}
+			if readErr != nil {
+				return nil, fmt.Errorf("%s: reading response: %w", model, readErr)
+			}
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			wait := geminiRetryDelay(raw, attempt)
@@ -327,6 +344,20 @@ func geminiPost(ctx context.Context, model string, body []byte) ([]byte, error) 
 			}
 		}
 		return nil, fmt.Errorf("%s: gemini %d: %s", model, resp.StatusCode, truncateStr(string(raw), 300))
+	}
+}
+
+// sleepCtx waits d unless ctx ends first or would end before d elapses;
+// it reports whether the full wait happened.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) <= d {
+		return false
+	}
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
