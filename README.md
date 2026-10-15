@@ -56,9 +56,9 @@ inferred from the model name, and any tier can run locally as `ollama/<model>`
 (e.g. `ollama/qwen3:8b`): no keys or quotas, slower on a laptop. `PLANNER_EMBED_MODEL` provides catalog recall —
 `ollama/nomic-embed-text` locally, or `gemini-embedding-001` /
 `text-embedding-3-small`. The reasoner uses `REASONER_MODEL` and
-`REASONER_SYNTHESIS_MODEL` (default `gemini-3.5-flash-lite`). Long prompts are
-outlined first, and large graphs (80+ nodes) are written one section per reduce
-call; the `PLANNER_*` limits in `.env.example` tune this. Gemini 429s are
+`REASONER_SYNTHESIS_MODEL` (default `gemini-3.5-flash-lite`). The reduce model
+sizes each graph: large ones (80+ nodes) come back as an outline and are written
+one section per reduce call; the `PLANNER_*` limits in `.env.example` tune this. Gemini 429s are
 retried after the server-suggested delay, so free-tier keys work, just slower.
 
 ## Local development

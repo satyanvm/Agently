@@ -3,19 +3,21 @@ package services
 // planner_sections.go — writing large graphs section by section.
 //
 // One reduce call has to fit the whole graph JSON in its output budget, which
-// caps a single-shot graph at roughly 30 nodes. For long requests the reduce
-// model first writes an OUTLINE (plan metadata plus ordered sections, each with
-// a goal and a rough node count). When the outline is large it then writes ONE
-// SECTION PER CALL, seeing the nodes already written so it can depend on and
-// reference them. Each section is validated against the accumulated graph and
-// repaired on its own, so a mistake in section 5 never re-emits sections 1–4.
-//
-// Short prompts skip the outline entirely (sectionMinPromptChars), so ordinary
-// requests pay no extra round trip.
+// caps a single-shot graph at roughly 30 nodes. So the first reduce call lets
+// the model size the graph itself: it either returns the whole graph, or — when
+// it needs more than sectionThreshold nodes — an OUTLINE (plan metadata plus
+// ordered sections, each with a goal and a rough node count). Small graphs cost
+// one call, as before. For an outline the planner writes ONE SECTION PER CALL,
+// seeing the nodes already written so it can depend on and reference them.
+// Each section is validated against the accumulated graph and repaired on its
+// own, so a mistake in section 5 never re-emits sections 1–4. A graph the model
+// misjudged as small and that overflows the output budget (errOutputCapped) is
+// re-planned the same way.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -42,11 +44,32 @@ func reduceTimeout() time.Duration {
 	return time.Duration(envInt("PLANNER_REDUCE_TIMEOUT_S", 180)) * time.Second
 }
 
-// sectionMinPromptChars is the prompt length at which the planner outlines
-// first. sectionThreshold is the estimated node count above which it writes
-// section by section.
-func sectionMinPromptChars() int { return envInt("PLANNER_SECTION_MIN_PROMPT_CHARS", 600) }
-func sectionThreshold() int      { return envInt("PLANNER_SECTION_THRESHOLD", 25) }
+// errOutputCapped marks a model response cut off by its output-token budget.
+var errOutputCapped = errors.New("output token cap reached")
+
+// sectionThreshold is the node count above which the model must outline
+// instead of writing the graph in one call.
+func sectionThreshold() int { return envInt("PLANNER_SECTION_THRESHOLD", 25) }
+
+// sizeGateInstructions is appended to the first reduce call.
+func sizeGateInstructions() string {
+	return fmt.Sprintf(`
+
+GRAPH SIZE — first decide how many nodes the complete graph needs. If it is %d or
+fewer, return the graph object above. If it is MORE than %d, do not write any
+nodes: return ONLY {"outline": <outline>} where <outline> is:%s`, sectionThreshold(), sectionThreshold(), outlineShape)
+}
+
+// parseOutline recognizes a first-call answer that chose outline mode.
+func parseOutline(raw string) (graphOutline, bool) {
+	var wrapped struct {
+		Outline *graphOutline `json:"outline"`
+	}
+	if err := json.Unmarshal([]byte(extractJSON(raw)), &wrapped); err != nil || wrapped.Outline == nil {
+		return graphOutline{}, false
+	}
+	return *wrapped.Outline, len(wrapped.Outline.Sections) > 0
+}
 
 type graphOutline struct {
 	Name           string         `json:"name"`
@@ -67,7 +90,9 @@ func (o graphOutline) sectioned() bool {
 
 const outlineInstructions = `
 
-OUTLINE MODE — for THIS call do not write any nodes. Return ONE JSON object:
+OUTLINE MODE — for THIS call do not write any nodes. Return ONE JSON object:` + outlineShape
+
+const outlineShape = `
 {
   "name": "short title",
   "description": "one sentence",

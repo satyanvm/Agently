@@ -132,3 +132,79 @@ func TestOutlineSectioned_SmallGraphStaysSingleShot(t *testing.T) {
 		t.Fatal("a 12-node outline should be written in one call")
 	}
 }
+
+const sixSectionOutline = `{"outline": {"name": "Big", "estimatedNodes": 80, "defaultInput": {"topic": "AI"},
+  "sections": [{"key":"p1","goal":"g","nodes":13},{"key":"p2","goal":"g","nodes":13},{"key":"p3","goal":"g","nodes":13},
+               {"key":"p4","goal":"g","nodes":13},{"key":"p5","goal":"g","nodes":13},{"key":"p6","goal":"g","nodes":13}]}}`
+
+// routedModel answers the first (size-gated) call with first(), outline calls
+// with the six-section outline, and section calls with fakeSectionModel.
+func routedModel(t *testing.T, calls *int, first func() (string, error)) func(context.Context, string, int, time.Duration, string, []llmMsg) (string, error) {
+	sections := fakeSectionModel(t, calls)
+	return func(ctx context.Context, model string, max int, to time.Duration, system string, msgs []llmMsg) (string, error) {
+		switch {
+		case strings.Contains(system, "GRAPH SIZE"):
+			*calls++
+			return first()
+		case strings.Contains(system, "OUTLINE MODE"):
+			*calls++
+			return strings.TrimSuffix(strings.TrimPrefix(sixSectionOutline, `{"outline": `), "}"), nil
+		}
+		return sections(ctx, model, max, to, system, msgs)
+	}
+}
+
+func TestAuthorGraph_ModelChoosesOutlineForLargeGraph(t *testing.T) {
+	calls := 0
+	orig := reduceLLM
+	reduceLLM = routedModel(t, &calls, func() (string, error) { return sixSectionOutline, nil })
+	t.Cleanup(func() { reduceLLM = orig })
+
+	p := basePlan("for each of six frameworks gather seven sources", "")
+	nodes, err := authorGraph(context.Background(), LoadCatalog(), "system", "short prompt, big graph", &p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 80 || calls != 8 { // gate + six sections + one repair
+		t.Fatalf("got %d nodes in %d calls, want 80 in 8", len(nodes), calls)
+	}
+}
+
+func TestAuthorGraph_OutputCapEscalatesToSections(t *testing.T) {
+	calls := 0
+	orig := reduceLLM
+	reduceLLM = routedModel(t, &calls, func() (string, error) {
+		return "", fmt.Errorf("model hit the cap: %w", errOutputCapped)
+	})
+	t.Cleanup(func() { reduceLLM = orig })
+
+	p := basePlan("x", "")
+	nodes, err := authorGraph(context.Background(), LoadCatalog(), "system", "misjudged as small", &p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 80 || calls != 9 { // gate + outline + six sections + one repair
+		t.Fatalf("got %d nodes in %d calls, want 80 in 9", len(nodes), calls)
+	}
+}
+
+func TestAuthorGraph_SmallGraphIsOneCall(t *testing.T) {
+	calls := 0
+	orig := reduceLLM
+	reduceLLM = routedModel(t, &calls, func() (string, error) {
+		return `{"name":"Small","nodes":[
+			{"key":"start","type":"trigger.manual","config":{}},
+			{"key":"write","type":"agent.llm","dependsOn":["start"],"config":{"prompt":"Hello"}},
+			{"key":"report","type":"output.report","dependsOn":["write"],"config":{"title":"T"}}]}`, nil
+	})
+	t.Cleanup(func() { reduceLLM = orig })
+
+	p := basePlan("a long, wordy prompt that still only needs three nodes", "")
+	nodes, err := authorGraph(context.Background(), LoadCatalog(), "system", strings.Repeat("words ", 300), &p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 3 || calls != 1 {
+		t.Fatalf("got %d nodes in %d calls, want 3 in 1", len(nodes), calls)
+	}
+}

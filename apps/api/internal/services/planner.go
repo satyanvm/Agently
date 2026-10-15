@@ -36,6 +36,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -356,25 +357,35 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 	if err != nil {
 		return nil, err
 	}
-	system := reduceSystemPrompt(cat, selected)
+	return authorGraph(ctx, cat, reduceSystemPrompt(cat, selected), prompt, p)
+}
 
-	// Large requests are written section by section (planner_sections.go): one
-	// reduce call cannot emit an 80-node graph inside its output budget.
-	if len([]rune(prompt)) >= sectionMinPromptChars() {
-		outline, err := outlineGraph(ctx, system, prompt)
-		if err != nil {
-			return nil, err
+// authorGraph runs the reduce phase over an assembled system prompt.
+func authorGraph(ctx context.Context, cat *Catalog, system, prompt string, p *Plan) ([]domain.GraphNode, error) {
+	// The reduce model sizes the graph itself: small graphs come back whole in
+	// this first call; graphs over sectionThreshold come back as an outline and
+	// are written section by section (planner_sections.go). A graph the model
+	// misjudged as small and that overflows the output budget escalates the same way.
+	nodes, outline, err := authorGraphSingle(ctx, cat, system+sizeGateInstructions(), prompt, p)
+	switch {
+	case errors.Is(err, errOutputCapped):
+		o, oerr := outlineGraph(ctx, system, prompt)
+		if oerr != nil {
+			return nil, oerr
 		}
-		if outline.sectioned() {
-			return authorGraphSections(ctx, cat, system, prompt, outline, p)
-		}
+		return authorGraphSections(ctx, cat, system, prompt, o, p)
+	case err != nil:
+		return nil, err
+	case outline != nil:
+		return authorGraphSections(ctx, cat, system, prompt, *outline, p)
 	}
-	return authorGraphSingle(ctx, cat, system, prompt, p)
+	return nodes, nil
 }
 
 // authorGraphSingle has the reduce model write the whole graph in one call,
-// then validates and repairs it.
-func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string, p *Plan) ([]domain.GraphNode, error) {
+// then validates and repairs it. When the model answers with an outline
+// instead (the graph is too large for one call), that outline is returned.
+func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string, p *Plan) ([]domain.GraphNode, *graphOutline, error) {
 	msgs := []llmMsg{{Role: "user", Content: prompt}}
 	const attempts = 3 // 1 author + 2 repairs
 	var lastComplaint string
@@ -382,7 +393,10 @@ func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string,
 		raw, err := reduceLLM(ctx, reduceModel(), reduceMaxTokens(), reduceTimeout(), system, msgs)
 		if err != nil {
 			// Provider-level failure: retrying won't change it.
-			return nil, fmt.Errorf("reduce phase: %w", err)
+			return nil, nil, fmt.Errorf("reduce phase: %w", err)
+		}
+		if o, ok := parseOutline(raw); ok {
+			return nil, &o, nil
 		}
 		var spec reduceGraphSpec
 		if err := json.Unmarshal([]byte(extractJSON(raw)), &spec); err != nil {
@@ -410,9 +424,9 @@ func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string,
 			continue
 		}
 		overlayMeta(spec, p)
-		return nodes, nil
+		return nodes, nil, nil
 	}
-	return nil, fmt.Errorf("reduce phase: %s could not author a valid graph in %d attempts; last problem: %s",
+	return nil, nil, fmt.Errorf("reduce phase: %s could not author a valid graph in %d attempts; last problem: %s",
 		reduceModel(), attempts, lastComplaint)
 }
 
