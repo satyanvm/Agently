@@ -71,11 +71,25 @@ function toWorkflowRun(r: ApiRun): WorkflowRun {
 }
 
 async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+      cache: "no-store",
+    });
+  } catch (e) {
+    // fetch only rejects when no HTTP response arrived at all (server down or
+    // restarting, connection dropped). The browser's bare "Failed to fetch"
+    // says nothing about that, so name the likely cause.
+    if (e instanceof TypeError) {
+      throw new Error(
+        "Couldn't reach the Agently server — it may be down or restarting. " +
+          "Check `pnpm agently:status` and try again.",
+      );
+    }
+    throw e;
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`API ${res.status} on ${path}: ${body.slice(0, 200)}`);

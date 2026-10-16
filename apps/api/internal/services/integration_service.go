@@ -49,7 +49,7 @@ func NewIntegrationService(deps Deps, http *http.Client) *IntegrationService {
 		deps:         deps,
 		clientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		clientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		redirectURL:  envOrDefault("GOOGLE_OAUTH_REDIRECT", "http://localhost:8080/api/integrations/google/callback"),
+		redirectURL:  envOrDefault("GOOGLE_OAUTH_REDIRECT", "http://localhost:8090/api/integrations/google/callback"),
 		appBaseURL:   envOrDefault("APP_BASE_URL", "http://localhost:3000"),
 		http:         http,
 		states:       map[string]bool{},
