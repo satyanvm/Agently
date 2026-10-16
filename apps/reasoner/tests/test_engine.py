@@ -537,3 +537,25 @@ class ComposeReportTest(unittest.TestCase):
         body = nodes._compose_report("T", {"fetch": {"status": 200}, "a": {"text": "x"}, "b": {"text": "y"}})
         self.assertEqual(body, "# T\n\n## A\n\nx\n\n## B\n\ny\n")
 
+
+
+class StableAgentIdTest(unittest.TestCase):
+    def test_keys_with_a_shared_prefix_get_distinct_ids(self):
+        a = db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_pypi")
+        b = db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_profile")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_pypi"))
+        self.assertEqual(len(a), 23)
+
+
+class UrlQueryTest(unittest.TestCase):
+    def test_empty_params_are_dropped(self):
+        url = "https://export.arxiv.org/api/query?search_query=all%3Aagents&max_results=10&sortBy=&sortOrder=descending"
+        self.assertEqual(
+            nodes._drop_empty_query_params(url),
+            "https://export.arxiv.org/api/query?search_query=all%3Aagents&max_results=10&sortOrder=descending",
+        )
+
+    def test_urls_without_empty_params_are_unchanged(self):
+        for url in ("https://api.example.com/x", "https://api.example.com/x?a=1&b=2"):
+            self.assertEqual(nodes._drop_empty_query_params(url), url)
