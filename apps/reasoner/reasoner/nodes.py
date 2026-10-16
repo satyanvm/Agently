@@ -15,6 +15,7 @@ rows the UI already renders.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
 import re
@@ -468,16 +469,40 @@ def _send_smtp(to: str, subject: str, body: str) -> None:
         server.send_message(msg)
 
 
+def _compose_report(title: str, upstream: dict[str, Any]) -> str:
+    """The report body: every upstream text output, in dependency order.
+
+    One input is the whole body, as before. Several inputs each become a
+    section headed by the producing node's key ("framework_profile_crewai" →
+    "Framework profile crewai") under the report title. This used to keep only
+    the LAST input, so a report fed by a summary, a trends section and a dozen
+    profiles came out as whichever node happened to be listed last.
+
+    Feeds (GDELT, RSS, Lobsters) hand the model HTML-escaped text and it echoes
+    entities such as &#34; back, so they are decoded here.
+    """
+    sections = [
+        (key, html.unescape(str(v["text"])).strip())
+        for key, v in upstream.items()
+        if isinstance(v, dict) and v.get("text")
+    ]
+    sections = [(k, t) for k, t in sections if t]
+    if not sections:
+        return ""
+    if len(sections) == 1:
+        return sections[0][1]
+    parts = [f"# {title}"]
+    for key, text in sections:
+        heading = key.replace("_", " ").replace("-", " ").strip().capitalize() or key
+        parts.append(f"## {heading}\n\n{text}")
+    return "\n\n".join(parts) + "\n"
+
+
 @handles("output.report")
 async def _report(ctx: NodeContext) -> NodeResult:
     title = render(_cfg(ctx, "title"), ctx) or "report"
     fmt = _cfg(ctx, "format") or "markdown"
-    # Compose from the most relevant upstream text output.
-    body = ""
-    for v in reversed(list(ctx.upstream.values())):
-        if isinstance(v, dict) and v.get("text"):
-            body = str(v["text"])
-            break
+    body = _compose_report(title, ctx.upstream)
     ext = "pdf" if fmt == "pdf" else "md"
     await db.add_artifact(ctx.run_id, f"{_slug(title)}.{ext}", "report", ctx.label or "Composer", body)
     return NodeResult(output={"title": title, "format": fmt}, summary=f"Report: {title}")
