@@ -72,6 +72,8 @@ class Config:
     tool_db_url: str
     # How often the dispatcher polls Postgres for queued temporal runs (seconds).
     dispatch_interval_s: float
+    # Most nodes of one run executing at once (independent branches overlap).
+    run_max_parallel: int
 
     @property
     def gemini_enabled(self) -> bool:
@@ -151,6 +153,7 @@ def load() -> Config:
         tool_code_enabled=os.getenv("TOOL_CODE_ENABLED", "") in ("1", "true", "yes"),
         tool_db_url=os.getenv("TOOL_DB_URL", ""),
         dispatch_interval_s=float(os.getenv("REASONER_DISPATCH_INTERVAL_S", "1.5")),
+        run_max_parallel=max(1, int(os.getenv("RUN_MAX_PARALLEL", "") or 8)),
     )
 
 

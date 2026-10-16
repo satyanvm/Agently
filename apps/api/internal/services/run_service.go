@@ -107,6 +107,21 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	// Merge the workflow's default input (the planned template: topic/email/sources/
 	// urls) UNDER the per-run input, so a one-click "Run now" inherits the plan while
 	// an explicit per-run value still wins.
+	// Refuse a manual launch whose graph cannot resolve every account, so the
+	// caller can connect them first. Scheduled and webhook launches have no one
+	// to ask: they record the run as failed with the same reason instead of
+	// running until the first node without a token.
+	var preflight *RunPreflight
+	if credentialCheckEnabled() && !input.SkipCredentialCheck {
+		pf := checkNodeCredentials(s.deps.Repos.Credentials, wf.WorkspaceID, currentNodes(s.deps.Repos, wf))
+		if !pf.Ready {
+			if input.Trigger == domain.TriggerManual || input.Trigger == "" {
+				return domain.RunDetail{}, preflightError(pf)
+			}
+			preflight = &pf
+		}
+	}
+
 	runInput := mergeInput(wf.DefaultInput, input.Input)
 	total := wf.AgentCount * 4
 	if total < 1 {
@@ -126,6 +141,21 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 		Steps: domain.StepProgress{Done: 0, Total: total}, CurrentStep: queuedStep,
 		CostUsd: 0, Usage: domain.Usage{TokensIn: 0, TokensOut: 0}, Error: nil, BrowserSessionID: nil,
 		QueuedAt: now, StartedAt: nil, FinishedAt: nil,
+	}
+	if preflight != nil {
+		perr := preflightError(*preflight)
+		msg := perr.Message
+		run.Status = domain.RunFailed
+		run.Error = &msg
+		run.CurrentStep = "Failed"
+		run.FinishedAt = &now
+		s.deps.Repos.Runs.Insert(run)
+		s.emit(domain.RunFinishedEvent{RunID: runID, Status: domain.RunFailed, Error: &msg})
+		s.logs.Append(runID, AppendLogInput{Level: domain.LevelError, Channel: domain.ChannelSystem, Source: "scheduler", Message: "Run #" + itoa(run.Number) + " not started: " + msg})
+		for _, d := range perr.Details {
+			s.logs.Append(runID, AppendLogInput{Level: domain.LevelError, Channel: domain.ChannelSystem, Source: "scheduler", Message: d.Message})
+		}
+		return s.detail(run), nil
 	}
 	s.deps.Repos.Runs.Insert(run)
 

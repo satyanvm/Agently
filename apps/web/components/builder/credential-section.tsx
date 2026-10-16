@@ -166,7 +166,7 @@ export function CredentialSection({
  * placeholder and are only included in the PUT when the user types a new
  * value (the API merges values per-key).
  */
-function CredentialModal({
+export function CredentialModal({
   typeDef,
   existing,
   onClose,

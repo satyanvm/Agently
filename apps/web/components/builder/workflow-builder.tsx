@@ -25,7 +25,9 @@ import { NodeInspector } from "./node-inspector";
 import { WorkflowNode } from "./workflow-node";
 import { CredentialsProvider } from "./credentials-context";
 import { NODE_CATALOG, defaultConfig, findNodeSpec } from "./node-catalog";
-import { getWorkflowGraph, saveWorkflowGraph, launchRun } from "@/lib/api";
+import { getWorkflowGraph, saveWorkflowGraph, launchRun, fetchPreflight, type RunPreflight } from "@/lib/api";
+import { ConnectAccounts } from "@/components/connect-accounts";
+import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { maxNumericNodeId } from "@/lib/builder-graph";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +56,9 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRunning, setIsRunning] = React.useState(false);
+  // Set when Test run found nodes without an account; shows the connect dialog.
+  const [preflight, setPreflight] = React.useState<RunPreflight | null>(null);
+  const [runError, setRunError] = React.useState<string | null>(null);
   const reactFlowWrapper = React.useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = React.useState<any>(null);
 
@@ -88,18 +93,51 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
     }
   };
 
+  const launchTestRun = async (skipCredentialCheck = false) => {
+    // The reasoner executes the saved graph literally, so the drawn graph runs
+    // exactly as wired.
+    const runId = await launchRun(workflowSlug, undefined, { skipCredentialCheck });
+    router.push(`/runs/${runId}`);
+  };
+
   const handleTestRun = async () => {
     setIsRunning(true);
+    setRunError(null);
     try {
       // Persist the current graph before launching so the run executes what's on canvas.
       const saved = await saveWorkflow();
-      if (!saved) return;
-      // The reasoner executes the saved graph literally, so the drawn graph runs
-      // exactly as wired.
-      const runId = await launchRun(workflowSlug);
-      router.push(`/runs/${runId}`);
+      if (!saved) {
+        setRunError("Could not save the workflow, so the test run did not start.");
+        setIsRunning(false);
+        return;
+      }
+      const pf = await fetchPreflight(workflowSlug).catch(() => null);
+      if (pf && !pf.ready) {
+        setPreflight(pf);
+        setIsRunning(false);
+        return;
+      }
+      await launchTestRun();
     } catch (err) {
-      console.error("Failed to launch test run:", err);
+      setRunError(err instanceof Error ? err.message : "Failed to launch test run");
+      setIsRunning(false);
+    }
+  };
+
+  // Connecting an account saves a new graph version server-side; reload it so
+  // the canvas (and the next save) carries the selected credentials.
+  const onPreflightChange = async (next: RunPreflight) => {
+    setPreflight(next);
+    await loadWorkflow();
+  };
+
+  const runAfterConnect = async (skipCredentialCheck: boolean) => {
+    setPreflight(null);
+    setIsRunning(true);
+    try {
+      await launchTestRun(skipCredentialCheck);
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Failed to launch test run");
       setIsRunning(false);
     }
   };
@@ -239,6 +277,11 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
               {isRunning ? "Running..." : "Test run"}
             </Button>
           </Panel>
+          {runError && (
+            <Panel position="top-center" className="m-4 max-w-[420px] rounded-md border border-danger/30 bg-danger-bg px-3 py-2 text-[12px] text-danger">
+              {runError}
+            </Panel>
+          )}
         </ReactFlow>
       </div>
 
@@ -249,6 +292,38 @@ export function WorkflowBuilder({ workflowSlug }: WorkflowBuilderProps) {
         onDelete={deleteSelectedNode}
       />
     </div>
+    <Dialog open={preflight !== null} onOpenChange={(o) => !o && setPreflight(null)}>
+      <DialogHeader
+        title="Connect accounts to run"
+        subtitle="Some nodes need an account before this workflow can run."
+        onClose={() => setPreflight(null)}
+      />
+      <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+        {preflight && (preflight.ready ? (
+          <p className="text-[12px] text-muted">All accounts are connected.</p>
+        ) : (
+          <ConnectAccounts slug={workflowSlug} preflight={preflight} onChange={onPreflightChange} />
+        ))}
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+        {preflight && !preflight.ready && (
+          <button
+            type="button"
+            className="mr-auto text-[12px] text-faint underline-offset-2 hover:underline"
+            onClick={() => runAfterConnect(true)}
+          >
+            Run anyway
+          </button>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => setPreflight(null)}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="sm" disabled={!preflight?.ready} onClick={() => runAfterConnect(false)}>
+          <Play className="size-4" />
+          Test run
+        </Button>
+      </div>
+    </Dialog>
     </CredentialsProvider>
   );
 }

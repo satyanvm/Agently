@@ -47,3 +47,23 @@ supplies choices when available.
 
 Generated catalog files are produced by `packages/nodes/build-web.mjs` and are not
 hand-edited.
+
+## Run preflight
+
+Before a run starts, the API applies the runtime's resolution rules to the
+workflow's current graph without executing anything
+(`apps/api/internal/services/preflight.go`):
+
+- `GET /api/workflows/{slug}/preflight` returns `{ready, accounts[]}`. Each
+  account (`credentialType`, `label`, `authType`, `envKeys`) lists the nodes
+  that cannot run, each with a `problem`: `not_connected`,
+  `credential_deleted` or `incomplete` (plus `missingKeys`). An account with
+  an empty `credentialType` is a server env var (for example `TOOL_DB_URL`).
+- `POST /api/workflows/{slug}/credentials` with `{credentialId}` selects that
+  credential on every node of its type that cannot run, saving a new graph
+  version, and returns the new preflight.
+- A manual launch that fails the preflight gets 409 `credentials_required`,
+  with one detail per node; `skipCredentialCheck: true` in the launch body
+  overrides it. Scheduled and webhook launches record the run as failed with
+  the same reason instead. `RUN_CREDENTIAL_CHECK=off` disables the check.
+

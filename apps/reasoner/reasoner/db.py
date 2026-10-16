@@ -236,10 +236,15 @@ async def set_run_running(run_id: str, current_step: str) -> None:
 
 
 async def set_run_progress(run_id: str, steps_done: int, steps_total: int, current_step: str) -> None:
+    # Nodes finish concurrently, so progress writes can land out of order; never
+    # let a late, smaller count overwrite a newer one.
     async with _conn() as conn:
         await conn.execute(
-            "update runs set steps_done = %s, steps_total = %s, current_step = %s where id = %s",
-            (steps_done, steps_total, current_step, run_id),
+            """
+            update runs set steps_done = %s, steps_total = %s, current_step = %s
+             where id = %s and coalesce(steps_done, 0) <= %s
+            """,
+            (steps_done, steps_total, current_step, run_id, steps_done),
         )
 
 

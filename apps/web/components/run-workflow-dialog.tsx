@@ -6,7 +6,8 @@ import { Play, Loader2 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { launchRun } from "@/lib/api";
+import { fetchPreflight, launchRun, type RunPreflight } from "@/lib/api";
+import { ConnectAccounts } from "@/components/connect-accounts";
 import type { Workflow } from "@/lib/types";
 
 /**
@@ -29,6 +30,8 @@ export function RunWorkflowDialog({
   const [email, setEmail] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // null while loading or when the check itself failed (launch then decides).
+  const [preflight, setPreflight] = React.useState<RunPreflight | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -36,18 +39,22 @@ export function RunWorkflowDialog({
       setEmail(typeof defaults.email === "string" ? defaults.email : "");
       setError(null);
       setLaunching(false);
+      setPreflight(null);
+      fetchPreflight(workflow.slug).then(setPreflight).catch(() => setPreflight(null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onLaunch = async () => {
+  const blocked = preflight !== null && !preflight.ready;
+
+  const onLaunch = async (skipCredentialCheck = false) => {
     setLaunching(true);
     setError(null);
     try {
       const input: Record<string, unknown> = {};
       if (topic.trim()) input.topic = topic.trim();
       if (email.trim()) input.email = email.trim();
-      const runId = await launchRun(workflow.slug, input);
+      const runId = await launchRun(workflow.slug, input, { skipCredentialCheck });
       onOpenChange(false);
       router.push(`/runs/${runId}`);
     } catch (e) {
@@ -75,6 +82,9 @@ export function RunWorkflowDialog({
             placeholder="you@gmail.com"
           />
         </Field>
+        {preflight && !preflight.ready && (
+          <ConnectAccounts slug={workflow.slug} preflight={preflight} onChange={setPreflight} />
+        )}
         {error && (
           <div className="rounded-md border border-danger/30 bg-danger-bg px-3 py-2 text-[12px] text-danger">
             {error}
@@ -82,10 +92,21 @@ export function RunWorkflowDialog({
         )}
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+        {blocked && (
+          <button
+            type="button"
+            className="mr-auto text-[12px] text-faint underline-offset-2 hover:underline"
+            title="Launch anyway, e.g. when the server's environment already provides these tokens"
+            onClick={() => onLaunch(true)}
+            disabled={launching}
+          >
+            Run anyway
+          </button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button variant="primary" size="sm" onClick={onLaunch} disabled={launching}>
+        <Button variant="primary" size="sm" onClick={() => onLaunch()} disabled={launching || blocked}>
           {launching ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
           Launch run
         </Button>
