@@ -297,9 +297,12 @@ async def _agent(ctx: NodeContext) -> NodeResult:
 
     model = _cfg(ctx, "model") or CONFIG.model
     out = await llm.complete(ctx.run_id, ctx.node["key"], system=system, user=prompt, model=model)
+    # Feeds hand the model HTML-escaped text and it echoes the entities back
+    # (&amp;, &#34;); unescape so every node's output reads as plain text.
+    text = html.unescape(out.text)
     return NodeResult(
-        output={"text": out.text, "model": model},
-        summary=_clip(out.text),
+        output={"text": text, "model": model},
+        summary=_clip(text),
         tokens_in=out.tokens_in,
         tokens_out=out.tokens_out,
         cost_usd=out.cost_usd,
@@ -620,8 +623,9 @@ async def _integration(ctx: NodeContext) -> NodeResult:
         prompt = render_tpl(llm_spec.get("prompt", ""), ctx, roots)
         model = _cfg(ctx, "model") or CONFIG.model
         out = await llm.complete(ctx.run_id, key, system=system, user=prompt, model=model)
+        text = html.unescape(out.text)
         return NodeResult(
-            output={"text": out.text, "model": model}, summary=_clip(out.text),
+            output={"text": text, "model": model}, summary=_clip(text),
             tokens_in=out.tokens_in, tokens_out=out.tokens_out, cost_usd=out.cost_usd,
         )
 
