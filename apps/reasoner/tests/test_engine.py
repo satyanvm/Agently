@@ -188,6 +188,23 @@ class ExecuteGraphTest(unittest.TestCase):
         # usage rolled up from the one llm call
         self.assertEqual(self.fake.usage[0], 10)
 
+    def test_report_includes_every_upstream_section(self):
+        g = [
+            {"key": "start", "type": "trigger.manual", "config": {}, "dependsOn": []},
+            {"key": "executive_summary", "type": "agent.llm", "config": {}, "dependsOn": ["start"]},
+            {"key": "trends", "type": "agent.llm", "config": {}, "dependsOn": ["start"]},
+            {"key": "out", "type": "output.report", "config": {"title": "Landscape"},
+             "dependsOn": ["executive_summary", "trends"]},
+        ]
+        result = _run(engine.execute_graph("run_r", g, {}))
+        self.assertTrue(result["done"])
+        body = self.fake.artifacts[0][2]
+        self.assertTrue(body.startswith("# Landscape"))
+        # Both inputs, in dependency order, each under its own heading.
+        self.assertLess(body.index("## Executive summary"), body.index("## Trends"))
+        self.assertIn("answer:executive_summary", body)
+        self.assertIn("answer:trends", body)
+
     def test_node_failure_fails_run(self):
         async def boom(run_id, node, system, user, *, model=None):
             raise RuntimeError("model exploded")
@@ -506,3 +523,39 @@ class PerNodeOrchestrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComposeReportTest(unittest.TestCase):
+    def test_single_input_is_the_whole_body(self):
+        self.assertEqual(nodes._compose_report("T", {"a": {"text": "only"}}), "only")
+
+    def test_html_entities_are_decoded(self):
+        body = nodes._compose_report("T", {"a": {"text": "&#34;magic&#34; &amp; hype"}})
+        self.assertEqual(body, '"magic" & hype')
+
+    def test_inputs_without_text_are_skipped(self):
+        body = nodes._compose_report("T", {"fetch": {"status": 200}, "a": {"text": "x"}, "b": {"text": "y"}})
+        self.assertEqual(body, "# T\n\n## A\n\nx\n\n## B\n\ny\n")
+
+
+
+class StableAgentIdTest(unittest.TestCase):
+    def test_keys_with_a_shared_prefix_get_distinct_ids(self):
+        a = db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_pypi")
+        b = db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_profile")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, db._stable_agent_id("run_fc3owm4jo61pmz0ir0ul", "langgraph_pypi"))
+        self.assertEqual(len(a), 23)
+
+
+class UrlQueryTest(unittest.TestCase):
+    def test_empty_params_are_dropped(self):
+        url = "https://export.arxiv.org/api/query?search_query=all%3Aagents&max_results=10&sortBy=&sortOrder=descending"
+        self.assertEqual(
+            nodes._drop_empty_query_params(url),
+            "https://export.arxiv.org/api/query?search_query=all%3Aagents&max_results=10&sortOrder=descending",
+        )
+
+    def test_urls_without_empty_params_are_unchanged(self):
+        for url in ("https://api.example.com/x", "https://api.example.com/x?a=1&b=2"):
+            self.assertEqual(nodes._drop_empty_query_params(url), url)

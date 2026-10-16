@@ -15,8 +15,10 @@ rows the UI already renders.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
+import random
 import re
 import smtplib
 import urllib.parse
@@ -36,11 +38,43 @@ HTTP_SOFT_FAIL = os.environ.get("HTTP_SOFT_FAIL", "1").strip() != "0"
 
 
 def _retry_wait(resp: Any, attempt: int) -> float:
-    """Seconds to wait before retrying: Retry-After when sent, else backoff."""
+    """Seconds to wait before retrying: Retry-After when sent, else jittered
+    backoff (about 2s, 4s, 8s), so parallel nodes rate-limited together don't
+    all come back at the same instant."""
     try:
         return min(float(resp.headers.get("retry-after", "")), 30.0)
     except (TypeError, ValueError, AttributeError):
-        return float(2 ** (attempt + 1))  # 2s, 4s, 8s
+        return float(2 ** (attempt + 1)) + random.uniform(0, 1.5)
+
+
+# Most catalog requests to one host in flight at once, per worker. Parallel
+# runs fan many nodes out to the same public API (six Semantic Scholar or arXiv
+# searches at a time), which their anonymous rate limits answer with 429s.
+HTTP_PER_HOST = max(1, int(os.environ.get("HTTP_PER_HOST", "") or 2))
+_host_slots: dict[tuple[int, str], asyncio.Semaphore] = {}
+
+
+def _host_slot(url: str) -> asyncio.Semaphore:
+    # Keyed by event loop too: a semaphore binds to the loop that first waits on it.
+    key = (id(asyncio.get_running_loop()), urllib.parse.urlsplit(url).netloc.lower())
+    slot = _host_slots.get(key)
+    if slot is None:
+        slot = _host_slots[key] = asyncio.Semaphore(HTTP_PER_HOST)
+    return slot
+
+
+def _drop_empty_query_params(url: str) -> str:
+    """Remove `name=` pairs with no value from a rendered URL.
+
+    Optional config the planner leaves out renders as "", which turned
+    `&sortBy={{urlencode config.sortBy}}` into `&sortBy=`; arXiv answers that
+    with HTTP 400, and other APIs treat an empty value as a bad filter.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if not parts.query:
+        return url
+    kept = [p for p in parts.query.split("&") if p and not p.endswith("=")]
+    return urllib.parse.urlunsplit(parts._replace(query="&".join(kept)))
 
 
 HTTP_USER_AGENT = (
@@ -468,16 +502,40 @@ def _send_smtp(to: str, subject: str, body: str) -> None:
         server.send_message(msg)
 
 
+def _compose_report(title: str, upstream: dict[str, Any]) -> str:
+    """The report body: every upstream text output, in dependency order.
+
+    One input is the whole body, as before. Several inputs each become a
+    section headed by the producing node's key ("framework_profile_crewai" →
+    "Framework profile crewai") under the report title. This used to keep only
+    the LAST input, so a report fed by a summary, a trends section and a dozen
+    profiles came out as whichever node happened to be listed last.
+
+    Feeds (GDELT, RSS, Lobsters) hand the model HTML-escaped text and it echoes
+    entities such as &#34; back, so they are decoded here.
+    """
+    sections = [
+        (key, html.unescape(str(v["text"])).strip())
+        for key, v in upstream.items()
+        if isinstance(v, dict) and v.get("text")
+    ]
+    sections = [(k, t) for k, t in sections if t]
+    if not sections:
+        return ""
+    if len(sections) == 1:
+        return sections[0][1]
+    parts = [f"# {title}"]
+    for key, text in sections:
+        heading = key.replace("_", " ").replace("-", " ").strip().capitalize() or key
+        parts.append(f"## {heading}\n\n{text}")
+    return "\n\n".join(parts) + "\n"
+
+
 @handles("output.report")
 async def _report(ctx: NodeContext) -> NodeResult:
     title = render(_cfg(ctx, "title"), ctx) or "report"
     fmt = _cfg(ctx, "format") or "markdown"
-    # Compose from the most relevant upstream text output.
-    body = ""
-    for v in reversed(list(ctx.upstream.values())):
-        if isinstance(v, dict) and v.get("text"):
-            body = str(v["text"])
-            break
+    body = _compose_report(title, ctx.upstream)
     ext = "pdf" if fmt == "pdf" else "md"
     await db.add_artifact(ctx.run_id, f"{_slug(title)}.{ext}", "report", ctx.label or "Composer", body)
     return NodeResult(output={"title": title, "format": fmt}, summary=f"Report: {title}")
@@ -570,7 +628,7 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     # Default: http.
     http_spec = spec.get("http") or {}
     method = (http_spec.get("method") or "GET").upper()
-    url = render_tpl(http_spec.get("url", ""), ctx, roots)
+    url = _drop_empty_query_params(render_tpl(http_spec.get("url", ""), ctx, roots))
     if not url:
         raise ValueError(f"{ctx.node.get('type')} resolved to an empty URL")
     headers = {
@@ -594,8 +652,9 @@ async def _integration(ctx: NodeContext) -> NodeResult:
     failure = ""
     for attempt in range(HTTP_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, follow_redirects=True) as client:
-                resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
+            async with _host_slot(url):
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, follow_redirects=True) as client:
+                    resp = await client.request(method, url, headers=headers or None, content=(body or None), auth=auth)
         except Exception as exc:  # noqa: BLE001 - fail with the upstream reason
             resp, failure = None, f"request failed: {type(exc).__name__}: {exc}".rstrip(": ")
             await db.append_log(ctx.run_id, "error", "tool", key, f"{method} {url} {failure}")
