@@ -8,11 +8,21 @@ Rough time: 1 hour for Part 1, 3–4 hours for Part 2, Part 3 when you need it.
 
 0. THE PROJECT IN ONE PARAGRAPH
 --------------------------------
-Agently turns a plain-English prompt ("every morning, research AI papers and email
-me a digest") into a typed DAG (graph) of nodes — LLM agents, tools, logic, and
-700+ third-party integrations — and runs that graph durably on Temporal. If a
-worker dies mid-run, Temporal's event history lets the run resume at the exact
-node it was on. Durability is the whole point; lead with it when explaining.
+Agently is competitor intelligence + marketing intelligence + marketing
+automation for small B2B software teams (1–5 marketers). It runs one loop:
+detect a market signal (a competitor's pricing page changed, a news story, a
+Reddit thread) → decide what it means → draft the marketing response → a
+person approves → publish → record what happened. "Intelligence tools tell you
+what happened. Agently does something about it."
+Under the hood it is the same engine as before: a plain-English prompt (now
+called a "playbook": "when a competitor launches anything AI-related, draft a
+LinkedIn post and send it to Rahul to approve") becomes a typed DAG (graph) of
+nodes — LLM agents, tools, logic, and 700+ third-party integrations — run
+durably on Temporal. If a worker dies mid-run, Temporal's event history lets
+the run resume at the exact node it was on, and a run can wait days for an
+approver without holding a worker. Lead with two things when explaining:
+durability (approvals take days) and traceability (every published item links
+back to its signal, run, cost and approver). Part 11 covers the loop.
 
 Four apps, one Postgres, one Temporal:
 
@@ -79,7 +89,12 @@ PART 1 — READING LIST FOR INFO (docs, in order)
     activities), §22 (credentials). Skip the chunk-by-chunk history unless you
     want the story of how it evolved.
 
- Optional background: product.md (what it is for), DEMO.md (demo script),
+ 9. product.md, then docs/product-direction.md
+    What Agently is FOR now: the problem, the target user, the signal → draft →
+    approve → publish loop, first-version scope, how success is measured; then
+    why, and how it compares to Klue, Crayon, Jasper, HubSpot Breeze, Sprinklr…
+
+ Optional background: DEMO.md (demo script),
  BACKEND.md (history: the API was ported from TypeScript to Go 1:1 — older, some
  details are stale), plan_for_prompt_to_workflow.md and plan_intelligent_dag.md
  (design notes behind the compiler).
@@ -473,3 +488,86 @@ PART 10 — THE WHOLE SYSTEM ON ONE PAGE (say this in an interview)
   6. RECOVER: node retries/timeouts/continue-on-fail, then the error
      workflow + alerts (Part 9).
   7. OBSERVE: live SSE run view, Temporal UI per run, Langfuse per LLM call.
+
+
+PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
+==================================================================
+  The pitch: "Intelligence tools tell you what happened. Agently does
+  something about it." Klue/Crayon (intelligence) stop at "here's what
+  changed"; Jasper/HubSpot Breeze/Typeface (execution) start from a blank
+  brief. Agently is the loop in between, for teams of 1–5 marketers:
+
+      signal  → meaning  → draft  → human approval → publish → record
+      (watch)   (AI)       (AI,     (a person:       (real     (signal, run,
+                           brand    edit / approve /  integra-  cost, approver,
+                           voice)   reject)           tions)    time)
+
+  Three rules hold the loop together:
+    * Nothing publishes without a person's approval. The only exception is a
+      short list of "safe" actions, such as pausing scheduled posts in a crisis.
+    * Signals are collected by us (websites, GDELT, RSS, Reddit/HN, reviews),
+      never bought from a paid intelligence vendor like Meltwater.
+    * Same strict failure model as everywhere else (Part 5): a missing
+      integration fails with its real reason; a publish is never faked.
+
+  Why this needs THIS engine (good interview answer):
+    * Durability: an approval can take days. A Temporal workflow waiting on a
+      signal survives restarts and deploys and holds no worker while it waits.
+    * Traceability: run_agents already stores every node's output (Part 8),
+      runs carry cost and a Langfuse trace id — the approval record links a
+      published item back to all of it.
+    * Prompt → DAG becomes "describe your own playbook in plain English".
+
+  Read first: product.md (scope + success metrics), docs/product-direction.md
+  (competitors, our angle, risks).
+
+  What already exists and the loop reuses, in reading order:
+   L1. packages/nodes/catalog/research-news.json (gdelt.searchDocs,
+       googlenews.fetchRss), data-web.json, social.json (reddit.*,
+       hackernews.*, rss.fetchFeed, x.searchPosts / linkedin.getCompanyPage
+       via the browser). The SIGNAL side: mostly keyless HTTP nodes.
+   L2. apps/reasoner/reasoner/nodes.py — _http (tool.http) and the catalog
+       runner below it (spec.get("runtime")): how a catalog JSON entry becomes
+       a real HTTP call. browser.py: tool.browser on Browserbase, for pages
+       that need JavaScript.
+   L3. apps/api/internal/services/scheduler.go — when signals get checked.
+       Note dueAt: only "hourly" and "daily HH:MM" today (a weekly content
+       plan needs more).
+   L4. packages/nodes/pieces/index.json — search it for linkedin, twitter,
+       wordpress, webflow, hubspot (create-blog-post), buffer, typefully,
+       google-docs, notion, gmail. The PUBLISH side: real Activepieces pieces
+       run by the pieces worker (Part 2, Pass D), logged in via Part 7.
+   L5. apps/reasoner/reasoner/engine.py (db.add_usage) and db.py
+       set_langfuse_trace — the cost + trace half of traceability.
+
+  What the loop still needs (being built; this part gets file paths as each
+  piece lands):
+    * Competitor registry + page snapshots in Postgres + "what changed since
+      last time" diffs, exposed as planner nodes.
+    * A human-approval node: the run pauses durably (Temporal signal with a
+      timeout) until someone approves, edits or rejects; Slack/email link.
+      Today nothing can pause: the pieces worker deliberately throws on
+      Activepieces' run.pause (apps/pieces-worker/src/execute.ts), so AP's own
+      "request approval" Slack/Gmail actions fail.
+    * An approval inbox in the web app with full history.
+    * Per-workspace brand context injected into AI drafting nodes.
+    * Three ready-made playbooks (pricing change, feature launch, weekly
+      content plan) and planner eval cases for marketing prompts.
+
+  Likely interview questions:
+    Q: Why not just buy a Meltwater/Klue feed?
+       Price (quote-only, five figures a year) puts it out of reach for the
+       target user, and it only covers half the loop.
+    Q: Why must approval be durable? Why not a polling loop or a DB flag?
+       The run's state (upstream outputs, the draft, what comes next) lives in
+       Temporal history. A signal resumes the exact workflow; no worker is
+       held while waiting, and a restart doesn't lose the place.
+    Q: How do you stop page diffs from being noise?
+       Normalise before diffing (strip scripts, timestamps, rotating banners)
+       and track "signal precision" as a product metric (product.md).
+    Q: What if LinkedIn/X won't give API access?
+       Use the closest working integration (Buffer, Typefully, a HubSpot blog
+       draft, a Google Doc) and say so — never pretend it was posted.
+    Q: How do you prove where a post came from?
+       signal → run → node outputs → draft → approver → publish time → cost,
+       all rows we already record or will record on the approval.
