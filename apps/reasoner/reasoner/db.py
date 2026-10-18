@@ -488,3 +488,124 @@ async def finish_browser_session(session_id: str, status: str) -> None:
             "update browser_sessions set status = %s, finished_at = now() where id = %s",
             (status, session_id),
         )
+
+
+# ───────────────────── competitors, snapshots, signals (0015) ─────────────────────
+
+def _rows(cur: Any, rows: list[Any]) -> list[dict[str, Any]]:
+    cols = [d.name for d in cur.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+async def run_workspace_id(run_id: str) -> str:
+    """The workspace a run belongs to; every intel row is scoped by it."""
+    async with _conn() as conn:
+        cur = await conn.execute("select workspace_id from runs where id = %s", (run_id,))
+        row = await cur.fetchone()
+    if not row:
+        raise RuntimeError(f"run {run_id} not found")
+    return str(row[0])
+
+
+async def list_competitors(workspace_id: str) -> list[dict[str, Any]]:
+    """Active (not archived) competitors, by name."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """select id, name, website, pages from competitors
+                where workspace_id = %s and archived_at is null order by name""",
+            (workspace_id,),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+_SNAPSHOT_COLS = "id, competitor_id, page_kind, url, run_id, fetched_via, status_code, title, content_hash, content, fetched_at, last_seen_at"
+
+
+async def latest_snapshots(workspace_id: str, url: str, limit: int = 2) -> list[dict[str, Any]]:
+    """The newest versions of a page, newest first."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_SNAPSHOT_COLS} from page_snapshots
+                 where workspace_id = %s and url = %s
+                 order by fetched_at desc limit %s""",
+            (workspace_id, url, limit),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+async def snapshot_by_id(snapshot_id: str) -> dict[str, Any] | None:
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"select workspace_id, {_SNAPSHOT_COLS} from page_snapshots where id = %s", (snapshot_id,)
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def snapshot_before(workspace_id: str, url: str, fetched_at: Any) -> dict[str, Any] | None:
+    """The version of a page that came before the one fetched at `fetched_at`."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_SNAPSHOT_COLS} from page_snapshots
+                 where workspace_id = %s and url = %s and fetched_at < %s
+                 order by fetched_at desc limit 1""",
+            (workspace_id, url, fetched_at),
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def insert_snapshot(
+    workspace_id: str, *, competitor_id: str | None, page_kind: str | None, url: str, run_id: str,
+    fetched_via: str, status_code: int | None, title: str, content_hash: str, content: str,
+) -> dict[str, Any]:
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""insert into page_snapshots
+                  (id, workspace_id, competitor_id, page_kind, url, run_id, fetched_via, status_code,
+                   title, content_hash, content, fetched_at, last_seen_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                returning {_SNAPSHOT_COLS}""",
+            (gen_id("snap"), workspace_id, competitor_id, page_kind, url, run_id, fetched_via,
+             status_code, title, content_hash, content),
+        )
+        return _rows(cur, [await cur.fetchone()])[0]
+
+
+async def touch_snapshot(snapshot_id: str) -> None:
+    """The page was fetched again and hadn't changed."""
+    async with _conn() as conn:
+        await conn.execute("update page_snapshots set last_seen_at = now() where id = %s", (snapshot_id,))
+
+
+async def insert_signal(
+    workspace_id: str, *, source: str, title: str, run_id: str, summary: str = "", url: str = "",
+    detail: dict[str, Any] | None = None, competitor_id: str | None = None,
+    snapshot_id: str | None = None, previous_snapshot_id: str | None = None,
+    dedupe_key: str | None = None,
+) -> tuple[str, bool]:
+    """Record a signal; returns (signal id, created). A dedupe_key already
+    recorded in the workspace returns the existing signal (created=False), so a
+    re-run never reports the same change or article twice."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """insert into signals
+                  (id, workspace_id, source, competitor_id, title, summary, url, detail,
+                   snapshot_id, previous_snapshot_id, run_id, dedupe_key, detected_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, now())
+                on conflict (workspace_id, dedupe_key) where dedupe_key is not null do nothing
+                returning id""",
+            (gen_id("sig"), workspace_id, source, competitor_id, title, summary, url,
+             json.dumps(detail or {}), snapshot_id, previous_snapshot_id, run_id, dedupe_key),
+        )
+        row = await cur.fetchone()
+        if row:
+            return str(row[0]), True
+        cur = await conn.execute(
+            "select id from signals where workspace_id = %s and dedupe_key = %s",
+            (workspace_id, dedupe_key),
+        )
+        existing = await cur.fetchone()
+    if not existing:
+        raise RuntimeError(f"signal insert for {dedupe_key!r} neither created nor found")
+    return str(existing[0]), False

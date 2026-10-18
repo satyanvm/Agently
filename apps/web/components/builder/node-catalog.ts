@@ -23,6 +23,10 @@ import {
   Megaphone,
   CalendarCheck,
   FlaskConical,
+  Radar,
+  Camera,
+  GitCompare,
+  Flag,
   type LucideIcon,
 } from "lucide-react";
 
@@ -107,6 +111,44 @@ export const NODE_CATALOG: NodeSpec[] = [
     icon: MessageSquare,
     tone: "text-accent",
     toneBg: "bg-accent-bg",
+  },
+
+  // ── Market intelligence (apps/reasoner/reasoner/intel_nodes.py) ─────────
+  {
+    id: "intel.watchCompetitors",
+    label: "Watch competitors",
+    description: "Check every registered competitor page and report what changed.",
+    kind: "tool",
+    icon: Radar,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.snapshotPage",
+    label: "Snapshot page",
+    description: "Store a page's visible text when it has a new version.",
+    kind: "tool",
+    icon: Camera,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.diffPage",
+    label: "Diff against last snapshot",
+    description: "Lines added and removed since the previous version.",
+    kind: "tool",
+    icon: GitCompare,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.recordSignal",
+    label: "Record signal",
+    description: "Save news, posts or reviews as traceable signals.",
+    kind: "tool",
+    icon: Flag,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
   },
 
   // ── Tools ───────────────────────────────────────────────────────────────
@@ -336,6 +378,34 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   ],
   "tool.browser": [
     { key: "urls", label: "URLs (one per line)", control: "textarea", placeholder: "https://example.com" },
+  ],
+  "intel.watchCompetitors": [
+    { key: "competitors", label: "Competitors (blank = all)", control: "text", placeholder: "Acme, Globex" },
+    { key: "pageKinds", label: "Page kinds (blank = all)", control: "text", placeholder: "pricing, changelog" },
+    { key: "ignore", label: "Ignore lines matching (one regex per line)", control: "textarea", help: "Timestamps, \"x minutes ago\" and copyright years are already ignored." },
+  ],
+  "intel.snapshotPage": [
+    { key: "url", label: "URL", control: "text", placeholder: "https://competitor.com/pricing" },
+    { key: "competitor", label: "Competitor (optional)", control: "text" },
+    { key: "pageKind", label: "Page kind", control: "select", options: ["pricing", "changelog", "blog", "careers", "other"] },
+    { key: "render", label: "Fetch with", control: "select", options: ["http", "browser"], help: "browser = Browserbase, for pages that only render with JavaScript." },
+    { key: "ignore", label: "Ignore lines matching (one regex per line)", control: "textarea", help: "Timestamps, \"x minutes ago\" and copyright years are already ignored." },
+  ],
+  "intel.diffPage": [
+    { key: "snapshotId", label: "Snapshot id", control: "text", placeholder: "{{outputs.snapshot.snapshotId}}" },
+    { key: "url", label: "URL (instead of snapshot id)", control: "text" },
+    { key: "recordSignal", label: "Record a signal on change", control: "select", options: ["true", "false"] },
+  ],
+  "intel.recordSignal": [
+    { key: "source", label: "Source", control: "select", options: ["news", "rss", "reddit", "hackernews", "review", "page_change", "other"] },
+    { key: "items", label: "Items expression (optional)", control: "text", placeholder: "outputs.news.articles" },
+    { key: "titleField", label: "Title field (with items)", control: "text", placeholder: "title" },
+    { key: "urlField", label: "URL field (with items)", control: "text", placeholder: "url" },
+    { key: "summaryField", label: "Summary field (with items)", control: "text" },
+    { key: "title", label: "Title (single signal)", control: "text" },
+    { key: "url", label: "URL (single signal)", control: "text" },
+    { key: "summary", label: "Summary (single signal)", control: "textarea" },
+    { key: "competitor", label: "Competitor (optional)", control: "text" },
   ],
   "tool.http": [
     { key: "method", label: "Method", control: "select", options: ["GET", "POST", "PUT", "PATCH", "DELETE"] },

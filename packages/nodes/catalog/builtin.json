@@ -78,6 +78,74 @@
       "credentials": []
     },
     {
+      "id": "intel.watchCompetitors",
+      "label": "Watch competitors",
+      "description": "Snapshot every registered page (pricing, changelog, blog, careers) of the chosen competitors and report what changed since the last check. Each change is recorded as a signal. The usual first step of a competitor playbook.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "competitor watch monitor track pricing changelog blog careers page changes diff market intelligence signal",
+      "config": [
+        { "key": "competitors", "label": "Competitors (names, comma-separated; blank = all)", "control": "text", "required": false, "placeholder": "Acme, Globex" },
+        { "key": "pageKinds", "label": "Page kinds (blank = all)", "control": "text", "required": false, "placeholder": "pricing, changelog", "help": "Any of pricing, changelog, blog, careers, other." },
+        { "key": "ignore", "label": "Ignore lines matching (one regex per line)", "control": "textarea", "required": false, "help": "Lines that change on every load but mean nothing (a visitor counter, a rotating quote). Timestamps, 'x minutes ago' and copyright years are already ignored." }
+      ],
+      "outputs": ["changed", "changes", "checked", "baselines", "failed", "text", "signalIds"],
+      "credentials": []
+    },
+    {
+      "id": "intel.snapshotPage",
+      "label": "Snapshot page",
+      "description": "Fetch a web page (plain HTTP, honouring robots.txt, or a real browser for JavaScript pages), reduce it to its visible text, and store it when it differs from the last stored version.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "snapshot page capture save web page version monitor scrape competitor",
+      "config": [
+        { "key": "url", "label": "URL", "control": "text", "required": true, "placeholder": "https://competitor.com/pricing" },
+        { "key": "competitor", "label": "Competitor (name, optional)", "control": "text", "required": false },
+        { "key": "pageKind", "label": "Page kind", "control": "select", "required": false, "options": ["pricing", "changelog", "blog", "careers", "other"] },
+        { "key": "render", "label": "Fetch with", "control": "select", "required": false, "options": ["http", "browser"] },
+        { "key": "ignore", "label": "Ignore lines matching (one regex per line)", "control": "textarea", "required": false, "help": "Lines that change on every load but mean nothing (a visitor counter, a rotating quote). Timestamps, 'x minutes ago' and copyright years are already ignored." }
+      ],
+      "outputs": ["snapshotId", "url", "title", "fetchedVia", "newVersion", "first", "contentHash", "text"],
+      "credentials": []
+    },
+    {
+      "id": "intel.diffPage",
+      "label": "Diff against last snapshot",
+      "description": "Compare a page snapshot with the version before it: lines added and removed. Records a page_change signal when this run found a new version.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "diff compare changes previous snapshot what changed page version",
+      "config": [
+        { "key": "snapshotId", "label": "Snapshot id", "control": "text", "required": false, "placeholder": "{{outputs.snapshot.snapshotId}}", "help": "From an upstream Snapshot page node. Or leave blank and set URL to diff that page's latest snapshot." },
+        { "key": "url", "label": "URL", "control": "text", "required": false },
+        { "key": "recordSignal", "label": "Record a signal on change", "control": "select", "required": false, "options": ["true", "false"] }
+      ],
+      "outputs": ["changed", "first", "summary", "added", "removed", "addedCount", "removedCount", "url", "pageKind", "snapshotId", "previousSnapshotId", "signalId"],
+      "credentials": []
+    },
+    {
+      "id": "intel.recordSignal",
+      "label": "Record signal",
+      "description": "Record a market signal (news article, RSS item, Reddit or Hacker News post, review) so drafts can be traced back to it. Give one title, or a list of items with the path to each item's title and URL. Items already recorded are not recorded twice.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "record signal save news article post review mention event traceability",
+      "config": [
+        { "key": "source", "label": "Source", "control": "select", "required": true, "options": ["news", "rss", "reddit", "hackernews", "review", "page_change", "other"] },
+        { "key": "items", "label": "Items expression (optional)", "control": "text", "required": false, "placeholder": "outputs.news.articles" },
+        { "key": "titleField", "label": "Title field (with items)", "control": "text", "required": false, "placeholder": "title" },
+        { "key": "urlField", "label": "URL field (with items)", "control": "text", "required": false, "placeholder": "url" },
+        { "key": "summaryField", "label": "Summary field (with items)", "control": "text", "required": false },
+        { "key": "title", "label": "Title (single signal)", "control": "text", "required": false },
+        { "key": "url", "label": "URL (single signal)", "control": "text", "required": false },
+        { "key": "summary", "label": "Summary (single signal)", "control": "textarea", "required": false },
+        { "key": "competitor", "label": "Competitor (name, optional)", "control": "text", "required": false }
+      ],
+      "outputs": ["signalIds", "count", "created", "duplicates"],
+      "credentials": []
+    },
+    {
       "id": "tool.http",
       "label": "HTTP request",
       "description": "Call any REST API or fetch any URL. The universal escape hatch for data sources without a dedicated node.",

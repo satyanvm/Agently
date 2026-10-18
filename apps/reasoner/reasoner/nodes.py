@@ -767,3 +767,7 @@ def _coerce(val: Any) -> Any:
 def _slug(s: str) -> str:
     out = "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-")
     return out or "report"
+
+
+# intel.* handlers live in their own module; importing it registers them.
+from . import intel_nodes  # noqa: E402,F401
