@@ -604,6 +604,19 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
    loops, worker restart while waiting), tests/test_approval_db.py (real
    Postgres + a fake Slack webhook), handler/approvals_test.go (409 when two
    people decide).
+   M13. Traceability — what happened AFTER the decision:
+        workflow.py _outcome: every node that runs, fails or is skipped
+        downstream of a decided approval is recorded against it
+        (approval.py record_outcome → approval_outcomes, with the link to the
+        published item when the output has one: url / permalink /
+        webViewLink …). Outcome ids are minted in workflow code with
+        workflow.uuid4() — deterministic on replay — so a retried activity
+        can't insert a duplicate.
+        services/approval_service.go History → GET /api/approvals/{id}/history:
+        the whole story oldest first (signal → run started → draft → decision →
+        outcomes → run finished with its cost) plus `published`: the outcomes
+        that succeeded AND acted outside Agently (integrations, output.*,
+        tool.http) — internal logic/AI steps are in the timeline, not there.
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
