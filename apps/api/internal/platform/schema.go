@@ -2,9 +2,18 @@ package platform
 
 import (
 	"context"
+	_ "embed"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Whole-file migrations applied at startup, embedded from schema/. Each is a
+// byte-for-byte copy of its packages/db/migrations file (schema_test.go checks
+// that), idempotent (`if not exists`), and runs in its own transaction.
+//
+//go:embed schema/0015_marketing_loop.sql
+var migration0015 string
 
 // schemaUpgrades are additive, idempotent column additions the code depends
 // on, applied at API startup so an existing database never runs against code
@@ -22,12 +31,17 @@ var schemaUpgrades = []string{
 	`alter table runs add column if not exists failure_handled_at timestamptz`,
 }
 
-// EnsureSchema applies schemaUpgrades.
+// EnsureSchema applies schemaUpgrades, then the embedded whole-file migrations.
 func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, stmt := range schemaUpgrades {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			return err
 		}
+	}
+	// No arguments → pgx uses the simple protocol, which accepts the file's
+	// several statements (and its begin/commit) in one call.
+	if _, err := pool.Exec(ctx, migration0015); err != nil {
+		return fmt.Errorf("apply 0015_marketing_loop.sql: %w", err)
 	}
 	return nil
 }

@@ -173,6 +173,78 @@ type CredentialRepo interface {
 	Delete(id domain.CredentialId) bool
 }
 
+/* ------------------- signal → approval loop (0015) ------------------- */
+
+// CompetitorPatch carries the mutable fields of a competitor update.
+type CompetitorPatch struct {
+	Name       *string
+	Website    *string
+	Pages      *[]domain.CompetitorPage
+	Notes      *string
+	UpdatedAt  *domain.Timestamp
+	ArchivedAt **domain.Timestamp // double pointer: set vs set-to-null (unarchive)
+}
+
+// CompetitorRepo stores the competitors a workspace watches. There is no hard
+// delete: snapshots and signals keep pointing at an archived competitor.
+type CompetitorRepo interface {
+	ListByWorkspace(workspaceID domain.WorkspaceId, includeArchived bool) []domain.Competitor
+	GetByID(id domain.CompetitorId) (domain.Competitor, bool)
+	Insert(competitor domain.Competitor) domain.Competitor
+	Update(id domain.CompetitorId, patch CompetitorPatch) (domain.Competitor, error)
+}
+
+// SnapshotRepo reads page versions. The reasoner's snapshot node writes them;
+// Insert exists for the in-memory store and tests.
+type SnapshotRepo interface {
+	ListByCompetitor(id domain.CompetitorId, limit int) []domain.PageSnapshot
+	ListByURL(workspaceID domain.WorkspaceId, url string, limit int) []domain.PageSnapshot
+	GetByID(id domain.PageSnapshotId) (domain.PageSnapshot, bool)
+	Insert(snapshot domain.PageSnapshot) domain.PageSnapshot
+}
+
+// SignalQuery filters List. Zero values mean "any"; Limit <= 0 means 100.
+type SignalQuery struct {
+	CompetitorID *domain.CompetitorId
+	RunID        *domain.RunId
+	Source       string
+	Since        *domain.Timestamp
+	Limit        int
+}
+
+type SignalRepo interface {
+	List(workspaceID domain.WorkspaceId, q SignalQuery) []domain.Signal // newest first
+	GetByID(id domain.SignalId) (domain.Signal, bool)
+	// Insert records a signal. When DedupeKey matches an existing signal in the
+	// workspace it returns that one (created=false) instead.
+	Insert(signal domain.Signal) (stored domain.Signal, created bool)
+}
+
+type BrandContextRepo interface {
+	Get(workspaceID domain.WorkspaceId) (domain.BrandContext, bool)
+	Upsert(brand domain.BrandContext) domain.BrandContext
+}
+
+// ApprovalQuery filters List. Zero values mean "any"; Limit <= 0 means 100.
+type ApprovalQuery struct {
+	Status *domain.ApprovalStatus
+	RunID  *domain.RunId
+	Limit  int
+}
+
+type ApprovalRepo interface {
+	List(workspaceID domain.WorkspaceId, q ApprovalQuery) []domain.Approval // newest first
+	GetByID(id domain.ApprovalId) (domain.Approval, bool)
+	// Insert is idempotent on (run, node, iteration): a retried open-request
+	// returns the existing row.
+	Insert(approval domain.Approval) domain.Approval
+	// Decide moves a PENDING approval to approved/rejected. Deciding one that is
+	// no longer pending is a Conflict, so two people can't both decide it.
+	Decide(id domain.ApprovalId, d domain.ApprovalDecision) (domain.Approval, error)
+	ListOutcomes(id domain.ApprovalId) []domain.ApprovalOutcome
+	InsertOutcome(outcome domain.ApprovalOutcome) domain.ApprovalOutcome
+}
+
 // Repositories is the full set of repositories handed to services.
 type Repositories struct {
 	Workspace     WorkspaceRepo
@@ -190,4 +262,9 @@ type Repositories struct {
 	Activity      ActivityRepo
 	Integrations  IntegrationRepo
 	Credentials   CredentialRepo
+	Competitors   CompetitorRepo
+	Snapshots     SnapshotRepo
+	Signals       SignalRepo
+	Brand         BrandContextRepo
+	Approvals     ApprovalRepo
 }

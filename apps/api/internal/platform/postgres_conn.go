@@ -64,6 +64,11 @@ func NewPostgresRepositories(pool *pgxpool.Pool, log Logger) *Repositories {
 		Activity:      &pgActivityRepo{s},
 		Integrations:  &pgIntegrationRepo{s},
 		Credentials:   &pgCredentialRepo{s},
+		Competitors:   &pgCompetitorRepo{s},
+		Snapshots:     &pgSnapshotRepo{s},
+		Signals:       &pgSignalRepo{s},
+		Brand:         &pgBrandRepo{s},
+		Approvals:     &pgApprovalRepo{s},
 	}
 }
 

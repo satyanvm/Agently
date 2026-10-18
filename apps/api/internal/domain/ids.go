@@ -31,6 +31,11 @@ type (
 	EventId           string
 	IntegrationId     string
 	CredentialId      string
+	CompetitorId      string
+	PageSnapshotId    string
+	SignalId          string
+	ApprovalId        string
+	ApprovalOutcomeId string
 )
 
 // EntityKind keys the IDPrefix map. The single place prefixes are declared.
@@ -56,6 +61,11 @@ const (
 	KindEvent           EntityKind = "event"
 	KindIntegration     EntityKind = "integration"
 	KindCredential      EntityKind = "credential"
+	KindCompetitor      EntityKind = "competitor"
+	KindPageSnapshot    EntityKind = "pageSnapshot"
+	KindSignal          EntityKind = "signal"
+	KindApproval        EntityKind = "approval"
+	KindApprovalOutcome EntityKind = "approvalOutcome"
 )
 
 // IDPrefix maps each entity kind to its id prefix.
@@ -79,6 +89,11 @@ var IDPrefix = map[EntityKind]string{
 	KindEvent:           "evt",
 	KindIntegration:     "int",
 	KindCredential:      "cred",
+	KindCompetitor:      "cmp",
+	KindPageSnapshot:    "snap",
+	KindSignal:          "sig",
+	KindApproval:        "apr",
+	KindApprovalOutcome: "out",
 }
 
 const base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -123,3 +138,8 @@ func NewActivityId() ActivityId               { return ActivityId(NewID(KindActi
 func NewEventId() EventId                     { return EventId(NewID(KindEvent)) }
 func NewIntegrationId() IntegrationId         { return IntegrationId(NewID(KindIntegration)) }
 func NewCredentialId() CredentialId           { return CredentialId(NewID(KindCredential)) }
+func NewCompetitorId() CompetitorId           { return CompetitorId(NewID(KindCompetitor)) }
+func NewPageSnapshotId() PageSnapshotId       { return PageSnapshotId(NewID(KindPageSnapshot)) }
+func NewSignalId() SignalId                   { return SignalId(NewID(KindSignal)) }
+func NewApprovalId() ApprovalId               { return ApprovalId(NewID(KindApproval)) }
+func NewApprovalOutcomeId() ApprovalOutcomeId { return ApprovalOutcomeId(NewID(KindApprovalOutcome)) }

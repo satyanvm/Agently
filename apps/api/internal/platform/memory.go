@@ -59,6 +59,12 @@ type store struct {
 	activity     []domain.ActivityEvent
 	integrations []domain.Integration
 	credentials  []domain.Credential
+	competitors  []domain.Competitor
+	snapshots    []domain.PageSnapshot
+	signals      []domain.Signal
+	brand        map[domain.WorkspaceId]domain.BrandContext
+	approvals    []domain.Approval
+	outcomes     []domain.ApprovalOutcome
 	// failureHandled marks failed runs the failure watcher already claimed.
 	failureHandled map[domain.RunId]bool
 }
@@ -99,6 +105,11 @@ func NewMemoryRepositories(data MemoryData) *Repositories {
 		Activity:      &activityRepo{s},
 		Integrations:  &integrationRepo{s},
 		Credentials:   &credentialRepo{s},
+		Competitors:   &competitorRepo{s},
+		Snapshots:     &snapshotRepo{s},
+		Signals:       &signalRepo{s},
+		Brand:         &brandRepo{s},
+		Approvals:     &approvalRepo{s},
 	}
 }
 
