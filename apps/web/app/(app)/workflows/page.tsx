@@ -52,17 +52,17 @@ export default function WorkflowsPage() {
   return (
     <>
       <TopBar
-        crumbs={[{ label: "Workflows" }]}
+        crumbs={[{ label: "Playbooks" }]}
         actions={
           <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" /> New workflow
+            <Plus className="size-4" /> New playbook
           </Button>
         }
       />
       <PageContainer>
         <PageTitle
-          title="Workflows"
-          subtitle="Reusable agent crews you can launch, schedule, or trigger from events."
+          title="Playbooks"
+          subtitle="What to watch, what to draft and who approves it, described in plain English. Run them on demand, on a schedule or from an event."
         />
 
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">

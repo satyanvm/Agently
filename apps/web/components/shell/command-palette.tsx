@@ -30,7 +30,7 @@ interface Item {
 
 const NAV_ITEMS: Item[] = [
   { id: "dash", label: "Dashboard", hint: "Overview", icon: LayoutDashboard, href: "/dashboard", group: "Navigate" },
-  { id: "wf", label: "Workflows", hint: "All workflows", icon: Workflow, href: "/workflows", group: "Navigate" },
+  { id: "wf", label: "Playbooks", hint: "All playbooks", icon: Workflow, href: "/workflows", group: "Navigate" },
   { id: "runs", label: "Runs", hint: "Execution history", icon: ListTree, href: "/runs", group: "Navigate" },
   { id: "agents", label: "Agents", hint: "Agent library", icon: Bot, href: "/agents", group: "Navigate" },
   { id: "browser", label: "Browser Sessions", hint: "Live browsers", icon: Globe, href: "/browser", group: "Navigate" },

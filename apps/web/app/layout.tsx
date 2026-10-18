@@ -4,9 +4,9 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 
 export const metadata: Metadata = {
-  title: "Agently — The cloud for autonomous agents",
+  title: "Agently — Competitor signals to approved marketing",
   description:
-    "Deploy autonomous AI agent workflows that keep running after you disconnect. Monitor live logs, browser activity, multi-agent graphs, cost and runtime — in one premium control plane.",
+    "Agently watches your competitors and the market, drafts the marketing response in your brand voice, and publishes only what a person approves — with every item traceable to the signal that caused it.",
   metadataBase: new URL("https://agently.dev"),
 };
 

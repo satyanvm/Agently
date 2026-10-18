@@ -82,7 +82,7 @@ export function CreateWorkflowDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} className="max-w-[620px]">
       <DialogHeader
-        title="New workflow from a prompt"
+        title="New playbook from a prompt"
         subtitle="Describe the agent crew you want. We compile it into a runnable graph."
         onClose={() => onOpenChange(false)}
       />
