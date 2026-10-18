@@ -540,6 +540,23 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
    L5. apps/reasoner/reasoner/engine.py (db.add_usage) and db.py
        set_langfuse_trace — the cost + trace half of traceability.
 
+  Built so far (Phase 2, in reading order):
+   M1. packages/db/migrations/0015_marketing_loop.sql — read the table
+       comments: competitors, page_snapshots (one row per DISTINCT version of
+       a page), signals (dedupe_key stops the same news item counting twice),
+       brand_context, approvals (unique per run+node+iteration, so a retried
+       activity can't open two), approval_outcomes (what got published).
+   M2. apps/api/internal/domain/marketing.go — the Go nouns for those tables.
+   M3. apps/api/internal/platform/repositories.go (bottom), memory_marketing.go,
+       postgres_marketing.go — look at pgApprovalRepo.Decide: the
+       `where status='pending'` guard makes a decision atomic, so two people
+       clicking Approve at once can't both win (the second gets 409 Conflict).
+   M4. apps/api/internal/platform/schema.go + schema_test.go — the API applies
+       0015 at startup from an embedded copy; the test fails if the copy and
+       packages/db/migrations drift apart.
+   Test: marketing_repos_test.go runs ONE contract against both the memory
+   store and real Postgres (AGENTLY_TEST_DATABASE_URL, see RUNBOOK.md).
+
   What the loop still needs (being built; this part gets file paths as each
   piece lands):
     * Competitor registry + page snapshots in Postgres + "what changed since
