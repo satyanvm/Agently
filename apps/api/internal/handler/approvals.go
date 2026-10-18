@@ -45,3 +45,12 @@ func decideApproval(p *services.Platform) http.HandlerFunc {
 		})
 	}
 }
+
+func approvalHistory(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			h, err := p.Approvals.History(domain.ApprovalId(chi.URLParam(r, "id")))
+			return h, http.StatusOK, err
+		})
+	}
+}

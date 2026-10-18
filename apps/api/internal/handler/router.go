@@ -81,6 +81,7 @@ func NewRouter(p *services.Platform) chi.Router {
 		// Approvals: drafts waiting for a person (services/approval_service.go).
 		r.Get("/approvals", listApprovals(p))
 		r.Get("/approvals/{id}", getApproval(p))
+		r.Get("/approvals/{id}/history", approvalHistory(p))
 		r.Post("/approvals/{id}/decision", decideApproval(p))
 
 		// Browser sign-in for credential types whose piece declares OAuth2.

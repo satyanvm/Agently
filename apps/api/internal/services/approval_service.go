@@ -6,9 +6,14 @@ package services
 //
 //	GET  /api/approvals[?status&runId&limit]   newest first, with the causing signal
 //	GET  /api/approvals/{id}                   + signals, run (cost, trace), outcomes
+//	GET  /api/approvals/{id}/history           signal → run → draft → decision → published, oldest first
 //	POST /api/approvals/{id}/decision          {decision, content?, decidedBy, note?}
 
 import (
+	"sort"
+	"strconv"
+	"strings"
+
 	"github.com/agently/api/internal/domain"
 	"github.com/agently/api/internal/domain/validate"
 	"github.com/agently/api/internal/platform"
@@ -134,4 +139,108 @@ func (s *ApprovalService) Decide(id domain.ApprovalId, in validate.DecisionInput
 		return ApprovalDetail{}, err
 	}
 	return s.Get(id)
+}
+
+// HistoryEvent is one step of an approval's story, oldest first.
+type HistoryEvent struct {
+	At     domain.Timestamp `json:"at"`
+	Kind   string           `json:"kind"` // signal | run_started | draft | decision | outcome | run_finished
+	Title  string           `json:"title"`
+	Detail string           `json:"detail,omitempty"`
+	URL    string           `json:"url,omitempty"`
+	Status string           `json:"status,omitempty"`
+	Ref    string           `json:"ref,omitempty"` // id of the signal / run / approval / outcome
+}
+
+// ApprovalHistory answers, for one draft: which signal caused it, which run
+// drafted it and what that run cost, who decided and when, and what was
+// published as a result.
+type ApprovalHistory struct {
+	ApprovalDetail
+	Edited bool `json:"edited"` // approved text differs from the draft
+	// Outcomes that succeeded AND acted outside Agently (an integration, an
+	// output.* or an HTTP call) — what actually went out. Every outcome,
+	// internal steps included, is still in Outcomes and the timeline.
+	Published []domain.ApprovalOutcome `json:"published"`
+	Timeline  []HistoryEvent           `json:"timeline"`
+}
+
+func (s *ApprovalService) History(id domain.ApprovalId) (ApprovalHistory, error) {
+	d, err := s.Get(id)
+	if err != nil {
+		return ApprovalHistory{}, err
+	}
+	h := ApprovalHistory{ApprovalDetail: d, Published: []domain.ApprovalOutcome{}, Timeline: []HistoryEvent{}}
+	h.Edited = d.FinalContent != nil && *d.FinalContent != d.Draft
+	add := func(e HistoryEvent) {
+		if e.At != "" {
+			h.Timeline = append(h.Timeline, e)
+		}
+	}
+	for _, sg := range d.Signals {
+		add(HistoryEvent{At: sg.DetectedAt, Kind: "signal", Title: sg.Title, Detail: sg.Summary, URL: sg.URL,
+			Status: sg.Source, Ref: string(sg.ID)})
+	}
+	if d.Run != nil && d.Run.StartedAt != nil {
+		add(HistoryEvent{At: *d.Run.StartedAt, Kind: "run_started",
+			Title: "Run #" + itoa(d.Run.Number) + " of " + d.Run.WorkflowName, Ref: string(d.Run.ID)})
+	}
+	draft := HistoryEvent{At: d.CreatedAt, Kind: "draft", Title: "Draft sent for approval: " + d.Title, Ref: string(d.ID)}
+	if d.Assignee != "" {
+		draft.Detail = "Assigned to " + d.Assignee
+	}
+	add(draft)
+	if d.DecidedAt != nil {
+		e := HistoryEvent{At: *d.DecidedAt, Kind: "decision", Status: string(d.Status), Ref: string(d.ID)}
+		switch d.Status {
+		case domain.ApprovalApproved:
+			e.Title = "Approved by " + deref(d.DecidedBy)
+			if h.Edited {
+				e.Title += " (edited)"
+			}
+		case domain.ApprovalRejected:
+			e.Title = "Rejected by " + deref(d.DecidedBy)
+		case domain.ApprovalTimedOut:
+			e.Title = "Timed out with no decision"
+		default:
+			e.Title = string(d.Status)
+		}
+		e.Detail = deref(d.DecisionNote)
+		add(e)
+	}
+	for _, o := range d.Outcomes {
+		title := o.NodeKey + " (" + o.NodeType + ")"
+		add(HistoryEvent{At: o.OccurredAt, Kind: "outcome", Title: title, Detail: o.Summary, URL: o.URL,
+			Status: o.Status, Ref: string(o.ID)})
+		if o.Status == "succeeded" && actsExternally(o.NodeType) {
+			h.Published = append(h.Published, o)
+		}
+	}
+	if d.Run != nil && d.Run.FinishedAt != nil {
+		add(HistoryEvent{At: *d.Run.FinishedAt, Kind: "run_finished", Status: string(d.Run.Status),
+			Title: "Run " + string(d.Run.Status) + ", cost $" + strconv.FormatFloat(d.Run.CostUsd, 'f', 4, 64),
+			Ref:   string(d.Run.ID)})
+	}
+	// ISO timestamps from every repository share one format, so they sort as text.
+	sort.SliceStable(h.Timeline, func(i, j int) bool { return h.Timeline[i].At < h.Timeline[j].At })
+	return h, nil
+}
+
+// actsExternally: integration and output nodes reach the outside world;
+// triggers, AI, logic, intel and approval steps don't.
+func actsExternally(nodeType string) bool {
+	switch strings.SplitN(nodeType, ".", 2)[0] {
+	case "trigger", "agent", "logic", "intel", "human":
+		return false
+	case "tool":
+		return nodeType == "tool.http"
+	}
+	return true
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
