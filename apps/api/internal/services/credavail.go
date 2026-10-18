@@ -119,5 +119,12 @@ func promptNamesService(lowerPrompt string, n CatalogNode, cat *Catalog) bool {
 			return true
 		}
 	}
+	// The ways people name destinations that don't spell the piece's slug:
+	// "on X" / "a tweet" (twitter), "a Google Doc" (google-docs).
+	for _, d := range namedDestinations {
+		if d.cluster == n.Cluster && d.pattern.MatchString(lowerPrompt) {
+			return true
+		}
+	}
 	return false
 }

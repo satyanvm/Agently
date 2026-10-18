@@ -135,8 +135,37 @@ func publishingErrors(nodes []domain.GraphNode) []string {
 				"depend on it, and publish {{outputs.<approval node>.content}} (the approved, possibly edited text)",
 			n.Key, n.Type, approvalType, n.Key))
 	}
+	// A raw HTTP write to a publishing API would publish around both the
+	// integration's stored login and the list above.
+	for _, n := range nodes {
+		if n.Type != "tool.http" {
+			continue
+		}
+		method := strings.ToUpper(strings.TrimSpace(fmt.Sprint(n.Config["method"])))
+		if method == "" || method == "<NIL>" || method == "GET" {
+			continue
+		}
+		url := strings.ToLower(fmt.Sprint(n.Config["url"]))
+		for _, host := range publishingAPIHosts {
+			if strings.Contains(url, host) {
+				errs = append(errs, fmt.Sprintf(
+					"node '%s' (tool.http %s %s) publishes through a raw API call: use the integration node "+
+						"for that destination instead (it carries the signed-in account), behind a %s",
+					n.Key, method, host, approvalType))
+				break
+			}
+		}
+	}
 	sort.Strings(errs)
 	return errs
+}
+
+// publishingAPIHosts: APIs of the publishing destinations in publishing.json.
+var publishingAPIHosts = []string{
+	"api.twitter.com", "api.x.com", "api.linkedin.com", "graph.facebook.com", "graph.instagram.com",
+	"public-api.wordpress.com", "/wp-json/wp/v2/posts", "api.webflow.com", "/ghost/api/admin",
+	"api.hubapi.com/cms", "api.buffer.com", "api.bufferapp.com", "api.typefully.com",
+	"oauth.reddit.com/api/submit", "oauth.reddit.com/api/comment", "api.mailchimp.com", "bsky.social/xrpc",
 }
 
 // PublishingTypes lists the publishing node types among ids (for the

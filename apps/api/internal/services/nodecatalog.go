@@ -237,7 +237,9 @@ func nodeSchema(n CatalogNode, has func(CatalogNode, string) bool) string {
 				configured = false
 			}
 		}
-		state := "NOT CONFIGURED by the user — only use this node if the request names this service"
+		state := "NOT SIGNED IN yet — prefer a configured alternative for generic needs, but if the request " +
+			"NAMES this service as where something goes (\"a Google Doc\", \"on X\", \"on LinkedIn\"), use THIS node " +
+			"anyway: the user signs in before running. Never replace a named destination with output.report or tool.http"
 		if configured {
 			state = "CONFIGURED"
 		}

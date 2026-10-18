@@ -38,8 +38,8 @@ func TestCredentialAvailability(t *testing.T) {
 func TestNodeSchemaMarksMissingCredentials(t *testing.T) {
 	n := CatalogNode{ID: "pieces.x.y", Cluster: "pieces.x", Credentials: []CatalogCredential{{Key: "AP_X_AUTH"}}}
 	missing := nodeSchema(n, func(CatalogNode, string) bool { return false })
-	if !strings.Contains(missing, "NOT CONFIGURED") {
-		t.Fatalf("want NOT CONFIGURED, got %q", missing)
+	if !strings.Contains(missing, "NOT SIGNED IN") {
+		t.Fatalf("want NOT SIGNED IN, got %q", missing)
 	}
 	present := nodeSchema(n, func(CatalogNode, string) bool { return true })
 	if !strings.Contains(present, "— CONFIGURED") {

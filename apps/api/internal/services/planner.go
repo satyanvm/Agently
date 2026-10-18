@@ -259,6 +259,30 @@ used to fulfill the request. Be selective — at most %d. Return {"nodes": []} i
 	}
 	wg.Wait()
 
+	// A destination the prompt names (named_destinations.go) always offers its
+	// actions, even when the per-cluster model picked none of them.
+	available := make(map[string]bool, len(clusterKeys))
+	for _, k := range clusterKeys {
+		available[k] = true
+	}
+	for _, k := range namedClusters(prompt, available) {
+		if len(byCluster[k]) > 0 {
+			continue
+		}
+		var ids []string
+		for _, n := range cat.Clusters[k].Nodes {
+			if n.Kind == "action" {
+				ids = append(ids, n.ID)
+			}
+			if len(ids) == perCluster {
+				break
+			}
+		}
+		if len(ids) > 0 {
+			byCluster[k] = ids
+		}
+	}
+
 	if len(failures) > 0 {
 		// Deterministic message regardless of goroutine completion order.
 		msgs := make([]string, len(failures))
@@ -272,6 +296,14 @@ used to fulfill the request. Be selective — at most %d. Return {"nodes": []} i
 
 	// routed doubles as the relevance order for the cap: most relevant cluster first.
 	return capFairly(byCluster, routed, totalCap()), nil
+}
+
+// CandidateNodes runs the router + map phases alone and returns the node ids
+// the reduce model would be offered (beyond the built-ins). For
+// cmd/planeval's diagnostics: when a graph lacks a node, this shows whether
+// it was never a candidate or the reduce model passed it over.
+func CandidateNodes(ctx context.Context, prompt string) ([]string, error) {
+	return mapPhase(ctx, LoadCatalog(), prompt)
 }
 
 // capFairly trims the union of per-cluster selections to max. Its predecessor
@@ -523,6 +555,13 @@ MARKETING PLAYBOOKS (watch → decide → draft → approve → publish):
   the approved (possibly edited) text, never the raw draft.
 - Approvals also guard customer-facing email and anything else the user says should be
   reviewed; internal notifications (Slack to the team, a report to the user) need none.
+- Publish through the integration node for the destination (pieces.linkedin.*,
+  pieces.twitter.*, pieces.google-docs.*, pieces.gmail.*, …): it carries the signed-in
+  account. Never post through tool.http to a publishing API (the validator rejects it).
+  "Save it in a Google Doc" means a pieces.google-docs node, not output.report.
+- Never invent competitor names or other facts the user didn't give. Leave
+  intel.watchCompetitors' competitors empty (= every registered competitor) unless the
+  user named specific ones; never put example names like "Acme" in defaultInput.
 
 NODE TYPES AVAILABLE:
 
