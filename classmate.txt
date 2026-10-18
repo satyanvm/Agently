@@ -648,6 +648,21 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
         runs once if <12 h late, else it's skipped), next() for "next run".
         Tests: schedule_test.go (incl. a Monday-only weekly schedule driven
         through SaveGraph + Scheduler.Tick, and switching to manual stopping it).
+   M17. "Nothing publishes without approval", enforced three times from ONE
+        list — packages/nodes/publishing.json (which piece actions post
+        publicly: LinkedIn, X, WordPress, Webflow, Mailchimp send_campaign …;
+        Slack-to-team, email and docs deliberately NOT on it):
+          apps/api/internal/services/publishing.go publishingErrors — every
+            publishing node needs a human.approval among its ANCESTORS (an
+            approval on a sibling branch doesn't count). Called from
+            validateGraph, so the planner's repair loop must fix it, and from
+            SaveGraph, so the builder can't save it.
+          apps/reasoner/reasoner/publishing.py — load_graph refuses to run an
+            old graph that breaks the rule (defence in depth).
+          A Go test fails if the list names an action the pieces index lacks.
+        planner.go reduceSystemPrompt "MARKETING PLAYBOOKS" — the guidance that
+        makes prompts come out as watch → branch → analyse → draft (brand) →
+        approve (assignee from the prompt) → publish {{outputs.<approval>.content}}.
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
