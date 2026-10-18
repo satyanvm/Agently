@@ -257,6 +257,12 @@ func (r *pgWorkflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (doma
 	if patch.Settings != nil {
 		b.add("settings", jsonArg(*patch.Settings))
 	}
+	if patch.Trigger != nil {
+		b.add("trigger", string(*patch.Trigger))
+	}
+	if patch.Schedule != nil {
+		b.add("schedule", strArg(*patch.Schedule))
+	}
 	if patch.UpdatedAt != nil {
 		b.add("updated_at", tsArg(*patch.UpdatedAt))
 	}

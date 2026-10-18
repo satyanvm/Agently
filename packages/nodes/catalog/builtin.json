@@ -28,11 +28,11 @@
     {
       "id": "trigger.schedule",
       "label": "Schedule trigger",
-      "description": "Run on a cron schedule (e.g. every weekday at 9am).",
+      "description": "Run on a schedule: hourly, daily 09:00, weekdays 09:00, weekly mon 09:00, or a 5-field cron (0 9 * * 1-5). Times are in the scheduler timezone (SCHEDULER_TZ).",
       "kind": "trigger",
       "runtime": "builtin",
-      "search": "schedule cron daily hourly recurring timer trigger",
-      "config": [{ "key": "cron", "label": "Cron", "control": "text", "required": false, "placeholder": "0 9 * * 1-5" }],
+      "search": "schedule cron daily hourly weekly weekdays every monday recurring timer trigger",
+      "config": [{ "key": "cron", "label": "Schedule", "control": "text", "required": false, "placeholder": "weekly mon 09:00", "help": "hourly, daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or a 5-field cron like 0 9 * * 1-5. Saving the playbook makes this the schedule that runs." }],
       "outputs": ["input"],
       "credentials": []
     },

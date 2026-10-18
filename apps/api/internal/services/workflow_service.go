@@ -125,6 +125,9 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	schedule := ""
 	if input.Schedule != nil {
 		schedule = *input.Schedule
+		if err := ValidateSchedule(schedule); err != nil {
+			return domain.WorkflowSummary{}, domain.BadRequest("schedule: " + err.Error())
+		}
 	}
 	plan, err := CompilePrompt(s.compileContext(), promptText, input.Name, input.Email, schedule)
 	if err != nil {
@@ -152,6 +155,13 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	if len(tags) == 0 {
 		tags = plan.Tags
 	}
+	if plan.Schedule != nil && input.Schedule == nil {
+		// The planner wrote it; refuse a cadence the scheduler couldn't run
+		// rather than save a workflow that silently never fires.
+		if err := ValidateSchedule(*plan.Schedule); err != nil {
+			return domain.WorkflowSummary{}, domain.Upstream("The planner produced an invalid schedule. " + err.Error())
+		}
+	}
 	trigger := input.Trigger
 	if plan.Schedule != nil && (trigger == "" || trigger == domain.TriggerManual) {
 		trigger = domain.TriggerSchedule
@@ -175,7 +185,7 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	versionID := domain.NewWorkflowVersionId()
 	s.deps.Repos.Versions.Insert(domain.WorkflowVersion{
 		ID: versionID, WorkflowID: wfID, Version: 1, Note: "Compiled from prompt",
-		CreatedBy: ownerID, CreatedAt: now, Nodes: plan.Nodes,
+		CreatedBy: ownerID, CreatedAt: now, Nodes: withScheduleOnTrigger(plan.Nodes, wf.Schedule),
 	})
 	agentCount := len(plan.Nodes)
 	if _, err := s.deps.Repos.Workflows.Update(wfID, platform.WorkflowPatch{
@@ -226,6 +236,12 @@ func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (doma
 	if !ok {
 		return domain.WorkflowSummary{}, domain.NotFound("workflow")
 	}
+	// The trigger node decides whether and when the scheduler runs this
+	// workflow (schedule.go graphSchedule). Checked before anything is saved.
+	trigger, schedule, err := graphSchedule(nodes, wf)
+	if err != nil {
+		return domain.WorkflowSummary{}, err
+	}
 
 	// Next version = max existing + 1 (versions are 1-based and contiguous-ish).
 	next := 1
@@ -248,16 +264,14 @@ func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (doma
 	})
 
 	agentCount := len(nodes)
-	if _, err := s.deps.Repos.Workflows.Update(wf.ID, platform.WorkflowPatch{
+	updated, err := s.deps.Repos.Workflows.Update(wf.ID, platform.WorkflowPatch{
 		CurrentVersionID: &versionID, AgentCount: &agentCount, UpdatedAt: &now,
-	}); err != nil {
+		Trigger: trigger, Schedule: schedule,
+	})
+	if err != nil {
 		return domain.WorkflowSummary{}, err
 	}
-
-	wf.CurrentVersionID = &versionID
-	wf.AgentCount = agentCount
-	wf.UpdatedAt = now
-	return s.ToSummary(wf), nil
+	return s.ToSummary(updated), nil
 }
 
 // uniqueSlug returns base if free, else base-2, base-3, … so Create never fails on a

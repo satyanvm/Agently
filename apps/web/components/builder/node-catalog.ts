@@ -87,7 +87,7 @@ export const NODE_CATALOG: NodeSpec[] = [
   {
     id: "trigger.schedule",
     label: "Schedule",
-    description: "Run on a cron schedule (e.g. every weekday at 9am).",
+    description: "Run hourly, daily, weekly or on a cron schedule.",
     kind: "trigger",
     icon: Clock,
     tone: "text-running",
@@ -374,7 +374,7 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "path", label: "Path", control: "text", placeholder: "/hooks/my-workflow" },
   ],
   "trigger.schedule": [
-    { key: "cron", label: "Cron", control: "text", placeholder: "0 9 * * 1-5" },
+    { key: "cron", label: "Schedule", control: "text", placeholder: "weekly mon 09:00", help: "hourly, daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or a 5-field cron like 0 9 * * 1-5. Saved with the playbook; times use SCHEDULER_TZ." },
   ],
   "agent.llm": [
     { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },

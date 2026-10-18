@@ -455,7 +455,7 @@ Return ONE JSON object:
 {
   "name": "short title",
   "description": "one sentence",
-  "schedule": "daily HH:MM" | "hourly" | "",
+  "schedule": "hourly" | "daily HH:MM" | "weekdays HH:MM" | "weekly <mon..sun> HH:MM" | "<5-field cron>" | "",
   "defaultInput": { "topic": "...", ... },
   "nodes": [
     { "key": "snake_case_unique", "type": "<node type id>", "name": "Human label",
@@ -468,7 +468,9 @@ GRAPH RULES (validated mechanically — violations are returned to you to fix):
 - "key" values are unique; every "dependsOn" entry names an existing key; no cycles.
 - Fill every required config field of a node's schema.
 - Start with exactly one trigger node: trigger.schedule when the user wants a cadence
-  (also set "schedule"), else trigger.manual. Triggers have no dependsOn.
+  (also set "schedule"; 24-hour times, e.g. "weekly mon 09:00" for "every Monday
+  morning", "0 9 1 * *" for "on the 1st of each month"), else trigger.manual.
+  Triggers have no dependsOn.
 - End with output node(s) matching how the user wants results delivered (email, slack,
   report). When in doubt, finish with output.report.
 
@@ -675,18 +677,45 @@ func parseTimeOfDay(lower string) (hh, mm int, ok bool) {
 	return hh, mm, true
 }
 
-// scheduleFrom infers a schedule string from the prompt. Daily cadence carries the
-// stated time of day ("every day at 9 am" → "daily 09:00"); a bare "morning" with no
-// time defaults to 09:00. The scheduler (services/scheduler.go) parses these strings.
+// scheduleFrom infers a schedule string from the prompt: hourly, daily, weekdays
+// ("every weekday", "business days") or weekly ("every Monday", "weekly" → Monday),
+// carrying the stated time of day ("every day at 9 am" → "daily 09:00"); a cadence
+// with no time defaults to 09:00. schedule.go parses these strings.
 func scheduleFrom(lower string) *string {
 	hh, mm, hasTime := parseTimeOfDay(lower)
 	daily := strings.Contains(lower, "every morning") || strings.Contains(lower, "each morning") ||
 		strings.Contains(lower, "morning") || strings.Contains(lower, "daily") ||
 		strings.Contains(lower, "every day") || strings.Contains(lower, "each day") ||
 		strings.Contains(lower, "every evening") || strings.Contains(lower, "every night")
+	weekday := -1
+	for _, w := range strings.FieldsFunc(lower, func(r rune) bool { return r < 'a' || r > 'z' }) {
+		if len(w) >= 6 && strings.HasSuffix(w, "day") { // monday … sunday (not "today")
+			if d, ok := dayFromWord(w); ok {
+				weekday = d
+				break
+			}
+		}
+	}
+	weekly := weekday >= 0 || strings.Contains(lower, "weekly") || strings.Contains(lower, "every week") ||
+		strings.Contains(lower, "each week")
+	weekdaysOnly := strings.Contains(lower, "weekday") || strings.Contains(lower, "every workday") ||
+		strings.Contains(lower, "business day")
+	if !hasTime {
+		hh, mm = 9, 0 // a cadence with no time of day runs at 09:00
+	}
+	at := pad2(hh) + ":" + pad2(mm)
 	switch {
 	case strings.Contains(lower, "every hour") || strings.Contains(lower, "hourly"):
 		s := "hourly"
+		return &s
+	case weekdaysOnly:
+		s := "weekdays " + at
+		return &s
+	case weekly:
+		if weekday < 0 {
+			weekday = 1 // "weekly" with no day: Monday
+		}
+		s := "weekly " + [7]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}[weekday] + " " + at
 		return &s
 	case daily || hasTime:
 		if !hasTime {

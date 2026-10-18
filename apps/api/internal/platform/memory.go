@@ -229,6 +229,12 @@ func (r *workflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (domain
 			if patch.Settings != nil {
 				w.Settings = *patch.Settings
 			}
+			if patch.Trigger != nil {
+				w.Trigger = *patch.Trigger
+			}
+			if patch.Schedule != nil {
+				w.Schedule = *patch.Schedule
+			}
 			if patch.UpdatedAt != nil {
 				w.UpdatedAt = *patch.UpdatedAt
 			}

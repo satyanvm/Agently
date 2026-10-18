@@ -32,6 +32,8 @@ type WorkflowPatch struct {
 	CurrentVersionID *domain.WorkflowVersionId
 	DefaultInput     *map[string]any
 	Settings         *domain.WorkflowSettings
+	Trigger          *domain.TriggerType
+	Schedule         **string // double pointer: set vs set-to-null
 	UpdatedAt        *domain.Timestamp
 	ArchivedAt       *domain.Timestamp
 }
