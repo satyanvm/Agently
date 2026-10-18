@@ -556,6 +556,26 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
        packages/db/migrations drift apart.
    Test: marketing_repos_test.go runs ONE contract against both the memory
    store and real Postgres (AGENTLY_TEST_DATABASE_URL, see RUNBOOK.md).
+   M5. apps/reasoner/reasoner/intel.py — the SIGNAL engine, pure functions:
+       html_to_text (stdlib HTMLParser, drops script/style/nav noise),
+       normalize_text (drops "5 minutes ago", "© 2026", bare timestamps — but
+       KEEPS numbers, because prices are the signal), diff_text (difflib), and
+       fetch_http (robots.txt honoured; 4xx/5xx/non-HTML raise FetchError).
+   M6. apps/reasoner/reasoner/intel_nodes.py — the four intel.* nodes. Read
+       snapshot_page (store a row only when the content hash changed) then
+       diff_snapshot: `changed` is true only when THIS run created the new
+       version, so an old change is never reported twice; the signal's
+       dedupe_key is the snapshot id for the same reason. _watch reports a
+       dead page in `failed` instead of failing the whole node.
+       browser.py browse_pages is the JavaScript-page path (Browserbase).
+   M7. packages/nodes/catalog/builtin.json (intel.*) — what the planner sees;
+       apps/web/components/builder/node-catalog.ts — what the builder shows.
+   M8. apps/api/internal/services/intel_service.go + handler/intel.go +
+       domain/validate/marketing.go — /api/competitors, /api/signals,
+       /api/snapshots. DELETE archives (history must survive for traceability).
+   Tests: apps/reasoner/tests/test_intel.py (a local HTTP server whose pricing
+   page changes between runs: baseline → unchanged → changed → signal),
+   apps/api/internal/handler/intel_test.go, services/intel_graph_test.go.
 
   What the loop still needs (being built; this part gets file paths as each
   piece lands):
