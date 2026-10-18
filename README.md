@@ -58,12 +58,25 @@ together.
 
 ## Status
 
-The engine is in place: the prompt-to-graph planner, Temporal durability, the
-pieces worker, credentials and OAuth sign-in, schedules and triggers, and the
-GDELT, RSS, Reddit, Hacker News, HTTP and Browserbase nodes. The approval node
-and inbox, competitor snapshots and diffs, brand context and the ready-made
-playbooks are being built. See `product.md` for the first-version scope and
-`docs/product-direction.md` for the reasoning and competitors.
+Built and tested end to end on a local stack:
+- **Signals:** competitors and their pages, page snapshots and diffs, and
+  signals from news, RSS, Reddit and Hacker News.
+- **Approval:** the durable approval step, with Slack and email notifications
+  (tested against a stand-in webhook so far, not real Slack or email).
+- **Web app:** the Inbox (edit, approve, reject, full history), plus the
+  Competitors and Brand pages.
+- **Drafting:** brand-aware drafts.
+- **Scheduling:** weekly and cron schedules.
+- **Approval rule:** no publishing step without an approval before it,
+  enforced when planning, saving and running.
+- **Playbooks:** three ready-made ones (competitor pricing change, competitor
+  feature launch, weekly content plan).
+
+**Not yet tested against real accounts:** publishing to Google Docs, Gmail,
+LinkedIn and X. Every integration loads and its sign-in is ready; see
+`docs/integrations-status.md` for what each needs. `DEMO.md` walks through
+the whole loop. `product.md` has the scope and `docs/product-direction.md`
+the reasoning and competitors.
 
 ## Architecture
 

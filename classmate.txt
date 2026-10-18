@@ -663,13 +663,59 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
         planner.go reduceSystemPrompt "MARKETING PLAYBOOKS" — the guidance that
         makes prompts come out as watch → branch → analyse → draft (brand) →
         approve (assignee from the prompt) → publish {{outputs.<approval>.content}}.
+   M18. Integrations reality check — docs/integrations-status.md. All 707
+        Activepieces packages load; what each publishing integration needs to
+        sign in. oauth_service.go oauthScopeOverride: OAUTH_<SLUG>_SCOPES —
+        LinkedIn's piece asks for company-page scopes only LinkedIn-approved
+        apps get, and LinkedIn rejects the WHOLE sign-in otherwise; asking for
+        "openid profile email w_member_social" makes personal posts work.
+   M19. Ready-made playbooks — packages/nodes/playbooks/*.json (pricing change,
+        feature launch, weekly content plan), served and installed by
+        apps/api/internal/services/playbooks.go (no AI compile: the template's
+        graph + your inputs; a single stored login is attached automatically).
+        playbooks_test.go runs every template through validateGraph +
+        validateRefs and checks every integration step sits behind an
+        approval — it caught a real template bug (steps reading
+        outputs.assess without depending on it).
+        Web: components/playbook-picker.tsx in the new-playbook dialog.
+   M20. Three engine features the playbooks needed:
+        * agent.llm responseFormat=json (nodes.py parse_json_reply) → the
+          reply lands in outputs.<key>.data, so a branch can test
+          outputs.assess.data.verdict == better and a loop can iterate
+          outputs.rank.data.opportunities. Not JSON → the node fails.
+        * logic.wait (waits.py + workflow.py _wait) — a durable Temporal timer
+          (workflow.sleep). from=run_start gives absolute slots: post 1 at
+          +24 h, post 2 at +48 h, instead of waits piling up in a loop.
+        * workflow.py _fan_out/_advance — a loop's items each open their
+          approvals FIRST, then finish in order. Without it, post 2 couldn't
+          reach the Inbox until post 1 was approved, waited AND published.
+   M21. apps/api/cmd/planeval/graphs.go (`go run ./cmd/planeval -graphs`) —
+        compiles ten plain-English playbook prompts through the real planner
+        and checks the graphs: right signal steps, an approval assigned to the
+        person named, brand on drafts, the right schedule, no invented
+        competitor names. An eval (costs model calls), not a CI test.
+        What its first runs exposed, and the fixes (a good interview story):
+          * "save it in a Google Doc" / "post it on X" came out as a report
+            or a raw HTTP call. The integrations WERE candidates; the
+            credential validator (credavail.go promptNamesService) threw
+            them out because "on X" doesn't spell "twitter" and "Google Doc"
+            doesn't spell "google-docs". named_destinations.go now teaches
+            both the router (always offer a named destination) and that
+            check how people actually name these products.
+          * a raw tool.http POST to a publishing API is rejected
+            (publishing.go publishingAPIHosts) — it would publish around the
+            signed-in integration and the approval list.
+          * the planner invented competitor names ("Acme, Globex") as a
+            filter; the prompt now forbids it and the eval checks for it.
+   DEMO.md walks the whole loop on the pricing playbook, with
+   scripts/demo_competitor_site.py standing in for a competitor and Slack.
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
    deadline for free.
 
-  What the loop still needs (being built; this part gets file paths as each
-  piece lands):
+  What the loop still needed when Phase 2 started (all built now — see M1–M21
+  above for where each one lives):
     * Competitor registry + page snapshots in Postgres + "what changed since
       last time" diffs, exposed as planner nodes.
     * A human-approval node: the run pauses durably (Temporal signal with a

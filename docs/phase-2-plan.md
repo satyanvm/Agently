@@ -1,6 +1,13 @@
 # Phase 2 plan: first version of the signal → approved-action loop
 
-Status: **approved decisions recorded** (2026-10-18). Nothing below is built yet.
+Status (2026-10-18): steps 1–12 are built and tested on the local stack.
+Still open:
+- **Live publishing:** Google Docs, Gmail, LinkedIn and X haven't been tested
+  against real accounts. That waits for the sign-in apps described in
+  `docs/integrations-status.md`.
+- **Two choices for the user:**
+  - Whether customer email should also require approval.
+  - Whether a new schedule should fire right after it's created.
 
 ## Design in one page
 
