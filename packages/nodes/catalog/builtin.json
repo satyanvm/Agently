@@ -155,7 +155,7 @@
     {
       "id": "output.email",
       "label": "Send email",
-      "description": "Deliver an email over the platform SMTP seam; records intent when SMTP is unconfigured.",
+      "description": "Send an email over the platform SMTP server. Fails the node when SMTP is not configured or delivery fails.",
       "kind": "output",
       "runtime": "builtin",
       "search": "email send mail deliver notify digest smtp",
@@ -170,7 +170,7 @@
     {
       "id": "output.slack",
       "label": "Send to Slack",
-      "description": "Post a message to a Slack incoming webhook; records intent when unconfigured.",
+      "description": "Post a message to a Slack incoming webhook. Fails the node when the webhook URL is missing or Slack rejects the post.",
       "kind": "output",
       "runtime": "builtin",
       "search": "slack post webhook message notify output",
