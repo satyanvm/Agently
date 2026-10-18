@@ -617,6 +617,17 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
         outcomes → run finished with its cost) plus `published`: the outcomes
         that succeeded AND acted outside Agently (integrations, output.*,
         tool.http) — internal logic/AI steps are in the timeline, not there.
+   M14. The web side (apps/web):
+        lib/marketing.ts — every call above, typed; rememberedName keeps the
+        approver's name in localStorage (no user accounts yet).
+        app/(app)/inbox/page.tsx (list, polls every 5s) and inbox/[id]/page.tsx
+        (edit → "Approve with edits" sends `content` only when the text
+        changed; keeps polling after a decision so outcomes appear live).
+        app/(app)/competitors/page.tsx, app/(app)/brand/page.tsx.
+        components/shell/sidebar.tsx — "Playbooks" is only a LABEL: routes
+        and the API still say /workflows.
+        components/ui/dialog.tsx — portaled to <body> (a dialog inside the
+        page's stacking layer was drawn under the fixed sidebar).
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
