@@ -66,6 +66,18 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Put("/credentials/{id}", updateCredential(p))
 		r.Delete("/credentials/{id}", deleteCredential(p))
 
+		// Market intelligence: competitors we watch, the page versions and
+		// signals the reasoner's intel.* nodes record (services/intel_service.go).
+		r.Get("/competitors", listCompetitors(p))
+		r.Post("/competitors", createCompetitor(p))
+		r.Get("/competitors/{id}", getCompetitor(p))
+		r.Put("/competitors/{id}", updateCompetitor(p))
+		r.Delete("/competitors/{id}", archiveCompetitor(p))
+		r.Get("/competitors/{id}/snapshots", listCompetitorSnapshots(p))
+		r.Get("/snapshots/{id}", getSnapshot(p))
+		r.Get("/signals", listSignals(p))
+		r.Get("/signals/{id}", getSignal(p))
+
 		// Browser sign-in for credential types whose piece declares OAuth2.
 		// start/callback are popup navigations (302s), not JSON endpoints.
 		r.Get("/oauth/callback", oauthCallback(p))
