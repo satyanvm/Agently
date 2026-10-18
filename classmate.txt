@@ -576,6 +576,38 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
    Tests: apps/reasoner/tests/test_intel.py (a local HTTP server whose pricing
    page changes between runs: baseline → unchanged → changed → signal),
    apps/api/internal/handler/intel_test.go, services/intel_graph_test.go.
+   M9. apps/reasoner/reasoner/workflow.py — human.approval inside
+       DynamicWorkflow. Read in this order:
+         approval_decided (the @workflow.signal: it only WAKES the run; the
+           decision itself is read back from Postgres, the source of truth)
+         the `while remaining:` pass loop — a node waiting on an undecided
+           approval is set aside and the pass goes on, so every other branch
+           and every other approval request moves first. Why: the loop is
+           sequential; without this, draft #2 wouldn't reach the Inbox until
+           draft #1 was decided (a test caught exactly that).
+         _open_approval → _resolve: workflow.wait_condition(..., timeout=)
+           is a durable timer. No worker is held while waiting; a restarted
+           worker replays history and keeps waiting.
+   M10. apps/reasoner/reasoner/approval.py — the three activities:
+        open_approval (render draft, idempotent insert, Slack/email with the
+        Inbox link — best effort, recorded in approvals.notify),
+        set_waiting (runs.status paused ↔ running), resolve_approval (a
+        timeout that races a last-second decision keeps the decision).
+   M11. apps/reasoner/reasoner/dispatcher.py relay_decisions — the API never
+        talks to Temporal: it writes the decision; this loop sends the signal
+        and stamps signaled_at (same pattern as dispatching runs).
+   M12. apps/api/internal/services/approval_service.go + handler/approvals.go
+        — GET /api/approvals, GET /api/approvals/{id} (with signals, run cost,
+        Langfuse trace, outcomes), POST /api/approvals/{id}/decision.
+   Tests: tests/test_approval_workflow.py (Temporal time-skipping server:
+   approve-with-edit, reject, timeout skip/fail, two approvals open at once,
+   loops, worker restart while waiting), tests/test_approval_db.py (real
+   Postgres + a fake Slack webhook), handler/approvals_test.go (409 when two
+   people decide).
+   Interview angle: "why a signal and not polling the DB from the workflow?"
+   — workflow code can't do IO; polling would be an activity per tick filling
+   history. A signal is one event, and wait_condition's timeout gives the
+   deadline for free.
 
   What the loop still needs (being built; this part gets file paths as each
   piece lands):
