@@ -170,3 +170,23 @@ func (s *IntelService) GetSignal(id domain.SignalId) (domain.Signal, error) {
 	}
 	return sg, nil
 }
+
+// GetBrand returns the workspace's brand context; an empty one (never saved)
+// when there is none yet.
+//
+//	GET /api/brand
+//	PUT /api/brand   {voice, productFacts, positioning, avoidClaims, updatedBy}
+func (s *IntelService) GetBrand() domain.BrandContext {
+	b, ok := s.deps.Repos.Brand.Get(s.ws())
+	if !ok {
+		return domain.BrandContext{WorkspaceID: s.ws()}
+	}
+	return b
+}
+
+func (s *IntelService) UpdateBrand(in validate.BrandInput) domain.BrandContext {
+	return s.deps.Repos.Brand.Upsert(domain.BrandContext{
+		WorkspaceID: s.ws(), Voice: in.Voice, ProductFacts: in.ProductFacts, Positioning: in.Positioning,
+		AvoidClaims: in.AvoidClaims, UpdatedAt: s.now(), UpdatedBy: in.UpdatedBy,
+	})
+}

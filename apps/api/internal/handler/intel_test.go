@@ -156,3 +156,24 @@ func TestCompetitorsAPI(t *testing.T) {
 		t.Fatal("bad since should be rejected")
 	}
 }
+
+func TestBrandAPI(t *testing.T) {
+	_, h := intelServer(t)
+	rec, body := call(t, h, http.MethodGet, "/api/brand", nil)
+	if rec.Code != http.StatusOK || dataOf(body)["voice"] != "" || dataOf(body)["updatedAt"] != "" {
+		t.Fatalf("empty brand = %d %s", rec.Code, rec.Body.String())
+	}
+	rec, body = call(t, h, http.MethodPut, "/api/brand", map[string]any{
+		"voice": " Plain, direct, no hype. ", "productFacts": "SOC 2 Type II", "avoidClaims": "Never say 'best'", "updatedBy": "Satya",
+	})
+	if rec.Code != http.StatusOK || dataOf(body)["voice"] != "Plain, direct, no hype." || dataOf(body)["updatedAt"] == "" {
+		t.Fatalf("put brand = %d %s", rec.Code, rec.Body.String())
+	}
+	_, body = call(t, h, http.MethodGet, "/api/brand", nil)
+	if dataOf(body)["avoidClaims"] != "Never say 'best'" || dataOf(body)["updatedBy"] != "Satya" {
+		t.Fatalf("get after put = %#v", body)
+	}
+	if rec, _ := call(t, h, http.MethodPut, "/api/brand", map[string]any{"voice": strings.Repeat("x", 8001)}); rec.Code == http.StatusOK {
+		t.Fatal("oversized field accepted")
+	}
+}

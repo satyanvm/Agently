@@ -201,3 +201,32 @@ func ParseListApprovalsQuery(q url.Values) (ListApprovalsQuery, error) {
 	}
 	return out, nil
 }
+
+// BrandInput mirrors PUT /api/brand. Every field is replaced as given.
+type BrandInput struct {
+	Voice        string
+	ProductFacts string
+	Positioning  string
+	AvoidClaims  string
+	UpdatedBy    string
+}
+
+func ParseBrandInput(body map[string]any) (BrandInput, error) {
+	v := &ValidationError{}
+	in := BrandInput{
+		Voice:        strings.TrimSpace(getString(body, "voice")),
+		ProductFacts: strings.TrimSpace(getString(body, "productFacts")),
+		Positioning:  strings.TrimSpace(getString(body, "positioning")),
+		AvoidClaims:  strings.TrimSpace(getString(body, "avoidClaims")),
+		UpdatedBy:    strings.TrimSpace(getString(body, "updatedBy")),
+	}
+	for path, val := range map[string]string{"voice": in.Voice, "productFacts": in.ProductFacts,
+		"positioning": in.Positioning, "avoidClaims": in.AvoidClaims} {
+		v.stringMaxLen(path, val, 8000)
+	}
+	v.stringMaxLen("updatedBy", in.UpdatedBy, 120)
+	if v.HasErrors() {
+		return BrandInput{}, v
+	}
+	return in, nil
+}

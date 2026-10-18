@@ -77,6 +77,8 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/snapshots/{id}", getSnapshot(p))
 		r.Get("/signals", listSignals(p))
 		r.Get("/signals/{id}", getSignal(p))
+		r.Get("/brand", getBrand(p))
+		r.Put("/brand", updateBrand(p))
 
 		// Approvals: drafts waiting for a person (services/approval_service.go).
 		r.Get("/approvals", listApprovals(p))

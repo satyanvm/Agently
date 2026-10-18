@@ -113,3 +113,22 @@ func getSignal(p *services.Platform) http.HandlerFunc {
 		})
 	}
 }
+
+func getBrand(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) { return p.Intel.GetBrand(), http.StatusOK, nil })
+	}
+}
+
+func updateBrand(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			body, _ := decodeBody(r)
+			in, err := validate.ParseBrandInput(body)
+			if err != nil {
+				return nil, 0, err
+			}
+			return p.Intel.UpdateBrand(in), http.StatusOK, nil
+		})
+	}
+}
