@@ -1,10 +1,74 @@
 # Agently
 
-Agently is a durable execution platform for long-running, multi-agent workflows.
-The API and web app form the control plane; Temporal, the Python reasoner, and the
-Node pieces worker form the execution plane.
+**Intelligence tools tell you what happened. Agently does something about it.**
+
+Agently does competitor intelligence, marketing intelligence and marketing
+automation as one loop:
+
+```text
+detect a market signal → decide what it means → draft the marketing response
+        → a person approves → publish → record what happened
+```
+
+A competitor changes its pricing page. Agently notices the change and works out
+what it means for you. It then drafts an updated battlecard, a comparison-page
+edit, a note to at-risk customers and a talk track for sales. Each draft waits
+in an approval inbox until someone on the team edits, approves or rejects it.
+Only then does it publish, and the published item links back to the signal that
+caused it.
+
+## Who it is for
+
+B2B software companies with one to five marketers and no budget for enterprise
+intelligence suites. They need to watch competitors and react quickly, but
+can't pay for one tool that monitors and a second that executes.
+
+## How it works
+
+- **Signals we collect ourselves.** Agently doesn't resell a paid intelligence
+  feed. It reads competitor websites (pricing, changelog, blog and careers
+  pages), GDELT news, RSS, Reddit, Hacker News, review sites, and any page
+  reachable over plain HTTP or a real Browserbase browser.
+- **Playbooks in plain English.** Describe what should happen ("when a
+  competitor launches anything AI-related, draft a LinkedIn post in our CEO's
+  voice and send it to Rahul to approve"). The planner compiles it into a typed
+  workflow graph you can inspect and edit. You can also start from a ready-made
+  playbook.
+- **AI drafts, a person approves.** Nothing publishes without human approval.
+  The only exception is a small set of explicitly safe actions, such as pausing
+  scheduled posts during a brand crisis. Drafts use the workspace's brand
+  voice, product facts and claims to avoid, so they don't come out generic.
+- **Integrations.** Drafts publish through 700+ MIT-licensed Activepieces
+  integrations plus hand-written nodes: LinkedIn, X, WordPress, Webflow,
+  HubSpot, Buffer, Slack, Notion, Google Docs, Gmail and more.
+
+## Why durability and traceability matter
+
+A playbook can wait days for an approver. Workers restart, deploys happen and
+laptops sleep in the meantime, and the run has to resume exactly where it
+stopped. Every run is a Temporal workflow with one activity per node, so a
+crashed worker resumes at the node it was on, and a run waiting on a Temporal signal holds
+no worker at all.
+
+Every published item has to answer five questions: which signal caused it,
+which run drafted it, what it cost, who approved it and when it went out.
+Agently records each node's input and output, run logs, per-run model cost, and
+a Langfuse trace of every model call. The approval record ties all of it
+together.
+
+## Status
+
+The engine is in place: the prompt-to-graph planner, Temporal durability, the
+pieces worker, credentials and OAuth sign-in, schedules and triggers, and the
+GDELT, RSS, Reddit, Hacker News, HTTP and Browserbase nodes. The approval node
+and inbox, competitor snapshots and diffs, brand context and the ready-made
+playbooks are being built. See `product.md` for the first-version scope and
+`docs/product-direction.md` for the reasoning and competitors.
 
 ## Architecture
+
+The API and web app form the control plane. Temporal, the Python reasoner and
+the Node pieces worker form the execution plane.
 
 ```text
 Next.js web -> Go API -> Postgres
