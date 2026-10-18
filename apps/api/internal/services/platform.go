@@ -31,6 +31,7 @@ type Platform struct {
 	Credentials   *CredentialService
 	OAuth         *OAuthService
 	Intel         *IntelService
+	Approvals     *ApprovalService
 }
 
 // Options configure platform construction. Tests may provide in-memory
@@ -96,6 +97,7 @@ func NewPlatform(opts Options) *Platform {
 	logs := NewLogService(deps, emit)
 
 	credentials := NewCredentialService(deps)
+	intel := NewIntelService(deps)
 	return &Platform{
 		Repos:         repos,
 		Bus:           bus,
@@ -113,6 +115,7 @@ func NewPlatform(opts Options) *Platform {
 		Integrations:  NewIntegrationService(deps, &http.Client{Timeout: 20 * time.Second}),
 		Credentials:   credentials,
 		OAuth:         NewOAuthService(deps, credentials, &http.Client{Timeout: 20 * time.Second}),
-		Intel:         NewIntelService(deps),
+		Intel:         intel,
+		Approvals:     NewApprovalService(deps, intel),
 	}
 }

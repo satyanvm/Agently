@@ -140,3 +140,64 @@ func ParseListSignalsQuery(q url.Values) (ListSignalsQuery, error) {
 	}
 	return out, nil
 }
+
+// DecisionInput mirrors POST /api/approvals/{id}/decision.
+type DecisionInput struct {
+	Status    domain.ApprovalStatus
+	Content   *string // the edited draft; omitted = approve as written
+	DecidedBy string
+	Note      *string
+}
+
+func ParseDecisionInput(body map[string]any) (DecisionInput, error) {
+	v := &ValidationError{}
+	out := DecisionInput{}
+	switch d := getString(body, "decision"); d {
+	case "approved", "rejected":
+		out.Status = domain.ApprovalStatus(d)
+	default:
+		v.add("decision", "must be approved or rejected")
+	}
+	out.DecidedBy = strings.TrimSpace(getString(body, "decidedBy"))
+	v.stringRequired("decidedBy", out.DecidedBy)
+	v.stringMaxLen("decidedBy", out.DecidedBy, 120)
+	if hasKey(body, "content") {
+		c, ok := body["content"].(string)
+		if !ok {
+			v.add("content", "must be a string")
+		} else if strings.TrimSpace(c) == "" {
+			v.add("content", "must not be empty; reject the draft instead")
+		} else {
+			v.stringMaxLen("content", c, 100_000)
+			out.Content = &c
+		}
+	}
+	if hasKey(body, "note") {
+		n := strings.TrimSpace(getString(body, "note"))
+		v.stringMaxLen("note", n, 2000)
+		if n != "" {
+			out.Note = &n
+		}
+	}
+	if v.HasErrors() {
+		return DecisionInput{}, v
+	}
+	return out, nil
+}
+
+// ListApprovalsQuery mirrors GET /api/approvals.
+type ListApprovalsQuery struct {
+	Status string
+	RunID  string
+	Limit  int
+}
+
+func ParseListApprovalsQuery(q url.Values) (ListApprovalsQuery, error) {
+	v := &ValidationError{}
+	out := ListApprovalsQuery{Status: q.Get("status"), RunID: q.Get("runId"), Limit: v.parseLimit(q)}
+	v.enumValue("status", out.Status, domain.ValidApprovalStatuses)
+	if v.HasErrors() {
+		return ListApprovalsQuery{}, v
+	}
+	return out, nil
+}

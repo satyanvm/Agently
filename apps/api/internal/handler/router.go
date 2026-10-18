@@ -78,6 +78,11 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/signals", listSignals(p))
 		r.Get("/signals/{id}", getSignal(p))
 
+		// Approvals: drafts waiting for a person (services/approval_service.go).
+		r.Get("/approvals", listApprovals(p))
+		r.Get("/approvals/{id}", getApproval(p))
+		r.Post("/approvals/{id}/decision", decideApproval(p))
+
 		// Browser sign-in for credential types whose piece declares OAuth2.
 		// start/callback are popup navigations (302s), not JSON endpoints.
 		r.Get("/oauth/callback", oauthCallback(p))
