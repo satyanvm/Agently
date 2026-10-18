@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -8,6 +9,8 @@ import { cn } from "@/lib/utils";
  * A tiny modal primitive modeled on the existing command-palette overlay (same
  * backdrop + click-outside-to-close + stop-propagation), so we add no dependency.
  * Renders nothing when `open` is false; Escape and backdrop click both close.
+ * Portaled to <body>: page content sits in its own stacking layer under the
+ * fixed sidebar, so a modal rendered in place would be drawn beneath it.
  */
 export function Dialog({
   open,
@@ -29,9 +32,9 @@ export function Dialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[10vh]"
       onClick={() => onOpenChange(false)}
@@ -48,7 +51,8 @@ export function Dialog({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
