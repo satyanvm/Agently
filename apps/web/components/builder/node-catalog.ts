@@ -380,6 +380,7 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },
     { key: "prompt", label: "Prompt", control: "textarea", placeholder: "Use {{input.topic}} and upstream outputs…" },
     { key: "model", label: "Model", control: "select", options: ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"] },
+    { key: "brand", label: "Use brand context", control: "select", options: ["false", "true"], help: "On for drafting steps: adds the Brand page (voice, product facts, positioning, claims to avoid) to the system prompt. Fails if the Brand page is empty." },
   ],
   "agent.chat": [
     { key: "system", label: "System prompt", control: "textarea" },

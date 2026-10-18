@@ -731,3 +731,15 @@ async def insert_approval_outcome(
             (outcome_id, approval_id, run_id, node_key, node_type, status, summary, url,
              None if output is None else json.dumps(output)),
         )
+
+
+async def brand_context(workspace_id: str) -> dict[str, Any] | None:
+    """The workspace's brand context (0015 brand_context), or None if never saved."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """select voice, product_facts, positioning, avoid_claims, updated_at, updated_by
+                 from brand_context where workspace_id = %s""",
+            (workspace_id,),
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None

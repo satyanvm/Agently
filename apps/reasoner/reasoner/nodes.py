@@ -255,9 +255,46 @@ async def _trigger(ctx: NodeContext) -> NodeResult:
     return NodeResult(output={"input": ctx.run_input}, summary="Triggered")
 
 
+def wants_brand(ctx: NodeContext) -> bool:
+    """config.brand: true (bool or the string the builder stores)."""
+    val = ctx.node.get("config", {}).get("brand")
+    return val is True or str(val).strip().lower() in ("true", "1", "yes")
+
+
+_BRAND_SECTIONS = (
+    ("voice", "Voice — write in this tone"),
+    ("product_facts", "Product facts — the only product claims you may make"),
+    ("positioning", "Positioning — who we are for and why we win"),
+    ("avoid_claims", "Never say — claims to avoid"),
+)
+
+
+def brand_block(brand: dict[str, Any]) -> str:
+    """The system-prompt section a brand-aware drafting node gets."""
+    parts = [f"### {label}\n{str(brand.get(key) or '').strip()}"
+             for key, label in _BRAND_SECTIONS if str(brand.get(key) or "").strip()]
+    return ("## Brand context (from the workspace's Brand page — follow it strictly; "
+            "if the task conflicts with it, follow the brand context)\n\n" + "\n\n".join(parts))
+
+
+async def _brand_for(ctx: NodeContext) -> dict[str, Any]:
+    """Load the brand context or fail: a node marked brand-aware never
+    silently drafts without it."""
+    ws = await db.run_workspace_id(ctx.run_id)
+    brand = await db.brand_context(ws)
+    if not brand or not any(str(brand.get(k) or "").strip() for k, _ in _BRAND_SECTIONS):
+        raise RuntimeError("this step uses brand context (brand: true), but the Brand page is empty; "
+                           "fill in at least the voice, or turn brand off for this step")
+    return brand
+
+
 @handles("agent.llm", "agent.chat")
 async def _agent(ctx: NodeContext) -> NodeResult:
     system = render(_cfg(ctx, "system") or "You are a helpful agent.", ctx)
+    brand: dict[str, Any] | None = None
+    if wants_brand(ctx):
+        brand = await _brand_for(ctx)
+        system = f"{system}\n\n{brand_block(brand)}"
     prompt = render(_cfg(ctx, "prompt"), ctx)
     if not prompt.strip():
         # No explicit prompt: fall back to the run topic + upstream text so the
@@ -270,8 +307,16 @@ async def _agent(ctx: NodeContext) -> NodeResult:
 
     model = _cfg(ctx, "model") or CONFIG.model
     out = await llm.complete(ctx.run_id, ctx.node["key"], system=system, user=prompt, model=model)
+    output: dict[str, Any] = {"text": out.text, "model": model}
+    if brand is not None:
+        # Which version of the brand context shaped this draft (traceability).
+        saved = brand.get("updated_at")
+        output["brandContextUpdatedAt"] = saved.isoformat() if hasattr(saved, "isoformat") else str(saved or "")
+        await db.append_log(ctx.run_id, "info", "system", ctx.node["key"],
+                            f"Drafted with brand context saved {output['brandContextUpdatedAt']}"
+                            + (f" by {brand['updated_by']}" if brand.get("updated_by") else ""))
     return NodeResult(
-        output={"text": out.text, "model": model},
+        output=output,
         summary=_clip(out.text),
         tokens_in=out.tokens_in,
         tokens_out=out.tokens_out,
