@@ -178,3 +178,35 @@ func TestOAuthFamilyFallbackAndPopularApps(t *testing.T) {
 		}
 	}
 }
+
+// OAUTH_<SLUG>_SCOPES narrows what the consent screen asks for, e.g. LinkedIn
+// personal posting without the organization scopes LinkedIn must approve.
+func TestOAuthScopeOverride(t *testing.T) {
+	t.Setenv("OAUTH_ACME_CLIENT_ID", "cid")
+	t.Setenv("OAUTH_ACME_CLIENT_SECRET", "csecret")
+	p := newTestPlatform()
+	svc := p.OAuth
+	svc.loadOnce.Do(func() {})
+	svc.providers = map[string]PieceOAuth{"pieces.acme": {
+		AuthURL: "https://acme.test/authorize", TokenURL: "https://acme.test/token",
+		Scope: []string{"w_member_social", "w_organization_social", "rw_organization_admin"},
+	}}
+	scopeOf := func() string {
+		raw, err := svc.StartURL("pieces.acme", "Acme", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _ := url.Parse(raw)
+		return u.Query().Get("scope")
+	}
+	if got := scopeOf(); got != "w_member_social w_organization_social rw_organization_admin" {
+		t.Fatalf("default scopes = %q", got)
+	}
+	t.Setenv("OAUTH_ACME_SCOPES", "openid, profile email w_member_social")
+	if got := scopeOf(); got != "openid profile email w_member_social" {
+		t.Fatalf("overridden scopes = %q", got)
+	}
+	if st := svc.Status("pieces.acme"); st.ScopesEnv != "OAUTH_ACME_SCOPES" {
+		t.Fatalf("status should name the scopes env, got %+v", st)
+	}
+}

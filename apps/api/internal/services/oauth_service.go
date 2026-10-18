@@ -55,6 +55,8 @@ type OAuthAppStatus struct {
 	RedirectURL  string `json:"redirectUrl"`
 	ClientIDEnv  string `json:"clientIdEnv,omitempty"`
 	ClientSecEnv string `json:"clientSecretEnv,omitempty"`
+	// Optional: narrows the scopes requested at sign-in (oauthScopeOverride).
+	ScopesEnv string `json:"scopesEnv,omitempty"`
 }
 
 type oauthState struct {
@@ -107,6 +109,7 @@ func (s *OAuthService) Status(credType string) OAuthAppStatus {
 	st.Supported = true
 	idEnv, secEnv := oauthEnvNames(credType)
 	st.ClientIDEnv, st.ClientSecEnv = idEnv, secEnv
+	st.ScopesEnv = oauthScopesEnv(credType)
 	id, sec := oauthClient(credType)
 	st.Configured = id != "" && sec != ""
 	return st
@@ -135,8 +138,15 @@ func (s *OAuthService) StartURL(credType, name, credentialID string, props map[s
 	if err != nil || authURL.Host == "" || strings.Contains(authURL.Host, "{") {
 		return "", domain.BadRequest("fill in the connection fields before signing in")
 	}
-	scopes := make([]string, 0, len(p.Scope))
-	for _, sc := range p.Scope {
+	requested := p.Scope
+	if override := oauthScopeOverride(credType); len(override) > 0 {
+		// The operator narrowed the scopes: a provider rejects the WHOLE sign-in
+		// when any scope isn't granted to their app (LinkedIn's organization
+		// scopes need its Community Management API approval).
+		requested = override
+	}
+	scopes := make([]string, 0, len(requested))
+	for _, sc := range requested {
 		if v := strings.TrimSpace(fillPlaceholders(sc, props)); v != "" {
 			scopes = append(scopes, v)
 		}
@@ -382,6 +392,18 @@ func loadOAuthProviders(path string) map[string]PieceOAuth {
 func oauthEnvNames(credType string) (string, string) {
 	slug := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(strings.TrimPrefix(credType, "pieces.")))
 	return "OAUTH_" + slug + "_CLIENT_ID", "OAUTH_" + slug + "_CLIENT_SECRET"
+}
+
+// oauthScopeOverride reads OAUTH_<SLUG>_SCOPES (space or comma separated),
+// e.g. OAUTH_LINKEDIN_SCOPES="openid profile email w_member_social" to sign
+// in with only LinkedIn's self-serve posting scope. Empty = the piece's own.
+func oauthScopeOverride(credType string) []string {
+	return strings.FieldsFunc(os.Getenv(oauthScopesEnv(credType)), func(r rune) bool { return r == ' ' || r == ',' })
+}
+
+func oauthScopesEnv(credType string) string {
+	idEnv, _ := oauthEnvNames(credType)
+	return strings.TrimSuffix(idEnv, "_CLIENT_ID") + "_SCOPES"
 }
 
 func oauthClient(credType string) (string, string) {
