@@ -628,6 +628,16 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
         and the API still say /workflows.
         components/ui/dialog.tsx — portaled to <body> (a dialog inside the
         page's stacking layer was drawn under the fixed sidebar).
+   M15. Brand context — apps/reasoner/reasoner/nodes.py _agent: when an
+        agent.llm node has config.brand = true, brand_block() appends the
+        Brand page (voice, product facts, positioning, claims to avoid) to the
+        SYSTEM prompt, and the output records brandContextUpdatedAt (which
+        version shaped the draft). Opt-in per node so analysis steps don't
+        pick up marketing voice. An empty Brand page FAILS the node — the
+        no-fake-output rule: a "brand-aware" draft without the brand would be
+        generic text pretending otherwise. Test: tests/test_brand.py.
+        Limits worth saying out loud: it steers, it doesn't verify — a draft
+        can still invent a detail; the human approval is the check.
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
