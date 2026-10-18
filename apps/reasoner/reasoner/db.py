@@ -93,6 +93,21 @@ async def claim_queued_runs(limit: int = 10) -> list[dict[str, Any]]:
 
 # ─────────────────────────── credentials ───────────────────────────
 
+async def fetch_credential_row(credential_id: str) -> tuple[str, dict[str, Any]] | None:
+    """Like fetch_credential_data, plus the credential type (for OAuth refresh)."""
+    if not credential_id:
+        return None
+    async with _conn() as conn:
+        cur = await conn.execute(
+            "select type, data from credentials where id = %s", (credential_id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        data = row[1]
+        return str(row[0] or ""), (open_credential_data(data) if isinstance(data, dict) else {})
+
+
 async def fetch_credential_data(credential_id: str) -> dict[str, Any] | None:
     """Return the secret key/values of a stored credential, or None if unknown.
 
@@ -300,11 +315,11 @@ async def upsert_agent(
     async with _conn() as conn:
         await conn.execute(
             """
-            insert into run_agents (id, run_id, name, role, model, status, depends_on, col, "row", summary, metrics)
-            values (%s, %s, %s, %s, %s, 'idle', %s, %s, %s, '', '{}'::jsonb)
+            insert into run_agents (id, run_id, node_key, name, role, model, status, depends_on, col, "row", summary, metrics)
+            values (%s, %s, %s, %s, %s, %s, 'idle', %s, %s, %s, '', '{}'::jsonb)
             on conflict (id) do nothing
             """,
-            (agent_id, run_id, name, role, model, dep_ids, col, row),
+            (agent_id, run_id, key, name, role, model, dep_ids, col, row),
         )
     return agent_id
 
@@ -347,6 +362,38 @@ async def set_agent_status(agent_id: str, status: str, summary: str | None = Non
             await conn.execute(
                 "update run_agents set status = %s where id = %s", (status, agent_id)
             )
+
+
+# Node outputs larger than this are stored as a truncated preview so one huge
+# scrape can't bloat the run row the builder loads.
+_MAX_OUTPUT_BYTES = 512 * 1024
+
+
+def _clip_output(output: Any) -> str:
+    raw = json.dumps(output, default=str)
+    if len(raw) <= _MAX_OUTPUT_BYTES:
+        return raw
+    return json.dumps({"__truncated": True, "bytes": len(raw), "preview": raw[:_MAX_OUTPUT_BYTES]})
+
+
+async def set_agent_result(
+    agent_id: str,
+    output: Any = None,
+    error: str | None = None,
+    attempts: int | None = None,
+) -> None:
+    """Store a node's full output / error for the builder's data inspector."""
+    async with _conn() as conn:
+        await conn.execute(
+            """
+            update run_agents
+               set output = coalesce(%s::jsonb, output),
+                   error = %s,
+                   attempts = coalesce(%s, attempts)
+             where id = %s
+            """,
+            (None if output is None else _clip_output(output), error, attempts, agent_id),
+        )
 
 
 async def add_message(run_id: str, from_agent_id: str, to_agent_id: str, label: str) -> None:

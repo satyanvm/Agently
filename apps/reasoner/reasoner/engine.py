@@ -84,10 +84,10 @@ async def seed_agents(run_id: str, plan: GraphPlan) -> dict[str, str]:
     return agent_ids
 
 
-async def mark_skipped(run_id: str, agent_id: str, key: str) -> None:
+async def mark_skipped(run_id: str, agent_id: str, key: str, reason: str = "") -> None:
     """Record a control-flow skip on a node's agent row + log."""
-    await db.set_agent_status(agent_id, _SKIPPED_STATUS, summary="Skipped (upstream condition)")
-    await db.append_log(run_id, "info", "system", key, "Skipped — upstream condition was false")
+    await db.set_agent_status(agent_id, _SKIPPED_STATUS, summary=f"Skipped ({reason or 'upstream condition'})")
+    await db.append_log(run_id, "info", "system", key, f"Skipped — {reason or 'upstream condition was false'}")
 
 
 async def execute_one_node(

@@ -38,7 +38,7 @@ function LandingNav() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-bg/70 backdrop-blur-xl">
       <div className="mx-auto flex h-15 max-w-[1180px] items-center gap-8 px-6 py-3.5">
         <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(94,79,242,0.5)]">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft">
             <Star className="h-4 w-4 text-white" />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">Agently</span>
@@ -60,7 +60,7 @@ function LandingNav() {
           </Link>
           <Link
             href="/dashboard"
-            className="flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+            className="flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
           >
             Open console
             <ArrowRight className="size-3.5" />
@@ -137,7 +137,7 @@ function Hero() {
         <div className="animate-in mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
             href="/dashboard"
-            className="group flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-[15px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+            className="group flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-[15px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
           >
             Start building
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -164,7 +164,6 @@ function Hero() {
 function HeroPreview() {
   return (
     <div className="animate-in relative mx-auto mt-16 max-w-[1000px]">
-      <div className="absolute -inset-x-10 -top-10 bottom-0 -z-10 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(94,79,242,0.18),transparent_70%)] blur-2xl" />
       <div className="overflow-hidden rounded-xl border border-border-strong bg-surface shadow-pop">
         {/* window chrome */}
         <div className="flex items-center gap-2 border-b border-border bg-surface-2/60 px-4 py-2.5">
@@ -482,7 +481,7 @@ function CTA() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/dashboard"
-              className="group flex h-11 items-center gap-2 rounded-lg bg-accent px-6 text-[15px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+              className="group flex h-11 items-center gap-2 rounded-lg bg-accent px-6 text-[15px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
             >
               Open the console
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />

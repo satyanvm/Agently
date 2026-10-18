@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { KeyRound, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { ExternalLink, KeyRound, LogIn, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -9,10 +9,19 @@ import { cn } from "@/lib/utils";
 import {
   createCredential,
   deleteCredential,
+  getOAuthStatus,
+  signInWithPopup,
   updateCredential,
   type CredentialSummary,
+  type OAuthStatus,
 } from "@/lib/credentials";
-import { credentialTypeDef, type CredentialTypeDef } from "./credential-types";
+import {
+  credentialTypeDef,
+  oauthAccessKey,
+  oauthTokenKeys,
+  isLoginType,
+  type CredentialTypeDef,
+} from "./credential-types";
 import { useCredentials } from "./credentials-context";
 import { DynamicField } from "./dynamic-field";
 import type { NodeField } from "./node-catalog";
@@ -84,11 +93,13 @@ export function CredentialSection({
         // Friendly empty state: nothing of this type yet.
         <div className="rounded-md border border-border bg-surface-2 px-3 py-3 text-center">
           <div className="text-[12px] text-muted mb-2">
-            No {typeDef.label} credentials yet
+            {isLoginType(typeDef)
+              ? `Sign in to ${typeDef.label} to use this node`
+              : `No ${typeDef.label} credentials yet`}
           </div>
-          <Button variant="secondary" size="sm" className="w-full" onClick={() => setModal({ mode: "create" })}>
-            <Plus className="size-3.5" />
-            Create credential
+          <Button variant="primary" size="sm" className="w-full" onClick={() => setModal({ mode: "create" })}>
+            {isLoginType(typeDef) ? <LogIn className="size-3.5" /> : <Plus className="size-3.5" />}
+            {isLoginType(typeDef) ? `Sign in to ${typeDef.label}` : "Create credential"}
           </Button>
         </div>
       ) : (
@@ -131,7 +142,7 @@ export function CredentialSection({
             onClick={() => setModal({ mode: "create" })}
             className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-accent hover:text-accent-soft transition-colors"
           >
-            <Plus className="size-3.5" /> Create new
+            <Plus className="size-3.5" /> {isLoginType(typeDef) ? "Connect another account" : "Create new"}
           </button>
         </>
       )}
@@ -141,9 +152,9 @@ export function CredentialSection({
           typeDef={typeDef}
           existing={modal.mode === "edit" ? modal.cred : undefined}
           onClose={() => setModal(null)}
-          onSaved={async (cred) => {
+          onSaved={async (id) => {
             await refresh();
-            onSelect(cred.id);
+            onSelect(id);
             setModal(null);
           }}
           onDeleted={async (id) => {
@@ -166,7 +177,7 @@ export function CredentialSection({
  * placeholder and are only included in the PUT when the user types a new
  * value (the API merges values per-key).
  */
-function CredentialModal({
+export function CredentialModal({
   typeDef,
   existing,
   onClose,
@@ -176,8 +187,8 @@ function CredentialModal({
   typeDef: CredentialTypeDef;
   existing?: CredentialSummary;
   onClose: () => void;
-  onSaved: (cred: CredentialSummary) => void | Promise<void>;
-  onDeleted: (id: string) => void | Promise<void>;
+  onSaved: (id: string) => void | Promise<void>;
+  onDeleted?: (id: string) => void | Promise<void>;
 }) {
   const [name, setName] = React.useState(existing?.name ?? `${typeDef.label} account`);
   // Only keys the user actually touched — untouched saved values are omitted
@@ -195,15 +206,46 @@ function CredentialModal({
   const [apiError, setApiError] = React.useState<string | null>(null);
 
   const isEdit = Boolean(existing);
-  const fields = typeDef.fields;
-
   const filled = (v: unknown) => v !== undefined && v !== null && v !== "";
+
+  // OAuth types sign in through a popup; the token fields stay available as a
+  // manual fallback ("paste a token") and are the only path while the
+  // operator hasn't configured an OAuth app for the provider.
+  const [oauth, setOauth] = React.useState<OAuthStatus | null>(null);
+  const [oauthLoading, setOauthLoading] = React.useState(Boolean(typeDef.oauth));
+  const [manual, setManual] = React.useState(!typeDef.oauth);
+  const [waiting, setWaiting] = React.useState<{ cancel: () => void } | null>(null);
+  React.useEffect(() => {
+    if (!typeDef.oauth) return;
+    let live = true;
+    getOAuthStatus(typeDef.id)
+      .then((st) => {
+        if (!live) return;
+        setOauth(st);
+        if (!st.supported || !st.configured) setManual(true);
+      })
+      .catch(() => live && setManual(true))
+      .finally(() => live && setOauthLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [typeDef.id, typeDef.oauth]);
+  // Stop listening for the popup if the modal goes away mid sign-in.
+  const waitingRef = React.useRef(waiting);
+  waitingRef.current = waiting;
+  React.useEffect(() => () => waitingRef.current?.cancel(), []);
+
+  const canSignIn = Boolean(oauth?.supported && oauth.configured);
+  const tokenKeys = oauthTokenKeys(typeDef);
+  const fields = manual ? typeDef.fields : typeDef.fields.filter((f) => !tokenKeys.has(f.key));
+
   const canSave =
     name.trim() !== "" &&
     (isEdit ||
-      fields.every(
-        (f) => !f.required || f.control === "checkbox" || filled(values[f.key]),
-      ));
+      (fields.every((f) => !f.required || f.control === "checkbox" || filled(values[f.key])) &&
+        // A pasted-token OAuth credential is useless without the token.
+        (!typeDef.oauth || filled(values[oauthAccessKey(typeDef)]))));
+
 
   const savedPlaceholder = (f: NodeField): string | undefined => {
     if (!existing || !existing.setKeys.includes(f.key) || f.key in values) return undefined;
@@ -224,15 +266,43 @@ function CredentialModal({
             ...(Object.keys(typed).length > 0 ? { values: typed } : {}),
           })
         : await createCredential({ name: name.trim(), type: typeDef.id, values: typed });
-      await onSaved(cred);
+      await onSaved(cred.id);
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to save credential");
       setBusy(false);
     }
   };
 
+  const propsFilled = fields.every(
+    (f) => !f.required || f.control === "checkbox" || filled(values[f.key]) || existing?.setKeys.includes(f.key),
+  );
+
+  const handleSignIn = async () => {
+    setApiError(null);
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (!tokenKeys.has(k) && (filled(v) || typeof v === "boolean")) props[k] = v;
+    }
+    const flow = signInWithPopup({
+      type: typeDef.id,
+      name: name.trim(),
+      credentialId: existing?.id,
+      props,
+    });
+    setWaiting({ cancel: flow.cancel });
+    try {
+      const id = await flow.result;
+      setWaiting(null);
+      await onSaved(id);
+    } catch (e) {
+      setWaiting(null);
+      const msg = e instanceof Error ? e.message : "Sign-in failed";
+      if (msg !== "cancelled") setApiError(msg);
+    }
+  };
+
   const handleDelete = async () => {
-    if (!existing) return;
+    if (!existing || !onDeleted) return;
     if (!window.confirm(`Delete credential "${existing.name}"? Nodes using it will need a new one.`)) {
       return;
     }
@@ -250,16 +320,52 @@ function CredentialModal({
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()} className="max-w-[440px]">
       <DialogHeader
-        title={isEdit ? `Edit ${typeDef.label} credential` : `Create ${typeDef.label} credential`}
+        title={
+          canSignIn && !manual
+            ? isEdit
+              ? `Reconnect ${typeDef.label}`
+              : `Sign in to ${typeDef.label}`
+            : isEdit
+              ? `Edit ${typeDef.label} credential`
+              : `Create ${typeDef.label} credential`
+        }
         subtitle={
-          isEdit
-            ? "Saved values stay hidden — retype a field to replace it."
-            : "Stored securely; values are never shown again after saving."
+          canSignIn && !manual
+            ? `You'll approve access in a ${typeDef.label} window. Agently never sees your password.`
+            : isEdit
+              ? "Saved values stay hidden — retype a field to replace it."
+              : "Stored securely; values are never shown again after saving."
         }
         onClose={onClose}
       />
 
       <div className="max-h-[55vh] overflow-y-auto px-5 py-4 space-y-4">
+        {typeDef.oauth && oauthLoading && (
+          <p className="text-[12px] text-faint">Checking sign-in options…</p>
+        )}
+
+        {typeDef.oauth && !oauthLoading && !canSignIn && oauth?.supported && (
+          <div className="rounded-md border border-warn/30 bg-warn-bg px-3 py-2.5 text-[11px] leading-relaxed text-fg">
+            <div className="flex items-center gap-1.5 font-medium text-warn">
+              <TriangleAlert className="size-3.5 shrink-0" />
+              One-click sign-in isn't set up for {typeDef.label}
+            </div>
+            <p className="mt-1 text-muted">
+              Register an OAuth app with {typeDef.label} using the redirect URL{" "}
+              <code className="font-mono text-fg break-all">{oauth.redirectUrl}</code>, then set{" "}
+              <code className="font-mono text-fg">{oauth.clientIdEnv}</code> and{" "}
+              <code className="font-mono text-fg">{oauth.clientSecretEnv}</code> on the API
+              {typeDef.id.startsWith("pieces.google") && (
+                <> (or <code className="font-mono text-fg">GOOGLE_CLIENT_ID</code>/<code className="font-mono text-fg">GOOGLE_CLIENT_SECRET</code> once for every Google app)</>
+              )}
+              . Until then, paste an access token below.{" "}
+              <a href="/settings/sign-in" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                Sign-in apps checklist
+              </a>
+            </p>
+          </div>
+        )}
+
         <div>
           <label className="block text-[12px] font-medium text-fg mb-1.5">
             Name
@@ -285,7 +391,46 @@ function CredentialModal({
           />
         ))}
 
-        {fields.length === 0 && (
+        {canSignIn && !manual && (
+          <div className="space-y-2">
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
+              onClick={handleSignIn}
+              disabled={Boolean(waiting) || !propsFilled}
+            >
+              <LogIn className="size-4" />
+              {waiting ? "Waiting for sign-in…" : `Sign in with ${typeDef.label}`}
+              {!waiting && <ExternalLink className="size-3.5 opacity-70" />}
+            </Button>
+            {waiting ? (
+              <p className="text-center text-[11px] text-faint">
+                Finish in the pop-up window.{" "}
+                <button onClick={() => waiting.cancel()} className="text-accent hover:text-accent-soft">
+                  Cancel
+                </button>
+              </p>
+            ) : (
+              <p className="text-center text-[11px] text-faint">
+                <button onClick={() => setManual(true)} className="hover:text-fg transition-colors">
+                  Paste an access token instead
+                </button>
+              </p>
+            )}
+          </div>
+        )}
+
+        {canSignIn && manual && (
+          <button
+            onClick={() => setManual(false)}
+            className="inline-flex items-center gap-1 text-[12px] text-accent hover:text-accent-soft"
+          >
+            <LogIn className="size-3.5" /> Sign in with {typeDef.label} instead
+          </button>
+        )}
+
+        {fields.length === 0 && !typeDef.oauth && (
           <p className="text-[11px] text-faint">
             No field definitions are available for this credential type yet — the
             catalog may still be regenerating.
@@ -297,7 +442,7 @@ function CredentialModal({
 
       <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
         <div>
-          {isEdit && (
+          {isEdit && onDeleted && (
             <Button variant="danger" size="sm" onClick={handleDelete} disabled={busy}>
               <Trash2 className="size-3.5" />
               Delete
@@ -308,9 +453,11 @@ function CredentialModal({
           <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || !canSave}>
-            {busy ? "Saving…" : isEdit ? "Save changes" : "Create"}
-          </Button>
+          {(manual || isEdit) && (
+            <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || !canSave || Boolean(waiting)}>
+              {busy ? "Saving…" : isEdit ? "Save changes" : "Create"}
+            </Button>
+          )}
         </div>
       </div>
     </Dialog>

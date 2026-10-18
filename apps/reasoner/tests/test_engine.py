@@ -50,6 +50,12 @@ class FakeDB:
         async def set_agent_status(agent_id, status, summary=None):
             self.agents.setdefault(agent_id, {})["status"] = status
 
+        async def set_agent_result(agent_id, output=None, error=None, attempts=None):
+            row = self.agents.setdefault(agent_id, {})
+            if output is not None:
+                row["output"] = output
+            row["error"] = error
+
         async def append_log(run_id, level, channel, source, message, detail=None, reasoning=False):
             self.logs.append((level, source, message))
 
@@ -147,6 +153,12 @@ class TemplateTest(unittest.TestCase):
     def test_unknown_ref_fails(self):
         with self.assertRaisesRegex(ValueError, "template reference not found"):
             nodes.render("x={{outputs.nope.text}}", self._ctx())
+
+    def test_list_index_paths(self):
+        root = {"outputs": {"f": {"items": [{"title": "first"}, {"title": "second"}]}}}
+        self.assertEqual(nodes.walk_path(root, "outputs.f.items.1.title"), "second")
+        with self.assertRaisesRegex(ValueError, "not found"):
+            nodes.walk_path(root, "outputs.f.items.5.title")
 
     def test_condition_eval(self):
         ctx = self._ctx()

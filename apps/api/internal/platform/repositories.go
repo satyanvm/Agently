@@ -31,6 +31,7 @@ type WorkflowPatch struct {
 	AgentCount       *int
 	CurrentVersionID *domain.WorkflowVersionId
 	DefaultInput     *map[string]any
+	Settings         *domain.WorkflowSettings
 	UpdatedAt        *domain.Timestamp
 	ArchivedAt       *domain.Timestamp
 }
@@ -68,6 +69,9 @@ type RunRepo interface {
 	Insert(run domain.Run) domain.Run
 	Update(id domain.RunId, patch RunPatch) (domain.Run, error)
 	NextNumber(workflowID domain.WorkflowId) int
+	// ClaimFailures marks up to limit recently failed, not-yet-handled runs as
+	// handled and returns them — each failure is handed out exactly once.
+	ClaimFailures(limit int) []domain.Run
 }
 
 // RunAgentPatch carries the mutable fields of a run-agent update.

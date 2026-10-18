@@ -32,7 +32,7 @@ export function Sidebar() {
       {/* Brand + workspace switcher */}
       <div className="px-3 pt-3.5">
         <button className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2">
-          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(94,79,242,0.5)]">
+          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft">
             <Logo className="h-4 w-4 text-white" />
           </span>
           <span className="min-w-0 flex-1">
@@ -51,7 +51,7 @@ export function Sidebar() {
       <div className="px-3 py-3">
         <Link
           href="/workflows?new=1"
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
         >
           <Plus className="size-4" />
           New workflow

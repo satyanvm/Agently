@@ -115,7 +115,7 @@ export function CommandPalette({
       className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[14vh]"
       onClick={() => onOpenChange(false)}
     >
-      <div className="absolute inset-0 bg-[#0b0e1a]/30 backdrop-blur-[2px] animate-in" />
+      <div className="absolute inset-0 bg-[#1a1714]/30 backdrop-blur-[2px] animate-in" />
       <div
         className="relative w-full max-w-[560px] overflow-hidden rounded-xl border border-border-strong bg-surface shadow-pop animate-in"
         onClick={(e) => e.stopPropagation()}

@@ -29,7 +29,7 @@ from typing import Any
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.contrib.langgraph import graph
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, TimeoutError as TemporalTimeoutError
 
 # Pure logic (reasoner.plan) and the activity definitions are imported under the
 # sandbox pass-through: they must not be re-validated/instrumented by the workflow
@@ -89,6 +89,13 @@ class DynamicWorkflow:
         # workflow INPUT (threaded by the dispatcher from config) — never an env
         # read here, so replays stay deterministic.
         self._pieces_queue: str = params.get("pieces_task_queue") or _DEFAULT_PIECES_QUEUE
+        # Builder test-run options (apps/api node_data.go → dispatcher):
+        # targetNode = run only it and its ancestors, reusing `seed` outputs for
+        # ancestors; usePins = pinned nodes return their pinned data.
+        exec_opts: dict[str, Any] = params.get("exec") or {}
+        self._use_pins = bool(exec_opts.get("usePins"))
+        self._seed: dict[str, Any] = exec_opts.get("seed") or {}
+        target: str = exec_opts.get("targetNode") or ""
 
         # 1) Resolve the graph + seed agents OUTSIDE the workflow (one activity).
         loaded = await workflow.execute_activity(
@@ -107,6 +114,8 @@ class DynamicWorkflow:
         prior = loaded.prior_status          # agent id → status (for resume)
         dependents = plan.dependents_of(ordered)
         total = len(ordered)
+        self._target = target
+        include = (plan.ancestors(target, ordered) | {target}) if target else None
 
         # 2) Drive the deterministic loop; each node is its own activity.
         outputs: dict[str, dict[str, Any]] = {}
@@ -121,6 +130,20 @@ class DynamicWorkflow:
             if key in fanned_out:
                 done += 1
                 await self._progress(run_id, done, total, f"Ran {key} (loop body)")
+                continue
+
+            # Step run: nodes the target doesn't depend on don't run.
+            if include is not None and key not in include:
+                skipped.add(key)
+                await workflow.execute_activity(
+                    activities.skip_node,
+                    activities.SkipNodeInput(run_id=run_id, agent_id=agent_id, key=key,
+                                             reason="not part of this step run"),
+                    start_to_close_timeout=_IO_TIMEOUT,
+                    retry_policy=_NODE_RETRY,
+                )
+                outputs[key] = {"skipped": True}
+                done += 1
                 continue
 
             # Pruned by an upstream gate (directly, or all deps skipped).
@@ -149,8 +172,8 @@ class DynamicWorkflow:
                 continue
 
             upstream = {dep: outputs.get(dep, {}) for dep in deps}
-            result = await self._run_one(
-                run_id, node, agent_id, upstream, run_input, extra=None,
+            result = await self._execute(
+                run_id, node, agent_id, upstream, run_input, extra=None, shortcuts=True,
             )
 
             if result.failed:
@@ -188,8 +211,9 @@ class DynamicWorkflow:
                             dep: (iter_outputs.get(dep) if dep in iter_outputs else outputs.get(dep, {}))
                             for dep in bdeps
                         }
-                        bresult = await self._run_one(
+                        bresult = await self._execute(
                             run_id, bnode, agent_ids[bkey], bupstream, run_input, extra=extra,
+                            shortcuts=False,
                         )
                         if bresult.failed:
                             await workflow.execute_activity(
@@ -246,11 +270,68 @@ class DynamicWorkflow:
         # 3) Finish the run.
         await workflow.execute_activity(
             activities.finish_run,
-            activities.FinishInput(run_id=run_id, status="succeeded", step="Completed"),
+            activities.FinishInput(run_id=run_id, status="succeeded",
+                                   step=f"Step run of {target} finished" if target else "Completed"),
             start_to_close_timeout=_IO_TIMEOUT,
             retry_policy=_NODE_RETRY,
         )
         return {"run_id": run_id, "done": True, "skipped": sorted(skipped)}
+
+    async def _execute(
+        self,
+        run_id: str,
+        node: dict[str, Any],
+        agent_id: str,
+        upstream: dict[str, dict[str, Any]],
+        run_input: dict[str, Any],
+        extra: dict[str, Any] | None,
+        shortcuts: bool,
+    ):
+        """Run one node under its builder settings (n8n-style node settings).
+
+        Shortcuts first (top-level nodes only, never loop-body iterations):
+        pinned data in a test run, or a step run's reused upstream output. Then
+        up to `retries` extra attempts with a durable `workflow.sleep` between
+        them, each bounded by `timeoutSec`. If every attempt fails and
+        `continueOnFail` is set, the node outputs {"error": …} and the run goes
+        on; otherwise the failure stops the run as before.
+        """
+        key = node["key"]
+        if shortcuts:
+            source, known = None, None
+            if self._use_pins and isinstance(node.get("pinned"), dict):
+                source, known = "pinned", node["pinned"]
+            elif self._target and key != self._target and isinstance(self._seed.get(key), dict):
+                source, known = "reused", self._seed[key]
+            if source:
+                return await workflow.execute_activity(
+                    activities.use_output,
+                    activities.UseOutputInput(run_id=run_id, agent_id=agent_id, key=key,
+                                              output=known, source=source),
+                    start_to_close_timeout=_IO_TIMEOUT,
+                    retry_policy=_NODE_RETRY,
+                )
+
+        retries, wait_s, timeout_s, continue_on_fail = plan.node_policy(node)
+        attempt = 0
+        while True:
+            attempt += 1
+            result = await self._run_one(run_id, node, agent_id, upstream, run_input, extra,
+                                         timeout_s=timeout_s, attempt=attempt)
+            if not result.failed or attempt > retries:
+                break
+            await workflow.sleep(timedelta(seconds=wait_s))
+
+        if result.failed and continue_on_fail:
+            await workflow.execute_activity(
+                activities.fail_node,
+                activities.FailNodeInput(run_id=run_id, agent_id=agent_id, key=key,
+                                         error=result.error, attempts=attempt, continued=True),
+                start_to_close_timeout=_IO_TIMEOUT,
+                retry_policy=_NODE_RETRY,
+            )
+            return activities.RunNodeResult(output={"error": result.error}, gate_open=True)
+        return result
 
     async def _run_one(
         self,
@@ -260,6 +341,8 @@ class DynamicWorkflow:
         upstream: dict[str, dict[str, Any]],
         run_input: dict[str, Any],
         extra: dict[str, Any] | None,
+        timeout_s: float | None = None,
+        attempt: int = 1,
     ):
         """Execute one node as its durable activity unit.
 
@@ -270,16 +353,33 @@ class DynamicWorkflow:
         the loop/gate/skip logic above is backend-agnostic.
         """
         if str(node.get("type", "")).startswith(_PIECE_PREFIX):
-            return await self._run_piece_node(run_id, node, agent_id, upstream, run_input, extra)
-        return await workflow.execute_activity(
-            activities.run_node,
-            activities.RunNodeInput(
-                run_id=run_id, node=node, agent_id=agent_id,
-                upstream=upstream, run_input=run_input, extra=extra or {},
-            ),
-            start_to_close_timeout=_NODE_TIMEOUT,
-            retry_policy=_NODE_RETRY,
-        )
+            return await self._run_piece_node(run_id, node, agent_id, upstream, run_input, extra,
+                                              timeout_s=timeout_s, attempt=attempt)
+        try:
+            return await workflow.execute_activity(
+                activities.run_node,
+                activities.RunNodeInput(
+                    run_id=run_id, node=node, agent_id=agent_id,
+                    upstream=upstream, run_input=run_input, extra=extra or {}, attempt=attempt,
+                ),
+                # A user timeout is a hard bound: one Temporal attempt, and the
+                # node's own retries (_execute) decide whether to go again.
+                start_to_close_timeout=timedelta(seconds=timeout_s) if timeout_s else _NODE_TIMEOUT,
+                retry_policy=RetryPolicy(maximum_attempts=1) if timeout_s else _NODE_RETRY,
+            )
+        except ActivityError as exc:
+            # Timed out, or the worker kept dying: the activity never recorded
+            # the failure itself, so do it here and fail the node cleanly.
+            error = (f"timed out after {timeout_s:g}s" if timeout_s and _is_timeout(exc)
+                     else f"node activity failed: {exc.cause or exc}")
+            await workflow.execute_activity(
+                activities.fail_node,
+                activities.FailNodeInput(run_id=run_id, agent_id=agent_id, key=node["key"],
+                                         error=error, attempts=attempt),
+                start_to_close_timeout=_IO_TIMEOUT,
+                retry_policy=_NODE_RETRY,
+            )
+            return activities.RunNodeResult(failed=True, error=f"{node.get('type')}: {error}")
 
     async def _run_piece_node(
         self,
@@ -289,6 +389,8 @@ class DynamicWorkflow:
         upstream: dict[str, dict[str, Any]],
         run_input: dict[str, Any],
         extra: dict[str, Any] | None,
+        timeout_s: float | None = None,
+        attempt: int = 1,
     ):
         """prepare (our queue) → execute_piece (pieces queue) → record (our queue).
 
@@ -318,15 +420,16 @@ class DynamicWorkflow:
                     prep.payload,
                     task_queue=self._pieces_queue,
                     schedule_to_start_timeout=_PIECE_SCHEDULE_TO_START,
-                    start_to_close_timeout=_PIECE_TIMEOUT,
-                    retry_policy=_PIECE_RETRY,
+                    start_to_close_timeout=timedelta(seconds=timeout_s) if timeout_s else _PIECE_TIMEOUT,
+                    retry_policy=RetryPolicy(maximum_attempts=1) if timeout_s else _PIECE_RETRY,
                 )
                 mode = "execute"
             except ActivityError as exc:
+                timed_out = bool(timeout_s) and _is_timeout(exc)
                 result = {
                     "ok": False,
-                    "errorType": "PiecesWorkerUnavailable",
-                    "error": f"execute_piece failed: {exc}",
+                    "errorType": "Timeout" if timed_out else "PiecesWorkerUnavailable",
+                    "error": f"timed out after {timeout_s:g}s" if timed_out else f"execute_piece failed: {exc}",
                 }
                 mode = "execute"
         else:
@@ -336,6 +439,7 @@ class DynamicWorkflow:
             activities.record_piece_result,
             activities.RecordPieceInput(
                 run_id=run_id, node=node, agent_id=agent_id, result=result, mode=mode,
+                attempt=attempt,
             ),
             start_to_close_timeout=_IO_TIMEOUT,
             retry_policy=_NODE_RETRY,
@@ -348,3 +452,7 @@ class DynamicWorkflow:
             start_to_close_timeout=_IO_TIMEOUT,
             retry_policy=_NODE_RETRY,
         )
+
+
+def _is_timeout(exc: ActivityError) -> bool:
+    return isinstance(exc.cause, TemporalTimeoutError)

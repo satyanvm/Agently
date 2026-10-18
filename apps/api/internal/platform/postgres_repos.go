@@ -163,11 +163,11 @@ func scanWorkflow(row pgx.Row) (domain.Workflow, error) {
 	var schedule, ownerID, currentVer *string
 	var tags []string
 	var agentCount int
-	var defaultInput []byte
+	var defaultInput, settings []byte
 	var created, updated any
 	var archived any
 	if err := row.Scan(&id, &ws, &slug, &name, &desc, &trigger, &schedule, &tags,
-		&ownerID, &agentCount, &currentVer, &created, &updated, &archived, &defaultInput); err != nil {
+		&ownerID, &agentCount, &currentVer, &created, &updated, &archived, &defaultInput, &settings); err != nil {
 		return w, err
 	}
 	w.ID = domain.WorkflowId(id)
@@ -189,10 +189,11 @@ func scanWorkflow(row pgx.Row) (domain.Workflow, error) {
 	w.ArchivedAt = anyTsPtr(archived)
 	w.DefaultInput = map[string]any{}
 	jsonInto(defaultInput, &w.DefaultInput)
+	jsonInto(settings, &w.Settings)
 	return w, nil
 }
 
-const workflowCols = `id, workspace_id, slug, name, description, trigger, schedule, tags, owner_id, agent_count, current_version_id, created_at, updated_at, archived_at, default_input`
+const workflowCols = `id, workspace_id, slug, name, description, trigger, schedule, tags, owner_id, agent_count, current_version_id, created_at, updated_at, archived_at, default_input, settings`
 
 func (r *pgWorkflowRepo) All() []domain.Workflow {
 	rows, err := r.s.pool.Query(bg(), `select `+workflowCols+` from workflows order by created_at`)
@@ -233,10 +234,11 @@ func (r *pgWorkflowRepo) GetBySlug(slug string) (domain.Workflow, bool) {
 
 func (r *pgWorkflowRepo) Insert(w domain.Workflow) domain.Workflow {
 	_, err := r.s.pool.Exec(bg(),
-		`insert into workflows (`+workflowCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		`insert into workflows (`+workflowCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		string(w.ID), string(w.WorkspaceID), w.Slug, w.Name, w.Description, string(w.Trigger),
 		strArg(w.Schedule), w.Tags, idPtrArg(w.OwnerID), w.AgentCount, idPtrArg(w.CurrentVersionID),
-		tsArg(w.CreatedAt), tsArg(w.UpdatedAt), tsPtrArg(w.ArchivedAt), jsonArg(orEmptyMap(w.DefaultInput)))
+		tsArg(w.CreatedAt), tsArg(w.UpdatedAt), tsPtrArg(w.ArchivedAt), jsonArg(orEmptyMap(w.DefaultInput)),
+		jsonArg(w.Settings))
 	r.s.fail("workflow.Insert", err)
 	return w
 }
@@ -251,6 +253,9 @@ func (r *pgWorkflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (doma
 	}
 	if patch.DefaultInput != nil {
 		b.add("default_input", jsonArg(orEmptyMap(*patch.DefaultInput)))
+	}
+	if patch.Settings != nil {
+		b.add("settings", jsonArg(*patch.Settings))
 	}
 	if patch.UpdatedAt != nil {
 		b.add("updated_at", tsArg(*patch.UpdatedAt))
@@ -494,6 +499,37 @@ func (r *pgRunRepo) Update(id domain.RunId, patch RunPatch) (domain.Run, error) 
 	return rn, nil
 }
 
+func (r *pgRunRepo) ClaimFailures(limit int) []domain.Run {
+	// Only recent failures: turning this on never alerts about last month.
+	rows, err := r.s.pool.Query(bg(), `
+		update runs set failure_handled_at = now()
+		 where id in (select id from runs
+		               where status = 'failed' and failure_handled_at is null
+		                 and finished_at > now() - interval '1 hour'
+		               order by finished_at limit $1
+		               for update skip locked)
+		returning id`, limit)
+	if err != nil {
+		r.s.fail("run.ClaimFailures", err)
+		return nil
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	out := make([]domain.Run, 0, len(ids))
+	for _, id := range ids {
+		if rn, ok := r.GetByID(domain.RunId(id)); ok {
+			out = append(out, rn)
+		}
+	}
+	return out
+}
+
 func (r *pgRunRepo) NextNumber(workflowID domain.WorkflowId) int {
 	row := r.s.pool.QueryRow(bg(),
 		`select coalesce(max(number),0)+1 from runs where workflow_id=$1`, string(workflowID))
@@ -516,10 +552,12 @@ func scanRunAgent(row pgx.Row) (domain.RunAgent, error) {
 	var name, role, model, status, summary string
 	var dependsOn []string
 	var col, rowN int
-	var metrics []byte
+	var metrics, output []byte
 	var started, finished any
+	var nodeKey, errStr *string
+	var attempts int
 	if err := row.Scan(&id, &run, &agentDef, &name, &role, &model, &status, &dependsOn,
-		&col, &rowN, &summary, &metrics, &started, &finished); err != nil {
+		&col, &rowN, &summary, &metrics, &started, &finished, &nodeKey, &output, &errStr, &attempts); err != nil {
 		return a, err
 	}
 	a.ID = domain.RunAgentId(id)
@@ -535,10 +573,20 @@ func scanRunAgent(row pgx.Row) (domain.RunAgent, error) {
 	jsonInto(metrics, &a.Metrics)
 	a.StartedAt = anyTsPtr(started)
 	a.FinishedAt = anyTsPtr(finished)
+	if nodeKey != nil {
+		a.NodeKey = *nodeKey
+	}
+	if len(output) > 0 {
+		jsonInto(output, &a.Output)
+	}
+	if errStr != nil {
+		a.Error = *errStr
+	}
+	a.Attempts = attempts
 	return a, nil
 }
 
-const runAgentCols = `id, run_id, agent_definition_id, name, role, model, status, depends_on, col, "row", summary, metrics, started_at, finished_at`
+const runAgentCols = `id, run_id, agent_definition_id, name, role, model, status, depends_on, col, "row", summary, metrics, started_at, finished_at, node_key, output, error, attempts`
 
 func (r *pgRunAgentRepo) ListByRun(runID domain.RunId) []domain.RunAgent {
 	rows, err := r.s.pool.Query(bg(), `select `+runAgentCols+` from run_agents where run_id=$1`, string(runID))
@@ -575,10 +623,11 @@ func (r *pgRunAgentRepo) InsertMany(agents []domain.RunAgent) {
 	batch := &pgx.Batch{}
 	for _, a := range agents {
 		batch.Queue(
-			`insert into run_agents (`+runAgentCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			`insert into run_agents (`+runAgentCols+`) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
 			string(a.ID), string(a.RunID), idPtrArg(a.AgentDefinitionID), a.Name, string(a.Role), a.Model,
 			string(a.Status), fromRunAgentIds(a.DependsOn), a.Col, a.Row, a.Summary, jsonArg(a.Metrics),
-			tsPtrArg(a.StartedAt), tsPtrArg(a.FinishedAt))
+			tsPtrArg(a.StartedAt), tsPtrArg(a.FinishedAt), nilIfEmptyStr(a.NodeKey), nullableJSON(a.Output),
+			nilIfEmptyStr(a.Error), a.Attempts)
 	}
 	br := r.s.pool.SendBatch(bg(), batch)
 	defer br.Close()
@@ -1320,4 +1369,18 @@ func noteArg(note string) any {
 		return nil
 	}
 	return note
+}
+
+func nilIfEmptyStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullableJSON(m map[string]any) any {
+	if m == nil {
+		return nil
+	}
+	return jsonArg(m)
 }

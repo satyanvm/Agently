@@ -204,7 +204,7 @@ func clusterIndex(f catalogFile) string {
 
 // nodeSchema renders one node's full schema for the reduce prompt: everything the
 // model needs to fill the node correctly and reference its outputs downstream.
-func nodeSchema(n CatalogNode) string {
+func nodeSchema(n CatalogNode, has func(CatalogNode, string) bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### %s (%s, runtime=%s)\n%s\n", n.ID, n.Label, n.Runtime, n.Description)
 	if len(n.Config) > 0 {
@@ -230,10 +230,18 @@ func nodeSchema(n CatalogNode) string {
 	}
 	if len(n.Credentials) > 0 {
 		keys := make([]string, len(n.Credentials))
+		configured := true
 		for i, c := range n.Credentials {
 			keys[i] = c.Key
+			if has == nil || !has(n, c.Key) {
+				configured = false
+			}
 		}
-		fmt.Fprintf(&b, "credentials (required at run time; missing values fail the node): %s\n", strings.Join(keys, ", "))
+		state := "NOT CONFIGURED by the user — only use this node if the request names this service"
+		if configured {
+			state = "CONFIGURED"
+		}
+		fmt.Fprintf(&b, "credentials: %s — %s\n", strings.Join(keys, ", "), state)
 	}
 	return b.String()
 }

@@ -84,7 +84,7 @@ func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) (P
 	if err := RequirePlannerKeys(); err != nil {
 		return Plan{}, err
 	}
-	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule
+	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule + "\x00" + credentialFingerprint(ctx)
 	planCache.Lock()
 	if p, ok := planCache.m[cacheKey]; ok {
 		planCache.Unlock()
@@ -357,7 +357,7 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 	if err != nil {
 		return nil, err
 	}
-	return authorGraph(ctx, cat, reduceSystemPrompt(cat, selected), prompt, p)
+	return authorGraph(ctx, cat, reduceSystemPrompt(cat, selected, credentialAvailability(ctx)), prompt, p)
 }
 
 // authorGraph runs the reduce phase over an assembled system prompt.
@@ -412,7 +412,11 @@ func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string,
 		for k := range spec.DefaultInput {
 			inputKeys[k] = true
 		}
-		if errs := graphProblems(nodes, cat, inputKeys); len(errs) > 0 {
+		errs := graphProblems(nodes, cat, inputKeys)
+		if len(errs) == 0 {
+			errs = validateCredentials(nodes, cat, credentialAvailability(ctx), prompt)
+		}
+		if len(errs) > 0 {
 			lastComplaint = strings.Join(errs, "; ")
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
@@ -441,7 +445,7 @@ func graphProblems(nodes []domain.GraphNode, cat *Catalog, inputKeys map[string]
 // the built-in core and every map-selected integration node. This is the ONLY
 // world knowledge we give the model — no source cookbook, no examples of "good"
 // services. The model is trusted to design; the contract keeps it executable.
-func reduceSystemPrompt(cat *Catalog, selected []string) string {
+func reduceSystemPrompt(cat *Catalog, selected []string, has func(CatalogNode, string) bool) string {
 	var b strings.Builder
 	b.WriteString(`You are an expert workflow architect. Convert the user's request into a directed
 acyclic graph of typed nodes that the execution engine runs. Design the best possible workflow:
@@ -502,13 +506,13 @@ NODE TYPES AVAILABLE:
 `)
 	// Built-in core first, always.
 	for _, n := range cat.Clusters["builtin"].Nodes {
-		b.WriteString(nodeSchema(n))
+		b.WriteString(nodeSchema(n, has))
 		b.WriteString("\n")
 	}
 	// Then the map-selected integrations.
 	for _, id := range selected {
 		if n, ok := cat.ByID[id]; ok {
-			b.WriteString(nodeSchema(n))
+			b.WriteString(nodeSchema(n, has))
 			b.WriteString("\n")
 		}
 	}

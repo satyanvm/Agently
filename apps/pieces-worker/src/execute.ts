@@ -34,6 +34,16 @@ export function makeExecutePiece(registry: Registry, resolveCredential?: Credent
     const slug = input.piece.replace(/^@activepieces\/piece-/, '');
     const found = actionOf(registry, slug, input.action);
     if (!found) {
+      // The package is installed but failed to import at startup. Retrying
+      // can't fix that, so return the load error instead of throwing.
+      const loadFailure = registry.failures.find((f) => f.packageName === `@activepieces/piece-${slug}`);
+      if (loadFailure) {
+        return {
+          ok: false,
+          error: `piece ${loadFailure.packageName} failed to load on this worker: ${loadFailure.error}`,
+          errorType: 'PieceLoadFailed',
+        };
+      }
       // Infra error: the reasoner planned an action this worker doesn't have
       // installed. Throwing (not returning) surfaces it as a retryable activity
       // failure — a redeploy with the package added genuinely fixes it.

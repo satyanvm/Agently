@@ -28,6 +28,8 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/workflows/{slug}", getWorkflow(p))
 		r.Get("/workflows/{slug}/graph", graphWorkflow(p))
 		r.Put("/workflows/{slug}/graph", saveWorkflowGraph(p))
+		r.Get("/workflows/{slug}/node-data", workflowNodeData(p))
+		r.Put("/workflows/{slug}/settings", updateWorkflowSettings(p))
 		r.Post("/workflows/{slug}/runs", launchRun(p))
 		r.Get("/workflows/{slug}/runs", listWorkflowRuns(p))
 
@@ -63,6 +65,13 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Post("/credentials", createCredential(p))
 		r.Put("/credentials/{id}", updateCredential(p))
 		r.Delete("/credentials/{id}", deleteCredential(p))
+
+		// Browser sign-in for credential types whose piece declares OAuth2.
+		// start/callback are popup navigations (302s), not JSON endpoints.
+		r.Get("/oauth/callback", oauthCallback(p))
+		r.Get("/oauth/apps", oauthApps(p))
+		r.Get("/oauth/{type}", oauthStatus(p))
+		r.Get("/oauth/{type}/start", oauthStart(p))
 
 		// Dynamic-prop options for pieces.* nodes (proxied to the pieces worker).
 		r.Post("/pieces/options", piecesOptions(p))

@@ -193,6 +193,9 @@ func authorSection(ctx context.Context, cat *Catalog, system, prompt string, out
 		if len(problems) == 0 {
 			problems = graphProblems(append(append([]domain.GraphNode{}, prior...), nodes...), cat, inputKeys)
 		}
+		if len(problems) == 0 {
+			problems = validateCredentials(nodes, cat, credentialAvailability(ctx), prompt)
+		}
 		if len(problems) > 0 {
 			lastComplaint = strings.Join(problems, "; ")
 			msgs = append(msgs,

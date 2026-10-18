@@ -148,6 +148,12 @@ Pass B — The control plane: how a prompt becomes a graph (Go, apps/api)
      Cron schedules and webhook/polling triggers that create runs automatically.
  B10. apps/api/internal/services/credential_service.go
      DB credential store used by piece nodes.
+ B10b. apps/api/internal/services/oauth_service.go, oauth_apps.go, handler/oauth.go
+     "Sign in with Slack/Google/…": the OAuth2 authorization-code flow (Part 7).
+ B10c. apps/api/internal/services/credavail.go
+     Tells the planner which logins you HAVE, so it prefers nodes that will run.
+ B10d. apps/api/internal/services/node_data.go, failures.go, platform/schema.go
+     Builder debugging data + "Run step" (Part 8) and failure handling (Part 9).
  B11. apps/api/cmd/planeval/main.go
      Recall eval harness: measures whether the router/embeddings find the right
      integrations for test prompts. Good for understanding "how do we know the
@@ -180,7 +186,10 @@ Pass C — The data plane: how a graph RUNS (Python, apps/reasoner)
      cost estimates (local = $0). _content_text flattens Gemini 3's content
      blocks. Note: errors RAISE — a failed model call never becomes a fake success.
  C10. apps/reasoner/reasoner/db.py
-     All Postgres reads/writes from the reasoner.
+     All Postgres reads/writes from the reasoner. set_agent_result stores each
+     node's full output/error (what the builder's Data tab shows).
+ C11. apps/reasoner/reasoner/oauth.py
+     Refreshes expired OAuth access tokens for catalog nodes before they run.
  Tests: apps/reasoner/tests/test_engine.py, test_dynamic_nodes.py, test_pieces.py,
         test_llm.py
 
@@ -206,6 +215,11 @@ Pass E — The UI (Next.js, apps/web)
      between the UI graph and the API graph.
  E4. apps/web/components/run-detail.tsx, live.tsx, log-viewer.tsx — live run view
      (SSE from apps/api/internal/handler/events.go).
+ E5. apps/web/components/builder/credential-section.tsx, login-prompt.tsx,
+     app/oauth/done/page.tsx, app/(app)/settings/sign-in/page.tsx — sign-in UI.
+ E6. apps/web/components/builder/node-inspector.tsx (Parameters/Data/Settings
+     tabs), node-data-panel.tsx, json-tree.tsx, node-settings-panel.tsx,
+     workflow-settings-dialog.tsx, lib/builder-debug.ts — the debugging loop.
 
 
 PART 3 — ONE TRACE THAT TIES IT ALL TOGETHER
@@ -255,7 +269,7 @@ PART 4 — HOW TO RUN AND TEST
   Try the durability demo: start a run, `pnpm agently:stop`, then
   `pnpm agently` again — the run finishes where it left off.
 
-  Tests:   cd apps/api && go test ./...
+  Tests:   cd apps/api && go test ./...         (OAuth, failures, step runs)
            cd apps/reasoner && ./.venv/bin/python -m unittest discover -s tests
            cd apps/pieces-worker && npm run build && npm test
   CI runs all of these (plus the web build and Docker image builds) on every
@@ -323,3 +337,139 @@ PART 6 — LAUNCH HARDENING (access control, encryption, deploy)
       docker-compose.app.yml (the four services on top of docker-compose.yml).
       RUNBOOK.md "Deploying" has the launch checklist.
 
+
+
+PART 7 — SIGN-IN WITH SLACK / GOOGLE / … (OAuth instead of pasted tokens)
+=========================================================================
+  The problem: nodes used to ask for a pasted access token. Nobody does that.
+  Now a node that needs a login shows "Sign in with Slack"; a popup opens
+  Slack's consent screen; you click Allow; the node is connected.
+
+  The flow (OAuth2 authorization code), file by file:
+    1. You drop a Slack node → workflow-builder.tsx queues a login; if you
+       already have a Slack account it is attached, else the sign-in modal
+       opens (login-prompt.tsx → credential-section.tsx CredentialModal).
+    2. "Sign in with Slack" → lib/credentials.ts signInWithPopup opens
+       GET /api/oauth/slack/start in a popup.
+    3. oauth_service.go StartURL builds Slack's consent URL: client_id,
+       redirect_uri, scopes, a random `state` (anti-CSRF, single use, 15 min),
+       and a PKCE challenge when the provider wants one. 302 to Slack.
+    4. Slack redirects to /api/oauth/callback?code&state. HandleCallback
+       checks the state, swaps the code for tokens at the provider's token
+       URL (exchange), and stores a credential row (encrypted, Part 6) with
+       access_token, refresh_token, expires_at, token_url.
+    5. The popup lands on /oauth/done, which tells the builder tab over a
+       BroadcastChannel (not window.opener: Google's COOP header severs it).
+       The builder attaches the new credential id to every Slack node.
+    6. At run time an expired token is refreshed first: pieces worker
+       (src/credentials.ts makeOAuthRefresher) for pieces.* nodes, reasoner
+       (reasoner/oauth.py) for hand-written catalog nodes.
+
+  Where the provider details come from: Activepieces pieces declare their
+  OAuth URLs/scopes; gen-index.ts copies them into pieces/index.json
+  (auth.oauth). Hand-written catalog types (slack, github, notion, hubspot,
+  asana, dropbox, intercom, todoist, typeform, clickup) borrow their piece's
+  flow — packages/nodes/build-web.mjs CATALOG_OAUTH maps e.g. slack →
+  pieces.slack and stores the token under SLACK_BOT_TOKEN, the key the
+  catalog template already reads.
+
+  What YOU (the operator) do once per provider: register an OAuth app with
+  redirect URL $APP_BASE_URL/api/oauth/callback, set
+  OAUTH_<SLUG>_CLIENT_ID/_SECRET (see .env.example), restart. One Google app
+  (GOOGLE_CLIENT_ID) covers Gmail/Sheets/Drive/Calendar/…; one Microsoft app
+  (MICROSOFT_CLIENT_ID) covers Outlook/Teams/Excel/OneDrive. Settings →
+  Sign-in apps (/settings/sign-in, backed by GET /api/oauth/apps) is the
+  checklist of the top 31 providers with each one's env names and console
+  link. Until a provider is configured, its modal says so and falls back to
+  pasting a token. This is the "hosted shared app" model n8n Cloud uses.
+
+  Interview angles: why `state` (CSRF), why PKCE (code interception), why
+  refresh tokens + expires_at (short-lived access), why the token never
+  touches the browser (server-side exchange, encrypted at rest).
+
+
+PART 8 — BUILD & DEBUG LIKE n8n (run one node, pin data, inspect, drag-to-map)
+==============================================================================
+  The builder inspector has three tabs: Parameters, Data, Settings, and a
+  "Run step" button.
+
+  Node data is now stored: run_agents got node_key, output (full JSON, up to
+  512 KB), error, attempts (migration 0014; the API also applies it at
+  startup — platform/schema.go EnsureSchema). The reasoner writes them in
+  activities.run_node / record_piece_result via db.set_agent_result.
+  GET /api/workflows/{slug}/node-data (node_data.go NodeData) returns each
+  node's newest output across the last 25 runs.
+
+  Run step (n8n "execute step"):
+    builder saves the graph → POST /runs with exec {targetNode, usePins}
+    → run_service.Launch → node_data.go stepExec computes the target's
+      ancestors and copies their last successful outputs into `seed`, all
+      stored under the reserved run-input key __exec
+    → dispatcher.py pops __exec out of the input (templates never see it)
+    → workflow.py DynamicWorkflow: nodes outside {target + ancestors} are
+      skipped; ancestors with a seed get it via the use_output activity
+      instead of running; only the target really executes.
+    The builder polls the run (builder-debug.ts runAndWait), shows a status
+    pill, refreshes node data, and marks nodes ✓/✗ on the canvas.
+
+  Pinned data: Data tab → "Pin output" (or "Set mock data") stores the JSON
+  under config.__pinned. Test runs (Test run / Run step, usePins=true) serve
+  it via use_output instead of calling the service; scheduled and
+  production runs ignore pins. load_graph's _lift_reserved moves __pinned /
+  __settings off the config so templates never see them.
+
+  Drag-to-map: the Parameters tab's "Map from upstream" and the Data tab
+  show each DIRECT dependency's output (pinned data wins) as a JSON tree
+  (json-tree.tsx). Drag a key onto a field → the browser inserts
+  {{outputs.<node>.<path>}} at the drop point (or it is appended for
+  dropdowns: node-inspector.tsx MapDropTarget). Paths may index lists —
+  outputs.fetch.result.0.title — via nodes.py walk_path. Only direct
+  dependencies, because that's all a node's templates can see (graphrefs.go).
+
+  Tested for real: tests/test_workflow_policy.py runs DynamicWorkflow on
+  Temporal's time-skipping test server with fake activities.
+
+
+PART 9 — HANDLING FAILURES (retry, timeout, continue on fail, error workflow)
+============================================================================
+  Per node (inspector Settings tab → config.__settings, read by
+  plan.node_policy, applied in workflow.py _execute):
+    retries + retryWaitSec  the node runs again; the wait is workflow.sleep —
+                            a durable Temporal timer, so it survives a crash.
+    timeoutSec              one Temporal attempt with that start_to_close
+                            timeout; on timeout fail_node records it.
+    continueOnFail          after the last attempt the node outputs
+                            {"error": "..."}, is marked failed "(continued)",
+                            and the run goes on.
+  Note the two retry layers: Temporal's RetryPolicy retries an activity that
+  CRASHED (worker died); the node setting retries a node that ran and
+  FAILED (API returned 500). run_node returns failures as data, so only our
+  loop sees them.
+
+  Per workflow ("On failure" in the builder toolbar → PUT
+  /api/workflows/{slug}/settings → workflows.settings jsonb):
+    error workflow, email alert, Slack incoming-webhook alert.
+  services/failures.go FailureWatcher (a goroutine next to the scheduler)
+  claims failed runs with one UPDATE … SET failure_handled_at … RETURNING
+  (each failure handled exactly once, even across restarts), launches the
+  error workflow with {{input.failedRun}} (workflow, runId, failedNode,
+  error, url) and sends the alerts. An error-workflow run never triggers
+  another error workflow (no loops).
+
+
+PART 10 — THE WHOLE SYSTEM ON ONE PAGE (say this in an interview)
+=================================================================
+  1. AUTHOR: prompt → Go planner (embed prefilter → route → map → reduce →
+     validate refs + credentials → repair) → typed DAG saved as a version.
+     Or draw/edit it in the builder.
+  2. CONNECT: nodes that need accounts get "Sign in with X" (Part 7).
+  3. DEBUG: Run step / pin / inspect / drag-to-map until each node is right
+     (Part 8).
+  4. RUN: manual, schedule (scheduler.go), webhook/polling triggers → a
+     queued run row in Postgres.
+  5. EXECUTE: reasoner dispatcher → Temporal DynamicWorkflow → one activity
+     per node (Python handlers, or the Node pieces worker for 700
+     Activepieces integrations). Kill a worker; the run resumes.
+  6. RECOVER: node retries/timeouts/continue-on-fail, then the error
+     workflow + alerts (Part 9).
+  7. OBSERVE: live SSE run view, Temporal UI per run, Langfuse per LLM call.

@@ -202,12 +202,26 @@ function pieceAuthFields(auth) {
         { key: "username", label: "Username", control: "text", required: true },
         { key: "password", label: "Password", control: "secret", required: true },
       ];
-    case "oauth2":
-      // Manual token entry for now — no OAuth dance (§3).
+    case "oauth2": {
+      // Connection props (tenant, subdomain, …) fill {placeholders} in the
+      // OAuth URLs and are entered before "Sign in". The token fields are the
+      // manual fallback when the workspace has no OAuth app for this provider;
+      // after a sign-in the API writes them itself.
+      const connProps = (auth.props ?? [])
+        .map((p) => pieceFieldFor({
+          key: p.key,
+          label: p.displayName || p.key,
+          type: p.type,
+          required: p.required,
+          description: p.description,
+        }))
+        .filter(Boolean);
       return [
-        { key: "access_token", label: "Access Token", control: "secret", required: true },
+        ...connProps,
+        { key: "access_token", label: "Access Token", control: "secret", required: !auth.oauth },
         { key: "refresh_token", label: "Refresh Token", control: "secret", required: false },
       ];
+    }
     case "custom_auth":
       return (auth.props ?? [])
         .map((p) => pieceFieldFor({
@@ -261,6 +275,9 @@ if (existsSync(piecesIndexFile)) {
         label: n.pieceDisplayName || humanizeWords(slug),
         source: "pieces",
         authType: n.auth.type,
+        // Present when the piece supports the browser sign-in flow
+        // (GET /api/oauth/{type}/start); the URLs stay server-side.
+        ...(n.auth.oauth ? { oauth: true } : {}),
         fields: pieceAuthFields(n.auth),
       };
       piecesTypeCount++;
@@ -268,6 +285,33 @@ if (existsSync(piecesIndexFile)) {
   }
 } else {
   console.warn(`pieces index not found at ${piecesIndexFile} — run apps/pieces-worker gen:index first; emitting catalog nodes only`);
+}
+
+/* ------------------- catalog types that can sign in via OAuth ------------------- */
+
+// Hand-written catalog nodes send one bearer token. When the provider's OAuth
+// access token is a drop-in for that token, the catalog type borrows the
+// matching piece's OAuth flow: "Sign in with Slack" stores the access token
+// under SLACK_BOT_TOKEN. Tokens sent any other way (GitLab's PRIVATE-TOKEN,
+// Pipedrive's ?api_token=, Mailchimp's <key>-<dc>) stay paste-only.
+const CATALOG_OAUTH = {
+  slack: "SLACK_BOT_TOKEN",
+  github: "GITHUB_TOKEN",
+  notion: "NOTION_API_KEY",
+  hubspot: "HUBSPOT_ACCESS_TOKEN",
+  asana: "ASANA_ACCESS_TOKEN",
+  dropbox: "DROPBOX_ACCESS_TOKEN",
+  intercom: "INTERCOM_ACCESS_TOKEN",
+  todoist: "TODOIST_API_TOKEN",
+  typeform: "TYPEFORM_ACCESS_TOKEN",
+  clickup: "CLICKUP_API_TOKEN",
+};
+for (const [provider, tokenKey] of Object.entries(CATALOG_OAUTH)) {
+  const def = credentialTypes[provider];
+  if (!def || !credentialTypes[`pieces.${provider}`]?.oauth) continue;
+  def.oauth = true;
+  def.oauthVia = `pieces.${provider}`;
+  def.oauthTokenKey = tokenKey;
 }
 
 /* ---------------------------------- write ---------------------------------- */

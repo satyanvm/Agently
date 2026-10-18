@@ -371,6 +371,10 @@ type LaunchRunInput struct {
 	Input   map[string]any
 	Trigger domain.TriggerType
 	Region  *string
+	// Builder test runs: run only up to TargetNode (reusing upstream outputs
+	// from the last run), and/or let pinned nodes return their pinned data.
+	TargetNode string
+	UsePins    bool
 }
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
@@ -384,6 +388,10 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	out := LaunchRunInput{
 		Input:   getMap(body, "input"),
 		Trigger: domain.TriggerType(trigger),
+	}
+	if exec := getMap(body, "exec"); exec != nil {
+		out.TargetNode, _ = exec["targetNode"].(string)
+		out.UsePins, _ = exec["usePins"].(bool)
 	}
 	if hasKey(body, "region") {
 		r := getString(body, "region")
