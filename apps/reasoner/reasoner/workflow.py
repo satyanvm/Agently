@@ -135,6 +135,8 @@ class DynamicWorkflow:
             # No composed graph — nothing for this workflow to do. (The dispatcher
             # only routes composed runs here, so this is a defensive no-op.)
             return {"run_id": run_id, "done": False, "dynamic": False}
+        if loaded.error:
+            return await self._fail_run(run_id, "", loaded.error)
 
         ordered = loaded.graph               # already topologically ordered
         agent_ids = loaded.agent_ids         # node key → agent id

@@ -36,6 +36,15 @@ def _split(raw: str) -> list[str]:
     return [p.strip() for p in re.split(r"[\n,]+", raw or "") if p.strip()]
 
 
+def _list_cfg(ctx: NodeContext, key: str) -> list[str]:
+    """A list-ish config value: a JSON list (what the planner often writes) or
+    a comma / newline separated string (what the builder field holds)."""
+    raw = (ctx.node.get("config") or {}).get(key)
+    if isinstance(raw, list):
+        return [str(render(v, ctx)).strip() for v in raw if str(v).strip()]
+    return _split(render(raw or "", ctx))
+
+
 def _ignore_patterns(ctx: NodeContext) -> list[str]:
     patterns = [p.strip() for p in _cfg(ctx, "ignore").splitlines() if p.strip()]
     for p in patterns:
@@ -189,9 +198,9 @@ async def _watch(ctx: NodeContext) -> NodeResult:
     registered = await db.list_competitors(ws)
     if not registered:
         raise RuntimeError("no competitors registered; add them on the Competitors page first")
-    refs = _split(render(_cfg(ctx, "competitors"), ctx))
+    refs = _list_cfg(ctx, "competitors")
     chosen = [_find_competitor(registered, r) for r in refs] if refs else registered
-    kinds = {k.lower() for k in _split(_cfg(ctx, "pageKinds"))}
+    kinds = {k.lower() for k in _list_cfg(ctx, "pageKinds")}
     ignore = _ignore_patterns(ctx)
 
     changes: list[dict[str, Any]] = []

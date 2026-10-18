@@ -21,7 +21,7 @@ from typing import Any
 
 from temporalio import activity
 
-from . import db, engine, obs, pieces
+from . import db, engine, obs, pieces, publishing
 from .nodes import NodeContext, render_tpl, split_credential
 
 
@@ -48,6 +48,9 @@ class LoadGraphResult:
     ordered_keys: list[str] = field(default_factory=list)
     agent_ids: dict[str, str] = field(default_factory=dict)   # node key → agent id
     prior_status: dict[str, str] = field(default_factory=dict)  # agent id → status
+    # Set when the graph must not run at all (a publishing node with no
+    # human.approval upstream — publishing.py); the workflow fails the run.
+    error: str = ""
 
 
 @dataclass
@@ -192,6 +195,14 @@ async def load_graph(inp: LoadGraphInput) -> LoadGraphResult:
     graph = await db.fetch_graph_nodes(inp.run_id)
     if not graph:
         return LoadGraphResult(dynamic=False)
+    try:
+        bad = publishing.unguarded(graph)
+    except RuntimeError as exc:
+        return LoadGraphResult(dynamic=True, error=f"cannot check which nodes publish: {exc}")
+    if bad:
+        return LoadGraphResult(dynamic=True, error=(
+            f"refusing to run: {', '.join(bad)} publish{'es' if len(bad) == 1 else ''} publicly with no "
+            "human.approval before it. Add an approval step in the builder and save."))
     plan = engine.build_plan(graph)
     agent_ids = await engine.seed_agents(inp.run_id, plan)
     prior = await db.fetch_agent_statuses(inp.run_id)

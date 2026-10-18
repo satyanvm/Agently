@@ -315,6 +315,8 @@ func validateGraph(nodes []domain.GraphNode, cat *Catalog) []string {
 	if cycle := findCycle(nodes); cycle != "" {
 		errs = append(errs, "cycle detected among nodes: "+cycle)
 	}
+	// Nothing publishes without a person's approval (publishing.go).
+	errs = append(errs, publishingErrors(nodes)...)
 	return errs
 }
 

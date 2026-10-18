@@ -236,6 +236,11 @@ func (s *WorkflowService) SaveGraph(slug string, nodes []domain.GraphNode) (doma
 	if !ok {
 		return domain.WorkflowSummary{}, domain.NotFound("workflow")
 	}
+	// Nothing publishes without approval (publishing.go): a builder graph
+	// with an unguarded publishing node is not saved.
+	if errs := publishingErrors(nodes); len(errs) > 0 {
+		return domain.WorkflowSummary{}, domain.BadRequest(joinErrors(errs))
+	}
 	// The trigger node decides whether and when the scheduler runs this
 	// workflow (schedule.go graphSchedule). Checked before anything is saved.
 	trigger, schedule, err := graphSchedule(nodes, wf)

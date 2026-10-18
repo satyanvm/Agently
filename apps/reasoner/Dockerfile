@@ -9,6 +9,8 @@ COPY apps/reasoner/pyproject.toml ./
 COPY apps/reasoner/reasoner ./reasoner
 RUN pip install --no-cache-dir -e .
 COPY packages/nodes/catalog /app/packages/nodes/catalog
+# Which node types publish publicly (must sit behind a human.approval).
+COPY packages/nodes/publishing.json /app/packages/nodes/publishing.json
 COPY packages/nodes/pieces/index.json /app/packages/nodes/pieces/index.json
 RUN useradd --system --uid 10001 agently
 USER agently

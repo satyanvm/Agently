@@ -235,6 +235,13 @@ class IntelNodesPostgresTest(unittest.TestCase):
         self.assertFalse(after.output["changed"])
         self.assertEqual(after.output["checked"], 1)
 
+    def test_page_kinds_as_a_list_or_a_string(self):
+        # The planner writes JSON lists; the builder field holds "a, b".
+        as_list = self.watch(self.runs[0], pageKinds=["pricing"], competitors=["Acme"])
+        self.assertEqual(as_list.output["checked"], 1)
+        as_text = self.watch(self.runs[1], pageKinds="pricing, careers")
+        self.assertEqual(as_text.output["checked"], 2)
+
     def test_no_competitors_or_all_failed_raise(self):
         asyncio.run(self._sql("update competitors set pages = %s::jsonb where workspace_id = %s",
                               (f'[{{"kind": "blog", "url": "{self.site.base}/gone"}}]', self.ws)))

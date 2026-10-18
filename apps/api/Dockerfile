@@ -12,6 +12,8 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # the repo layout (packages/nodes/..., apps/web/components/builder/...).
 WORKDIR /app
 COPY packages/nodes/catalog ./packages/nodes/catalog
+# Which node types publish publicly (must sit behind a human.approval).
+COPY packages/nodes/publishing.json ./packages/nodes/publishing.json
 # index.json plus the embeddings sidecar (npm run gen:embeddings) — the API
 # refuses to start without a sidecar matching PLANNER_EMBED_MODEL.
 COPY packages/nodes/pieces ./packages/nodes/pieces

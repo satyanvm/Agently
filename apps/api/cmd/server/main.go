@@ -54,6 +54,7 @@ func main() {
 	for _, check := range []func() error{
 		services.RequirePlannerKeys,
 		services.RequireNodeCatalog,
+		services.RequirePublishingList,
 		services.RequirePiecesIndex,
 		services.RequirePieceEmbeddings,
 	} {

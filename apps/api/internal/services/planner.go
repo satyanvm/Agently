@@ -503,6 +503,27 @@ DESIGN GUIDANCE:
   its action fits the request more precisely.
 - Keep graphs as small as the request allows. Parallel branches that later join are good.
 
+MARKETING PLAYBOOKS (watch → decide → draft → approve → publish):
+- Competitor changes: start from intel.watchCompetitors (it covers every registered
+  competitor page; set config.competitors / pageKinds only when the user names them),
+  or intel.snapshotPage + intel.diffPage for one specific URL. News, RSS, Reddit and
+  Hacker News items that a draft responds to go through intel.recordSignal so the draft
+  is traceable to them.
+- Gate on whether anything happened: logic.branch on outputs.watch.changed == true (or
+  outputs.diff.changed == true) before any AI or drafting work.
+- Decide what it means with an agent.llm (brand false): analysis, classification,
+  "are we better or missing it". Draft each piece of content with its own agent.llm
+  with config.brand = "true" so it uses the workspace's voice, facts and banned claims.
+- NOTHING PUBLISHES WITHOUT APPROVAL. Put a human.approval between every draft and
+  anything that publishes publicly (the validator rejects the graph otherwise):
+  config.draft = "{{outputs.<draft node>.text}}", config.title says what it is,
+  config.channel names where it goes, config.assignee is the person the user named
+  ("send it to Rahul to approve" → "Rahul"). One approval per draft. The publishing
+  node depends on the approval and publishes "{{outputs.<approval node>.content}}" —
+  the approved (possibly edited) text, never the raw draft.
+- Approvals also guard customer-facing email and anything else the user says should be
+  reviewed; internal notifications (Slack to the team, a report to the user) need none.
+
 NODE TYPES AVAILABLE:
 
 `)
@@ -517,6 +538,11 @@ NODE TYPES AVAILABLE:
 			b.WriteString(nodeSchema(n, has))
 			b.WriteString("\n")
 		}
+	}
+	if pub := PublishingTypes(selected); len(pub) > 0 {
+		b.WriteString("\nTHESE NODES PUBLISH PUBLICLY — each needs a human.approval upstream: ")
+		b.WriteString(strings.Join(pub, ", "))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
