@@ -47,3 +47,31 @@ func TestIntelNodesValidate(t *testing.T) {
 		t.Fatalf("servicesOf should list only integrations, got %v", got)
 	}
 }
+
+func TestApprovalNodeValidates(t *testing.T) {
+	cat := LoadCatalog()
+	g := []domain.GraphNode{
+		{Key: "t", Type: "trigger.manual"},
+		{Key: "watch", Type: "intel.watchCompetitors", DependsOn: []string{"t"}},
+		{Key: "draft", Type: "agent.llm", DependsOn: []string{"watch"},
+			Config: map[string]any{"prompt": "Write a LinkedIn post about {{outputs.watch.text}}"}},
+		{Key: "approve", Type: "human.approval", DependsOn: []string{"draft"},
+			Config: map[string]any{"draft": "{{outputs.draft.text}}", "assignee": "Rahul", "channel": "LinkedIn"}},
+		{Key: "tell", Type: "output.slack", DependsOn: []string{"approve"},
+			Config: map[string]any{"webhookUrl": "https://hooks.slack.test/x", "message": "{{outputs.approve.content}} (approved by {{outputs.approve.approver}})"}},
+	}
+	if errs := validateGraph(g, cat); len(errs) > 0 {
+		t.Fatalf("validateGraph: %s", strings.Join(errs, "; "))
+	}
+	if errs := validateRefs(g, cat, map[string]bool{}); len(errs) > 0 {
+		t.Fatalf("validateRefs: %s", strings.Join(errs, "; "))
+	}
+	if r := roleForType("human.approval"); r != domain.RoleValidator {
+		t.Fatalf("role = %s", r)
+	}
+	missing := []domain.GraphNode{{Key: "t", Type: "trigger.manual"},
+		{Key: "approve", Type: "human.approval", DependsOn: []string{"t"}}}
+	if errs := strings.Join(validateGraph(missing, cat), "; "); !strings.Contains(errs, "draft") {
+		t.Fatalf("an approval without a draft should not validate, got %q", errs)
+	}
+}

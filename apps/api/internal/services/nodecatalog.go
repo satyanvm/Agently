@@ -425,6 +425,8 @@ func roleForType(nodeType string) domain.AgentRole {
 		return domain.RoleAnalyst
 	case "output":
 		return domain.RoleWriter
+	case "human":
+		return domain.RoleValidator
 	}
 	// Integration nodes ("slack.sendMessage", "github.createIssue", …) execute
 	// via tools; browser-tone keeps the run view honest about external reach.

@@ -27,6 +27,7 @@ import {
   Camera,
   GitCompare,
   Flag,
+  UserCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -205,6 +206,15 @@ export const NODE_CATALOG: NodeSpec[] = [
     description: "Pass items through only if they match a rule.",
     kind: "logic",
     icon: Filter,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
+    id: "human.approval",
+    label: "Human approval",
+    description: "Wait for a person to approve, edit or reject a draft.",
+    kind: "logic",
+    icon: UserCheck,
     tone: "text-warn",
     toneBg: "bg-warn-bg",
   },
@@ -425,6 +435,17 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   ],
   "logic.filter": [
     { key: "condition", label: "Keep when", control: "text", placeholder: "item.score > 0.5" },
+  ],
+  "human.approval": [
+    { key: "draft", label: "Draft to approve", control: "textarea", placeholder: "{{outputs.write_post.text}}", help: "The approver can edit it; the final text is outputs.<this node>.content." },
+    { key: "title", label: "Title", control: "text", placeholder: "LinkedIn post: Acme cut prices" },
+    { key: "channel", label: "Publishes to", control: "text", placeholder: "LinkedIn" },
+    { key: "assignee", label: "Approver", control: "text", placeholder: "Rahul" },
+    { key: "notifySlackWebhook", label: "Notify Slack (incoming webhook URL)", control: "text", help: "Defaults to APPROVAL_SLACK_WEBHOOK_URL." },
+    { key: "notifyEmail", label: "Notify email", control: "text", placeholder: "rahul@example.com" },
+    { key: "timeoutHours", label: "Timeout (hours)", control: "text", placeholder: "72" },
+    { key: "onTimeout", label: "When it times out", control: "select", options: ["skip", "fail"] },
+    { key: "signalIds", label: "Signals (ids, optional)", control: "text", help: "Defaults to every signal recorded earlier in this run." },
   ],
   "logic.loop": [
     { key: "items", label: "Items expression", control: "text", placeholder: "outputs.fetch.items" },

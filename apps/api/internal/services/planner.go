@@ -568,7 +568,7 @@ func overlayMeta(spec reduceGraphSpec, p *Plan) {
 // "github", …) for the UI preview chip row. Built-in kinds are skipped; a
 // pieces.<slug>.<action> node counts as its slug.
 func servicesOf(nodes []domain.GraphNode) []string {
-	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true, "intel": true}
+	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true, "intel": true, "human": true}
 	seen := map[string]bool{}
 	var out []string
 	for _, n := range nodes {

@@ -609,3 +609,100 @@ async def insert_signal(
     if not existing:
         raise RuntimeError(f"signal insert for {dedupe_key!r} neither created nor found")
     return str(existing[0]), False
+
+
+# ─────────────────────────── approvals (0015) ───────────────────────────
+
+_APPROVAL_COLS = ("id, run_id, node_key, iteration, title, channel, draft, final_content, status, "
+                  "assignee, notify, signal_ids, decided_by, decision_note, decided_at, expires_at")
+
+
+async def signal_ids_for_run(run_id: str) -> list[str]:
+    """Signals recorded earlier in this run — what a draft is responding to."""
+    async with _conn() as conn:
+        cur = await conn.execute("select id from signals where run_id = %s order by detected_at", (run_id,))
+        return [str(r[0]) for r in await cur.fetchall()]
+
+
+async def open_approval(
+    workspace_id: str, *, run_id: str, node_key: str, iteration: int, title: str, channel: str,
+    draft: str, assignee: str, signal_ids: list[str], timeout_s: float,
+) -> tuple[dict[str, Any], bool]:
+    """Insert a pending approval; returns (row, created). Idempotent on
+    (run, node, iteration): a retried activity gets the row it already made."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""insert into approvals (id, workspace_id, run_id, node_key, iteration, title, channel, draft,
+                                       status, assignee, signal_ids, expires_at, created_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s,
+                        now() + make_interval(secs => %s), now())
+                on conflict (run_id, node_key, iteration) do nothing
+                returning {_APPROVAL_COLS}""",
+            (gen_id("apr"), workspace_id, run_id, node_key, iteration, title, channel, draft, assignee,
+             signal_ids, timeout_s),
+        )
+        row = await cur.fetchone()
+        created = row is not None
+        if not created:
+            cur = await conn.execute(
+                f"select {_APPROVAL_COLS} from approvals where run_id = %s and node_key = %s and iteration = %s",
+                (run_id, node_key, iteration),
+            )
+            row = await cur.fetchone()
+        return _rows(cur, [row])[0], created
+
+
+async def set_approval_notify(approval_id: str, notify: dict[str, Any]) -> None:
+    async with _conn() as conn:
+        await conn.execute("update approvals set notify = %s::jsonb where id = %s",
+                           (json.dumps(notify), approval_id))
+
+
+async def approval_by_id(approval_id: str) -> dict[str, Any] | None:
+    async with _conn() as conn:
+        cur = await conn.execute(f"select {_APPROVAL_COLS} from approvals where id = %s", (approval_id,))
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def time_out_approval(approval_id: str) -> dict[str, Any] | None:
+    """Mark a still-pending approval timed out. Returns the row as it stands
+    afterwards: if a person decided at the last moment, their decision wins and
+    the row comes back approved/rejected. signaled_at is stamped too — the run
+    already knows the outcome, so the relay must not deliver it."""
+    async with _conn() as conn:
+        await conn.execute(
+            """update approvals set status = 'timed_out', decided_at = now(), signaled_at = now()
+                where id = %s and status = 'pending'""",
+            (approval_id,),
+        )
+    return await approval_by_id(approval_id)
+
+
+async def undelivered_decisions(limit: int = 50) -> list[dict[str, Any]]:
+    """Decisions people made that the waiting run hasn't been told about."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_APPROVAL_COLS} from approvals
+                 where decided_at is not null and signaled_at is null
+                   and status in ('approved', 'rejected')
+                 order by decided_at limit %s""",
+            (limit,),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+async def mark_approval_signaled(approval_id: str) -> None:
+    async with _conn() as conn:
+        await conn.execute("update approvals set signaled_at = now() where id = %s", (approval_id,))
+
+
+async def set_run_waiting(run_id: str, waiting: bool, current_step: str) -> None:
+    """'paused' while a run waits for a person, back to 'running' after. Never
+    touches a run that has already finished."""
+    async with _conn() as conn:
+        await conn.execute(
+            """update runs set status = %s, current_step = %s
+                where id = %s and status in ('running', 'paused')""",
+            ("paused" if waiting else "running", current_step, run_id),
+        )

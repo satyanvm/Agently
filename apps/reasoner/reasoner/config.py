@@ -65,6 +65,13 @@ class Config:
     smtp_user: str
     smtp_pass: str
     smtp_from: str
+    # Public web URL: approval notifications link to $APP_BASE_URL/inbox/<id>
+    # (same variable and default the API uses for OAuth redirects).
+    app_base_url: str
+    # Default Slack incoming webhook for approval requests; a human.approval
+    # node's own notifySlackWebhook overrides it. Optional: the Inbox is the
+    # source of truth, notifications are a courtesy.
+    approval_slack_webhook: str
     # tool.code sandbox gate (opt-in — disabled execution is an explicit error).
     tool_code_enabled: bool
     # tool.db target (opt-in — SQL runs ONLY against this dedicated URL, never the
@@ -148,6 +155,8 @@ def load() -> Config:
         smtp_pass=os.getenv("SMTP_PASS", ""),
         # from = SMTP_FROM, then SMTP_USER (mirrors the Go notifier's fallback).
         smtp_from=os.getenv("SMTP_FROM", "") or os.getenv("SMTP_USER", ""),
+        app_base_url=os.getenv("APP_BASE_URL", "http://localhost:3000").rstrip("/"),
+        approval_slack_webhook=os.getenv("APPROVAL_SLACK_WEBHOOK_URL", "").strip(),
         tool_code_enabled=os.getenv("TOOL_CODE_ENABLED", "") in ("1", "true", "yes"),
         tool_db_url=os.getenv("TOOL_DB_URL", ""),
         dispatch_interval_s=float(os.getenv("REASONER_DISPATCH_INTERVAL_S", "1.5")),

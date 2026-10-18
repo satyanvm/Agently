@@ -27,6 +27,8 @@ _KIND_ROLE = {
     "tool": "browser",
     "logic": "analyst",
     "output": "writer",
+    "intel": "browser",
+    "human": "validator",
 }
 
 # run_agents has no "skipped" status in the schema (see ValidAgentStatuses in
@@ -36,7 +38,7 @@ _SKIPPED_STATUS = "blocked"
 
 # Node types that decide whether their downstream subgraph runs. Their handler
 # returns output["passed"] = bool; when false the engine prunes their descendants.
-_GATE_TYPES = {"logic.branch", "logic.filter"}
+_GATE_TYPES = {"logic.branch", "logic.filter", "human.approval"}
 
 
 def _role_for(node: dict[str, Any]) -> str:

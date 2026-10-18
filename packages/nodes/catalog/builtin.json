@@ -210,6 +210,27 @@
       "credentials": []
     },
     {
+      "id": "human.approval",
+      "label": "Human approval",
+      "description": "Pause until a person approves, edits or rejects a draft in the Inbox (with a timeout). Required before anything is published. Approved: downstream nodes run and read the final text as outputs.<key>.content. Rejected or timed out: everything downstream is skipped.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "approval approve review human in the loop sign off wait for person reject edit draft gate publish",
+      "config": [
+        { "key": "draft", "label": "Draft to approve", "control": "textarea", "required": true, "placeholder": "{{outputs.write_post.text}}", "help": "What the person reviews. They can edit it; the edited version is outputs.<this node>.content." },
+        { "key": "title", "label": "Title", "control": "text", "required": false, "placeholder": "LinkedIn post: Acme cut prices" },
+        { "key": "channel", "label": "Publishes to", "control": "text", "required": false, "placeholder": "LinkedIn" },
+        { "key": "assignee", "label": "Approver", "control": "text", "required": false, "placeholder": "Rahul", "help": "Who should decide. Shown in the Inbox and the notification." },
+        { "key": "notifySlackWebhook", "label": "Notify Slack (incoming webhook URL)", "control": "text", "required": false, "help": "Defaults to APPROVAL_SLACK_WEBHOOK_URL. The Inbox works without any notification." },
+        { "key": "notifyEmail", "label": "Notify email", "control": "text", "required": false, "placeholder": "rahul@example.com" },
+        { "key": "timeoutHours", "label": "Timeout (hours)", "control": "text", "required": false, "default": "72", "placeholder": "72" },
+        { "key": "onTimeout", "label": "When it times out", "control": "select", "required": false, "options": ["skip", "fail"], "help": "skip: nothing downstream runs, the run finishes. fail: the run fails." },
+        { "key": "signalIds", "label": "Signals (ids, optional)", "control": "text", "required": false, "help": "Defaults to every signal recorded earlier in this run." }
+      ],
+      "outputs": ["approvalId", "decision", "approved", "content", "approver", "note", "decidedAt", "passed", "url"],
+      "credentials": []
+    },
+    {
       "id": "logic.loop",
       "label": "Loop",
       "description": "Fan out: resolve a list and run the downstream branch once per item. Inside the body, {{item}} is the current element and {{loop.<key>.index}} the position; collected results appear as outputs.<key>.results.",
