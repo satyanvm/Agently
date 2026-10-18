@@ -530,9 +530,12 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
        runner below it (spec.get("runtime")): how a catalog JSON entry becomes
        a real HTTP call. browser.py: tool.browser on Browserbase, for pages
        that need JavaScript.
-   L3. apps/api/internal/services/scheduler.go — when signals get checked.
-       Note dueAt: only "hourly" and "daily HH:MM" today (a weekly content
-       plan needs more).
+   L3. apps/api/internal/services/scheduler.go + schedule.go — when signals
+       get checked. Every schedule string (hourly, daily 09:00, weekdays
+       08:30, weekly mon 09:00, or a 5-field cron) compiles to one cron spec;
+       dueAt = the most recent fire within 12 h, and alreadyFired (a scan of
+       the runs table) makes it fire once. The schedule node's cron field is
+       copied onto the workflow when the graph is saved (graphSchedule).
    L4. packages/nodes/pieces/index.json — search it for linkedin, twitter,
        wordpress, webflow, hubspot (create-blog-post), buffer, typefully,
        google-docs, notion, gmail. The PUBLISH side: real Activepieces pieces
@@ -638,6 +641,13 @@ PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
         generic text pretending otherwise. Test: tests/test_brand.py.
         Limits worth saying out loud: it steers, it doesn't verify — a draft
         can still invent a detail; the human approval is the check.
+   M16. apps/api/internal/services/schedule.go — a small 5-field cron parser
+        (no dependency): bitsets per field, the standard "day-of-month OR
+        day-of-week when both are restricted" rule, prev() searches back at
+        most 12 h (the catch-up window: a fire missed while the API was down
+        runs once if <12 h late, else it's skipped), next() for "next run".
+        Tests: schedule_test.go (incl. a Monday-only weekly schedule driven
+        through SaveGraph + Scheduler.Tick, and switching to manual stopping it).
    Interview angle: "why a signal and not polling the DB from the workflow?"
    — workflow code can't do IO; polling would be an activity per tick filling
    history. A signal is one event, and wait_condition's timeout gives the
