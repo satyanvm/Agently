@@ -28,6 +28,7 @@ import {
   GitCompare,
   Flag,
   UserCheck,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 
@@ -219,6 +220,15 @@ export const NODE_CATALOG: NodeSpec[] = [
     toneBg: "bg-warn-bg",
   },
   {
+    id: "logic.wait",
+    label: "Wait",
+    description: "Pause on a durable timer, then continue.",
+    kind: "logic",
+    icon: Timer,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
     id: "logic.loop",
     label: "Loop",
     description: "Iterate over a list and run the downstream branch for each item.",
@@ -380,6 +390,7 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },
     { key: "prompt", label: "Prompt", control: "textarea", placeholder: "Use {{input.topic}} and upstream outputs…" },
     { key: "model", label: "Model", control: "select", options: ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"] },
+    { key: "responseFormat", label: "Response format", control: "select", options: ["text", "json"], help: "json: the reply is parsed into outputs.<key>.data for branches and loops." },
     { key: "brand", label: "Use brand context", control: "select", options: ["false", "true"], help: "On for drafting steps: adds the Brand page (voice, product facts, positioning, claims to avoid) to the system prompt. Fails if the Brand page is empty." },
   ],
   "agent.chat": [
@@ -447,6 +458,10 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "timeoutHours", label: "Timeout (hours)", control: "text", placeholder: "72" },
     { key: "onTimeout", label: "When it times out", control: "select", options: ["skip", "fail"] },
     { key: "signalIds", label: "Signals (ids, optional)", control: "text", help: "Defaults to every signal recorded earlier in this run." },
+  ],
+  "logic.wait": [
+    { key: "hours", label: "Hours", control: "text", placeholder: "24", help: "Can come from upstream, e.g. {{item.delayHours}}." },
+    { key: "from", label: "Counted from", control: "select", options: ["now", "run_start"] },
   ],
   "logic.loop": [
     { key: "items", label: "Items expression", control: "text", placeholder: "outputs.fetch.items" },

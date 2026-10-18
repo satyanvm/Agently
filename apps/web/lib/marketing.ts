@@ -242,3 +242,38 @@ export function apiErrorMessage(e: unknown): string {
   }
   return raw;
 }
+
+/* ------------------------------- playbooks ------------------------------- */
+
+export interface PlaybookInput {
+  key: string;
+  label: string;
+  required: boolean;
+  type?: "list";
+  help?: string;
+  example?: string;
+}
+
+export interface PlaybookSummary {
+  id: string;
+  name: string;
+  summary: string;
+  trigger: string;
+  schedule: string;
+  publishesTo: string[];
+  inputs: PlaybookInput[];
+  steps: number;
+  approvals: number;
+  logins: { type: string; label: string; connected: boolean }[];
+}
+
+export function fetchPlaybooks(): Promise<PlaybookSummary[]> {
+  return getJSON<PlaybookSummary[]>("/api/playbooks");
+}
+
+export function installPlaybook(id: string, body: { name?: string; inputs: Record<string, string> }): Promise<{ slug: string }> {
+  return getJSON<{ slug: string }>(`/api/playbooks/${encodeURIComponent(id)}/install`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

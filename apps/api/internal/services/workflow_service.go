@@ -199,6 +199,45 @@ func (s *WorkflowService) Create(input validate.CreateWorkflowInput) (domain.Wor
 	return s.ToSummary(wf), nil
 }
 
+// CreateFromGraph saves a workflow from a ready graph (a playbook template):
+// no compile, version 1 is the graph as given. The caller validates it.
+func (s *WorkflowService) CreateFromGraph(name, description string, trigger domain.TriggerType, schedule *string,
+	nodes []domain.GraphNode, defaultInput map[string]any, tags []string) (domain.WorkflowSummary, error) {
+	if schedule != nil {
+		if err := ValidateSchedule(*schedule); err != nil {
+			return domain.WorkflowSummary{}, domain.BadRequest("schedule: " + err.Error())
+		}
+	}
+	if trigger == "" {
+		trigger = domain.TriggerManual
+	}
+	now := domain.Timestamp(s.deps.Clock.ISO())
+	var ownerID *domain.MemberId
+	if members := s.deps.Repos.Members.All(); len(members) > 0 {
+		ownerID = &members[0].ID
+	}
+	wfID := domain.NewWorkflowId()
+	wf := domain.Workflow{
+		ID: wfID, WorkspaceID: s.deps.Repos.Workspace.Get().ID, Slug: s.uniqueSlug(slugify(name)),
+		Name: name, Description: description, Trigger: trigger, Schedule: schedule, Tags: tags,
+		OwnerID: ownerID, AgentCount: len(nodes), DefaultInput: defaultInput, CreatedAt: now, UpdatedAt: now,
+	}
+	s.deps.Repos.Workflows.Insert(wf)
+	versionID := domain.NewWorkflowVersionId()
+	s.deps.Repos.Versions.Insert(domain.WorkflowVersion{
+		ID: versionID, WorkflowID: wfID, Version: 1, Note: "Installed from a playbook",
+		CreatedBy: ownerID, CreatedAt: now, Nodes: layoutGraph(withScheduleOnTrigger(nodes, schedule)),
+	})
+	agentCount := len(nodes)
+	updated, err := s.deps.Repos.Workflows.Update(wfID, platform.WorkflowPatch{
+		CurrentVersionID: &versionID, AgentCount: &agentCount, UpdatedAt: &now,
+	})
+	if err != nil {
+		return domain.WorkflowSummary{}, err
+	}
+	return s.ToSummary(updated), nil
+}
+
 // Plan compiles a prompt into a plan WITHOUT persisting anything — the dry-run that
 // powers the "preview the agents before you create" step in the UI.
 func (s *WorkflowService) Plan(prompt, name, email, schedule string) (Plan, error) {

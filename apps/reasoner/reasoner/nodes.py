@@ -255,6 +255,23 @@ async def _trigger(ctx: NodeContext) -> NodeResult:
     return NodeResult(output={"input": ctx.run_input}, summary="Triggered")
 
 
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+
+
+def parse_json_reply(text: str) -> Any:
+    """A model's JSON reply → the value. Tolerates one wrapping code fence."""
+    body = text.strip()
+    if m := _FENCE.match(body):
+        body = m.group(1)
+    try:
+        value = json.loads(body)
+    except ValueError as exc:
+        raise ValueError(f"the model was asked for JSON but replied with something else: {_clip(text, 200)}") from exc
+    if not isinstance(value, (dict, list)):
+        raise ValueError(f"the model was asked for a JSON object or list, got {type(value).__name__}")
+    return value
+
+
 def wants_brand(ctx: NodeContext) -> bool:
     """config.brand: true (bool or the string the builder stores)."""
     val = ctx.node.get("config", {}).get("brand")
@@ -305,9 +322,18 @@ async def _agent(ctx: NodeContext) -> NodeResult:
         )
         prompt = f"Task: {topic}\n\n{upstream}".strip()
 
+    json_mode = _cfg(ctx, "responseFormat").strip().lower() == "json"
+    if json_mode:
+        system += ("\n\nRespond with ONE valid JSON value and nothing else: no prose, no code fences. "
+                   "Use exactly the fields the task asks for.")
     model = _cfg(ctx, "model") or CONFIG.model
     out = await llm.complete(ctx.run_id, ctx.node["key"], system=system, user=prompt, model=model)
     output: dict[str, Any] = {"text": out.text, "model": model}
+    if json_mode:
+        # Downstream branches and loops read outputs.<key>.data; a reply that
+        # isn't JSON fails the node (node retries can ask again) rather than
+        # letting a branch quietly compare against nothing.
+        output["data"] = parse_json_reply(out.text)
     if brand is not None:
         # Which version of the brand context shaped this draft (traceability).
         saved = brand.get("updated_at")

@@ -29,6 +29,7 @@ from temporalio.worker import Worker  # noqa: E402
 from reasoner import activities as A  # noqa: E402
 from reasoner import approval as AP  # noqa: E402
 from reasoner import plan  # noqa: E402
+from reasoner import waits as W  # noqa: E402
 from reasoner.workflow import DynamicWorkflow  # noqa: E402
 
 QUEUE = "test-approval"
@@ -49,6 +50,7 @@ class Fake:
         self.events: list[str] = []                        # open/wait ordering
         self.outcomes: list[tuple[str, str, tuple[str, ...]]] = []  # (node, status, approval ids)
         self.outcome_ids: list[str] = []
+        self.waited: list[tuple[str, float, bool, str]] = []  # (node, hours, from start, resumed at)
 
     def decide(self, approval_id: str, status: str, content: str | None = None, by: str = "Rahul") -> None:
         row = self.rows[approval_id]
@@ -136,8 +138,26 @@ class Fake:
                 f.outcomes.append((inp.key, inp.status, tuple(inp.approval_ids)))
                 f.outcome_ids.extend(inp.outcome_ids)
 
+        @activity.defn(name="prepare_wait")
+        async def prepare_wait(inp: W.PrepareWaitInput) -> W.PrepareWaitResult:
+            cfg = inp.node.get("config") or {}
+            raw = cfg.get("hours")
+            if isinstance(raw, str) and raw.startswith("{{item."):
+                raw = inp.extra["item"][raw[7:-2]]
+            try:
+                hours = W.parse_hours(raw)
+            except ValueError as exc:
+                return W.PrepareWaitResult(failed=True, error=str(exc))
+            return W.PrepareWaitResult(hours=hours, from_run_start=cfg.get("from") == "run_start")
+
+        @activity.defn(name="finish_wait")
+        async def finish_wait(inp: W.FinishWaitInput) -> A.RunNodeResult:
+            f.waited.append((inp.key, inp.hours, inp.from_run_start, inp.resumed_at))
+            return A.RunNodeResult(output={"waitedHours": inp.hours, "resumedAt": inp.resumed_at})
+
         return [load_graph, run_node, skip_node, use_output, fail_node, finish_run, add_edge,
-                set_progress, open_approval, set_waiting, resolve_approval, record_outcome]
+                set_progress, open_approval, set_waiting, resolve_approval, record_outcome,
+                prepare_wait, finish_wait]
 
 
 def llm(key: str, deps: list[str] | None = None) -> dict[str, Any]:
@@ -283,6 +303,60 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertEqual(fake.ran.count("publish"), 1)  # item 0 approved, item 1 rejected
         self.assertEqual(fake.outcomes, [("publish", "succeeded", ("apr_ok_0",)),
                                          ("publish", "skipped", ("apr_ok_1",))])
+
+    def test_loop_items_open_all_approvals_then_publish_on_their_slots(self):
+        # The weekly-plan shape: per post, approve → wait for its slot → publish.
+        fake = Fake([llm("plan"),
+                     {"key": "each", "type": "logic.loop", "config": {"items": "outputs.plan.items"}, "dependsOn": ["plan"]},
+                     approve("ok", ["each"]),
+                     {"key": "slot", "type": "logic.wait", "dependsOn": ["ok"],
+                      "config": {"hours": "{{item.delayHours}}", "from": "run_start"}},
+                     llm("publish", ["slot"])])
+        orig = fake.acts
+
+        def acts():
+            out = orig()
+            for i, a in enumerate(out):
+                if getattr(a, "__temporal_activity_definition").name == "run_node":
+                    @activity.defn(name="run_node")
+                    async def run_node(inp: A.RunNodeInput) -> A.RunNodeResult:
+                        fake.ran.append(inp.node["key"])
+                        if inp.node.get("type") == "logic.loop":
+                            return A.RunNodeResult(output={"items": [{"delayHours": 24}, {"delayHours": 48}], "count": 2})
+                        return A.RunNodeResult(output={"text": "ok"})
+                    out[i] = run_node
+            return out
+        fake.acts = acts
+
+        async def go():
+            async with Worker(self.env.client, task_queue=QUEUE, workflows=[DynamicWorkflow], activities=fake.acts()):
+                handle = await self.env.client.start_workflow(
+                    DynamicWorkflow.run, {"run_id": "run_x", "input": {}, "exec": {}},
+                    id=f"wf-{uuid.uuid4()}", task_queue=QUEUE)
+                # Both posts reach the Inbox before anything waits.
+                await self._until(lambda: len(fake.opened) == 2 and "wait" in fake.events)
+                self.assertEqual(fake.events[:3], ["open:ok", "open:ok", "wait"])
+                for i in range(2):
+                    fake.decide(f"apr_ok_{i}", "approved")
+                    await handle.signal(DynamicWorkflow.approval_decided, {"approvalId": f"apr_ok_{i}"})
+                return await handle.result(), (await handle.describe()).start_time
+        (res, started) = self.loop.run_until_complete(go())
+        self.assertTrue(res["done"])
+        self.assertEqual(fake.ran.count("publish"), 2)
+        # Slots are absolute from the run start (24 h, 48 h), not 24 h after the previous one.
+        import datetime as dt
+        resumed = [dt.datetime.fromisoformat(w[3]) for w in fake.waited]
+        self.assertEqual([round((r - started).total_seconds() / 3600) for r in resumed], [24, 48])
+        self.assertEqual([o[:2] for o in fake.outcomes if o[0] == "publish"],
+                         [("publish", "succeeded"), ("publish", "succeeded")])
+
+    def test_wait_with_bad_hours_fails_the_run(self):
+        fake = Fake([llm("a"), {"key": "slot", "type": "logic.wait", "dependsOn": ["a"], "config": {"hours": "soon"}},
+                     llm("b", ["slot"])])
+        res = self.run_wf(fake)
+        self.assertFalse(res["done"])
+        self.assertIn("hours must be a number", fake.finish.error)
+        self.assertNotIn("b", fake.ran)
 
     def test_worker_restart_while_waiting(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"])])

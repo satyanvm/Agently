@@ -7,11 +7,13 @@ import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentGlyph } from "@/components/agent-glyph";
+import { PlaybookPicker } from "@/components/playbook-picker";
+import { Segmented } from "@/components/ui/segmented";
 import { planWorkflow, createWorkflow, type WorkflowPlan } from "@/lib/api";
 import type { AgentRole } from "@/lib/types";
 
 const EXAMPLE =
-  "Every morning, pull the latest AI research papers from arXiv, hot posts from Reddit r/MachineLearning, and top AI stories from Hacker News and Google News. Summarize the highlights and email me a digest at you@gmail.com.";
+  "When a competitor launches anything AI-related, draft a LinkedIn post in our CEO's voice and send it to Rahul to approve.";
 
 /**
  * The "prompt → workflow" composer. You describe what you want in plain English; we
@@ -28,6 +30,7 @@ export function CreateWorkflowDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const [mode, setMode] = React.useState<"playbook" | "prompt">("playbook");
   const [prompt, setPrompt] = React.useState("");
   const [plan, setPlan] = React.useState<WorkflowPlan | null>(null);
   const [planning, setPlanning] = React.useState(false);
@@ -58,6 +61,7 @@ export function CreateWorkflowDialog({
   // Reset on close.
   React.useEffect(() => {
     if (!open) {
+      setMode("playbook");
       setPrompt("");
       setPlan(null);
       setError(null);
@@ -82,11 +86,30 @@ export function CreateWorkflowDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} className="max-w-[620px]">
       <DialogHeader
-        title="New playbook from a prompt"
-        subtitle="Describe the agent crew you want. We compile it into a runnable graph."
+        title="New playbook"
+        subtitle={
+          mode === "playbook"
+            ? "Start from a ready-made playbook and fill in a few details."
+            : "Describe what to watch, what to draft and who approves it. We compile it into a graph you can edit."
+        }
         onClose={() => onOpenChange(false)}
       />
+      <div className="px-5 pt-4">
+        <Segmented<"playbook" | "prompt">
+          value={mode}
+          onChange={setMode}
+          size="sm"
+          options={[
+            { value: "playbook", label: "Start from a playbook" },
+            { value: "prompt", label: "Describe your own" },
+          ]}
+        />
+      </div>
 
+      {mode === "playbook" ? (
+        <PlaybookPicker onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
+      ) : (
+      <>
       <div className="space-y-4 px-5 py-4">
         <div>
           <textarea
@@ -174,9 +197,11 @@ export function CreateWorkflowDialog({
         </Button>
         <Button variant="primary" size="sm" onClick={onCreate} disabled={!prompt.trim() || creating}>
           {creating ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-          Create workflow
+          Create playbook
         </Button>
       </div>
+      </>
+      )}
     </Dialog>
   );
 }

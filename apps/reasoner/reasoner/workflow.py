@@ -47,6 +47,7 @@ with workflow.unsafe.imports_passed_through():
     import reasoner.activities as activities
     import reasoner.approval as approval
     import reasoner.plan as plan
+    import reasoner.waits as waits
 
 # Hardcoded (not imported from .graph) so the workflow sandbox never pulls in the
 # node modules' non-deterministic deps (psycopg, httpx, playwright). Must match
@@ -71,6 +72,8 @@ _DEFAULT_PIECES_QUEUE = "agently-pieces"
 # human.approval: opened without blocking, waited on (Temporal signal or
 # timeout) only when a node that depends on it is reached — see _resolve.
 _APPROVAL_TYPE = "human.approval"
+# logic.wait: a durable timer in workflow code (_wait).
+_WAIT_TYPE = "logic.wait"
 
 
 @workflow.defn
@@ -247,73 +250,13 @@ class DynamicWorkflow:
                 # logic.loop: fan its dominated body out once per item, each body-node
                 # execution its own durable activity. The items list is part of this
                 # loop node's activity result, so a replay reconstructs the identical
-                # fan-out from history — the workflow stays deterministic.
+                # fan-out from history — the workflow stays deterministic (_fan_out).
                 if str(node.get("type", "")) == "logic.loop":
                     body_keys = plan.loop_body(key, ordered, dependents)
                     fanned_out.update(body_keys)
-                    by_key = {n["key"]: n for n in ordered}
-                    items = list(outputs[key].get("items") or [])
-                    results: list[Any] = []
-                    loop_failed = False
-                    for idx, item in enumerate(items):
-                        extra = {"item": item, "loop": {key: {"index": idx}}}
-                        iter_outputs: dict[str, dict[str, Any]] = {}
-                        iter_skipped: set[str] = set()
-                        for bkey in body_keys:
-                            if bkey in iter_skipped:
-                                await self._outcome(run_id, by_key[bkey], agent_ids[bkey], "skipped", idx)
-                                continue
-                            bnode = by_key[bkey]
-                            bdeps = list(bnode.get("dependsOn") or [])
-                            bupstream = {
-                                dep: (iter_outputs.get(dep) if dep in iter_outputs else outputs.get(dep, {}))
-                                for dep in bdeps
-                            }
-                            if bnode.get("type") == _APPROVAL_TYPE:
-                                # Inside a loop each item's approval is its own row
-                                # (iteration = item index) and is waited on in place.
-                                bresult = await self._approval_inline(
-                                    run_id, bnode, agent_ids[bkey], bupstream, run_input, extra, idx,
-                                )
-                            else:
-                                bresult = await self._execute(
-                                    run_id, bnode, agent_ids[bkey], bupstream, run_input, extra=extra,
-                                    shortcuts=False,
-                                )
-                            if bnode.get("type") != _APPROVAL_TYPE:
-                                await self._outcome(run_id, bnode, agent_ids[bkey],
-                                                    "failed" if bresult.failed else _status_of(bresult), idx)
-                            if bresult.failed:
-                                await workflow.execute_activity(
-                                    activities.finish_run,
-                                    activities.FinishInput(run_id=run_id, status="failed", step="Failed", error=bresult.error),
-                                    start_to_close_timeout=_IO_TIMEOUT,
-                                    retry_policy=_NODE_RETRY,
-                                )
-                                loop_failed = True
-                                break
-                            iter_outputs[bkey] = bresult.output or {}
-                            if not bresult.gate_open:
-                                for pruned in plan.descendants(bkey, dependents):
-                                    if pruned in body_keys:
-                                        iter_skipped.add(pruned)
-                        if loop_failed:
-                            return {"run_id": run_id, "done": False, "failed_node": key}
-                        outputs.update(iter_outputs)
-                        if len(iter_outputs) == 1:
-                            results.append(next(iter(iter_outputs.values())))
-                        else:
-                            results.append(iter_outputs)
-                    outputs[key]["results"] = results
-                    if not items:
-                        for bkey in body_keys:
-                            await workflow.execute_activity(
-                                activities.skip_node,
-                                activities.SkipNodeInput(run_id=run_id, agent_id=agent_ids[bkey], key=bkey),
-                                start_to_close_timeout=_IO_TIMEOUT,
-                                retry_policy=_NODE_RETRY,
-                            )
-                            outputs[bkey] = {"skipped": True}
+                    if not await self._fan_out(run_id, key, ordered, dependents, agent_ids, body_keys,
+                                               outputs, run_input):
+                        return {"run_id": run_id, "done": False, "failed_node": key}
 
                 # Gate whose condition was false → prune its downstream subgraph.
                 if not result.gate_open:
@@ -406,10 +349,14 @@ class DynamicWorkflow:
         return opened
 
     async def _resolve(self, run_id: str, key: str) -> activities.RunNodeResult:
-        """Block until the approval opened for `key` is decided or times out,
-        then turn the decision into the node's output (a gate: approved opens
-        it, rejected / timed out prunes everything downstream)."""
-        approval_id, deadline, agent_id, on_timeout, title = self._pending.pop(key)
+        return await self._resolve_entry(run_id, key, self._pending.pop(key))
+
+    async def _resolve_entry(self, run_id: str, key: str,
+                             entry: tuple[str, datetime, str, str, str]) -> activities.RunNodeResult:
+        """Block until the approval `entry` is decided or times out, then turn
+        the decision into the node's output (a gate: approved opens it,
+        rejected / timed out prunes everything downstream)."""
+        approval_id, deadline, agent_id, on_timeout, title = entry
         self._resolved[key] = approval_id
         timed_out = False
         if approval_id not in self._decisions:
@@ -462,13 +409,138 @@ class DynamicWorkflow:
             retry_policy=_NODE_RETRY,
         )
 
-    async def _approval_inline(self, run_id: str, node: dict[str, Any], agent_id: str,
-                               upstream: dict[str, Any], run_input: dict[str, Any],
-                               extra: dict[str, Any], iteration: int) -> activities.RunNodeResult:
-        opened = await self._open_approval(run_id, node, agent_id, upstream, run_input, extra, iteration)
-        if opened.failed:
-            return activities.RunNodeResult(failed=True, error=f"{_APPROVAL_TYPE}: {opened.error}")
-        return await self._resolve(run_id, node["key"])
+    async def _fan_out(self, run_id: str, loop_key: str, ordered: list[dict[str, Any]],
+                       dependents: dict[str, list[str]], agent_ids: dict[str, str], body_keys: list[str],
+                       outputs: dict[str, dict[str, Any]], run_input: dict[str, Any]) -> bool:
+        """Run a loop's body once per item. Returns False if the run failed.
+
+        Like the top-level pass, an item's nodes that wait on its undecided
+        approval are set aside: every item first runs up to its approvals, so
+        all of them reach the Inbox together. Then items are finished in order,
+        each blocking only on its own approvals. Without this, item 2's draft
+        wouldn't reach the Inbox until item 1 had been decided (and, with a
+        logic.wait in the body, published)."""
+        by_key = {n["key"]: n for n in ordered}
+        items = list(outputs[loop_key].get("items") or [])
+        iters: list[dict[str, Any]] = []
+        for idx, item in enumerate(items):
+            it: dict[str, Any] = {
+                "idx": idx, "extra": {"item": item, "loop": {loop_key: {"index": idx}}},
+                "outputs": {}, "skipped": set(), "pending": {}, "remaining": list(body_keys),
+            }
+            if not await self._advance(run_id, it, by_key, dependents, agent_ids, body_keys, outputs, run_input):
+                return False
+            iters.append(it)
+        for it in iters:
+            while it["pending"]:
+                bkey = next(iter(it["pending"]))
+                decided = await self._resolve_entry(run_id, bkey, it["pending"].pop(bkey))
+                if decided.failed:
+                    await self._fail_run(run_id, bkey, decided.error)
+                    return False
+                it["outputs"][bkey] = decided.output or {}
+                if not decided.gate_open:
+                    it["skipped"].update(k for k in plan.descendants(bkey, dependents) if k in body_keys)
+                if not await self._advance(run_id, it, by_key, dependents, agent_ids, body_keys, outputs, run_input):
+                    return False
+            if it["remaining"]:
+                await self._fail_run(run_id, loop_key, f"loop item {it['idx']} could not finish: {it['remaining']}")
+                return False
+
+        results: list[Any] = []
+        for it in iters:
+            outputs.update(it["outputs"])
+            vals = it["outputs"]
+            results.append(next(iter(vals.values())) if len(vals) == 1 else vals)
+        outputs[loop_key]["results"] = results
+        if not items:
+            for bkey in body_keys:
+                await workflow.execute_activity(
+                    activities.skip_node,
+                    activities.SkipNodeInput(run_id=run_id, agent_id=agent_ids[bkey], key=bkey),
+                    start_to_close_timeout=_IO_TIMEOUT,
+                    retry_policy=_NODE_RETRY,
+                )
+                outputs[bkey] = {"skipped": True}
+        return True
+
+    async def _advance(self, run_id: str, it: dict[str, Any], by_key: dict[str, dict[str, Any]],
+                       dependents: dict[str, list[str]], agent_ids: dict[str, str], body_keys: list[str],
+                       outputs: dict[str, dict[str, Any]], run_input: dict[str, Any]) -> bool:
+        """Run one loop item's body nodes until the rest wait on its pending
+        approvals. Returns False if the run failed."""
+        remaining: list[str] = []
+        blocked: set[str] = set()
+        for bkey in it["remaining"]:
+            bnode = by_key[bkey]
+            if bkey in it["skipped"]:
+                await self._outcome(run_id, bnode, agent_ids[bkey], "skipped", it["idx"])
+                continue
+            bdeps = list(bnode.get("dependsOn") or [])
+            if any(d in it["pending"] or d in blocked for d in bdeps):
+                blocked.add(bkey)
+                remaining.append(bkey)
+                continue
+            bupstream = {dep: (it["outputs"][dep] if dep in it["outputs"] else outputs.get(dep, {})) for dep in bdeps}
+            if bnode.get("type") == _APPROVAL_TYPE:
+                # Inside a loop each item's approval is its own row (iteration = item index).
+                opened = await self._open_approval(run_id, bnode, agent_ids[bkey], bupstream, run_input,
+                                                   it["extra"], it["idx"])
+                if opened.failed:
+                    await self._fail_run(run_id, bkey, f"{_APPROVAL_TYPE}: {opened.error}")
+                    return False
+                it["pending"][bkey] = self._pending.pop(bkey)
+                it["outputs"][bkey] = {"approvalId": opened.approval_id, "pending": True}
+                continue
+            bresult = await self._execute(run_id, bnode, agent_ids[bkey], bupstream, run_input,
+                                          extra=it["extra"], shortcuts=False)
+            await self._outcome(run_id, bnode, agent_ids[bkey],
+                                "failed" if bresult.failed else _status_of(bresult), it["idx"])
+            if bresult.failed:
+                await self._fail_run(run_id, bkey, bresult.error)
+                return False
+            it["outputs"][bkey] = bresult.output or {}
+            if not bresult.gate_open:
+                it["skipped"].update(k for k in plan.descendants(bkey, dependents) if k in body_keys)
+        it["remaining"] = remaining
+        return True
+
+    async def _wait(self, run_id: str, node: dict[str, Any], agent_id: str, upstream: dict[str, Any],
+                    run_input: dict[str, Any], extra: dict[str, Any] | None) -> activities.RunNodeResult:
+        """logic.wait: sleep on a durable Temporal timer (no worker is held)."""
+        prep = await workflow.execute_activity(
+            waits.prepare_wait,
+            waits.PrepareWaitInput(run_id=run_id, node=node, agent_id=agent_id, upstream=upstream,
+                                   run_input=run_input, extra=extra or {}),
+            start_to_close_timeout=_IO_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
+        if prep.failed:
+            return activities.RunNodeResult(failed=True, error=f"{_WAIT_TYPE}: {prep.error}")
+        base = workflow.info().start_time if prep.from_run_start else workflow.now()
+        target = base + timedelta(hours=prep.hours)
+        remaining = (target - workflow.now()).total_seconds()
+        if remaining > 0:
+            await workflow.execute_activity(
+                approval.set_waiting,
+                approval.SetWaitingInput(run_id=run_id, waiting=True,
+                                         step=f"Waiting until {target.isoformat(timespec='minutes')}"),
+                start_to_close_timeout=_IO_TIMEOUT, retry_policy=_NODE_RETRY,
+            )
+            await workflow.sleep(timedelta(seconds=remaining))
+            await workflow.execute_activity(
+                approval.set_waiting,
+                approval.SetWaitingInput(run_id=run_id, waiting=False, step=f"Resumed after waiting ({node['key']})"),
+                start_to_close_timeout=_IO_TIMEOUT, retry_policy=_NODE_RETRY,
+            )
+        return await workflow.execute_activity(
+            waits.finish_wait,
+            waits.FinishWaitInput(run_id=run_id, agent_id=agent_id, key=node["key"], hours=prep.hours,
+                                  resumed_at=workflow.now().isoformat(timespec="seconds"),
+                                  from_run_start=prep.from_run_start),
+            start_to_close_timeout=_IO_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
 
     async def _execute(
         self,
@@ -545,6 +617,8 @@ class DynamicWorkflow:
         local `run_node` activity. Both return the same RunNodeResult shape, so
         the loop/gate/skip logic above is backend-agnostic.
         """
+        if node.get("type") == _WAIT_TYPE:
+            return await self._wait(run_id, node, agent_id, upstream, run_input, extra)
         if str(node.get("type", "")).startswith(_PIECE_PREFIX):
             return await self._run_piece_node(run_id, node, agent_id, upstream, run_input, extra,
                                               timeout_s=timeout_s, attempt=attempt)

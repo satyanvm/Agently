@@ -80,6 +80,11 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/brand", getBrand(p))
 		r.Put("/brand", updateBrand(p))
 
+		// Ready-made playbooks to start from (services/playbooks.go).
+		r.Get("/playbooks", listPlaybooks(p))
+		r.Get("/playbooks/{id}", getPlaybook(p))
+		r.Post("/playbooks/{id}/install", installPlaybook(p))
+
 		// Approvals: drafts waiting for a person (services/approval_service.go).
 		r.Get("/approvals", listApprovals(p))
 		r.Get("/approvals/{id}", getApproval(p))

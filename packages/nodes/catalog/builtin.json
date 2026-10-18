@@ -47,9 +47,10 @@
         { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
         { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true, "help": "Supports {{input.x}} and {{outputs.key.field}}" },
         { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"], "help": "Leave unset to use the deployment default (REASONER_MODEL). Set only when the user names a specific model." },
+        { "key": "responseFormat", "label": "Response format", "control": "select", "required": false, "options": ["text", "json"], "help": "json: the reply is parsed into outputs.<key>.data so branches and loops can use its fields (e.g. outputs.assess.data.verdict). Say in the prompt exactly which fields to return. A reply that isn't JSON fails the step." },
         { "key": "brand", "label": "Use brand context", "control": "select", "required": false, "options": ["false", "true"], "help": "Set true on every step that DRAFTS content for an audience (posts, emails, blog copy, battlecards, ad copy): the workspace's brand voice, product facts, positioning and claims to avoid are added to the system prompt. Leave false for analysis and classification." }
       ],
-      "outputs": ["text", "model", "brandContextUpdatedAt"],
+      "outputs": ["text", "model", "data", "brandContextUpdatedAt"],
       "credentials": []
     },
     {
@@ -229,6 +230,20 @@
         { "key": "signalIds", "label": "Signals (ids, optional)", "control": "text", "required": false, "help": "Defaults to every signal recorded earlier in this run." }
       ],
       "outputs": ["approvalId", "decision", "approved", "content", "approver", "note", "decidedAt", "passed", "url"],
+      "credentials": []
+    },
+    {
+      "id": "logic.wait",
+      "label": "Wait",
+      "description": "Pause the run on a durable timer, then continue: schedule an approved post for later. hours can come from upstream (e.g. {{item.delayHours}} inside a loop). from = run_start gives absolute slots (24 = a day after the run started) so items of a loop don't add their waits up.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "wait delay pause schedule later timer sleep publish at time slot",
+      "config": [
+        { "key": "hours", "label": "Hours", "control": "text", "required": true, "placeholder": "24" },
+        { "key": "from", "label": "Counted from", "control": "select", "required": false, "options": ["now", "run_start"] }
+      ],
+      "outputs": ["waitedHours", "resumedAt", "fromRunStart"],
       "credentials": []
     },
     {
