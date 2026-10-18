@@ -197,6 +197,23 @@ class ApprovalDbTest(unittest.TestCase):
         self.assertFalse(res2.failed, "a real decision is not a timeout")
         self.assertEqual(res2.output["decision"], "rejected")
 
+    def test_record_outcome_links_published_item_once(self):
+        opened = self.open()
+        asyncio.run(self._sql(
+            "insert into run_agents (id, run_id, name, role, model, status, summary, output) values "
+            "('ra_pub', %s, 'publish', 'browser', 'none', 'succeeded', 'Posted to LinkedIn', %s::jsonb)",
+            (self.run, '{"result": {"id": "urn:1", "permalink": "https://linkedin.test/p/1"}}')))
+        inp = approval.RecordOutcomeInput(run_id=self.run, agent_id="ra_pub", key="publish",
+                                          node_type="pieces.linkedin.create_share_update", status="succeeded",
+                                          approval_ids=[opened.approval_id], outcome_ids=["out_test0000000000000001"])
+        asyncio.run(approval.record_outcome(inp))
+        asyncio.run(approval.record_outcome(inp))  # a retried activity
+        rows = asyncio.run(self._sql(
+            "select node_key, node_type, status, summary, url, output->'result'->>'id' from approval_outcomes "
+            "where approval_id = %s", (opened.approval_id,)))
+        self.assertEqual(rows, [("publish", "pieces.linkedin.create_share_update", "succeeded",
+                                 "Posted to LinkedIn", "https://linkedin.test/p/1", "urn:1")])
+
     def test_relay_to_a_finished_run_is_stamped(self):
         opened = self.open()
         asyncio.run(self._sql("update approvals set status='approved', decided_by='R', decided_at=now() where id = %s",

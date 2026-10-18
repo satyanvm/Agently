@@ -94,6 +94,11 @@ class DynamicWorkflow:
         # node key → (approval id, deadline, agent id, onTimeout, title) for
         # approvals opened but not yet resolved.
         self._pending: dict[str, tuple[str, datetime, str, str, str]] = {}
+        # approval node key → id of its decided approval (the latest item's,
+        # inside a loop), and each node's ancestors: what runs after a
+        # decision is recorded against it (approval_outcomes).
+        self._resolved: dict[str, str] = {}
+        self._ancestors: dict[str, set[str]] = {}
 
     @workflow.signal
     def approval_decided(self, payload: dict[str, Any]) -> None:
@@ -137,6 +142,7 @@ class DynamicWorkflow:
         dependents = plan.dependents_of(ordered)
         total = len(ordered)
         self._target = target
+        self._ancestors = {n["key"]: plan.ancestors(n["key"], ordered) for n in ordered}
         include = (plan.ancestors(target, ordered) | {target}) if target else None
 
         # 2) Drive the deterministic loop; each node is its own activity.
@@ -192,6 +198,7 @@ class DynamicWorkflow:
                         retry_policy=_NODE_RETRY,
                     )
                     outputs[key] = {"skipped": True}
+                    await self._outcome(run_id, node, agent_id, "skipped")
                     done += 1
                     await self._progress(run_id, done, total, f"Skipped {key}")
                     continue
@@ -223,6 +230,7 @@ class DynamicWorkflow:
                 )
 
                 if result.failed:
+                    await self._outcome(run_id, node, agent_id, "failed")
                     await workflow.execute_activity(
                         activities.finish_run,
                         activities.FinishInput(run_id=run_id, status="failed", step="Failed", error=result.error),
@@ -232,6 +240,7 @@ class DynamicWorkflow:
                     return {"run_id": run_id, "done": False, "failed_node": key}
 
                 outputs[key] = result.output or {}
+                await self._outcome(run_id, node, agent_id, _status_of(result))
 
                 # logic.loop: fan its dominated body out once per item, each body-node
                 # execution its own durable activity. The items list is part of this
@@ -250,6 +259,7 @@ class DynamicWorkflow:
                         iter_skipped: set[str] = set()
                         for bkey in body_keys:
                             if bkey in iter_skipped:
+                                await self._outcome(run_id, by_key[bkey], agent_ids[bkey], "skipped", idx)
                                 continue
                             bnode = by_key[bkey]
                             bdeps = list(bnode.get("dependsOn") or [])
@@ -268,6 +278,9 @@ class DynamicWorkflow:
                                     run_id, bnode, agent_ids[bkey], bupstream, run_input, extra=extra,
                                     shortcuts=False,
                                 )
+                            if bnode.get("type") != _APPROVAL_TYPE:
+                                await self._outcome(run_id, bnode, agent_ids[bkey],
+                                                    "failed" if bresult.failed else _status_of(bresult), idx)
                             if bresult.failed:
                                 await workflow.execute_activity(
                                     activities.finish_run,
@@ -395,6 +408,7 @@ class DynamicWorkflow:
         then turn the decision into the node's output (a gate: approved opens
         it, rejected / timed out prunes everything downstream)."""
         approval_id, deadline, agent_id, on_timeout, title = self._pending.pop(key)
+        self._resolved[key] = approval_id
         timed_out = False
         if approval_id not in self._decisions:
             await workflow.execute_activity(
@@ -419,6 +433,29 @@ class DynamicWorkflow:
             approval.resolve_approval,
             approval.ResolveApprovalInput(run_id=run_id, agent_id=agent_id, key=key, approval_id=approval_id,
                                           on_timeout=on_timeout, timed_out=timed_out),
+            start_to_close_timeout=_IO_TIMEOUT,
+            retry_policy=_NODE_RETRY,
+        )
+
+    async def _outcome(self, run_id: str, node: dict[str, Any], agent_id: str, status: str,
+                       iteration: int = 0) -> None:
+        """Record a node that ran (or was skipped) after one or more decisions
+        against each of those approvals. Nodes with no decided approval
+        upstream record nothing (and add nothing to history)."""
+        if node.get("type") == _APPROVAL_TYPE:
+            return
+        ids = sorted({self._resolved[a] for a in self._ancestors.get(node["key"], set()) if a in self._resolved})
+        if not ids:
+            return
+        await workflow.execute_activity(
+            approval.record_outcome,
+            approval.RecordOutcomeInput(
+                run_id=run_id, agent_id=agent_id, key=node["key"], node_type=str(node.get("type") or ""),
+                status=status, approval_ids=ids,
+                # Minted in workflow code (deterministic on replay) so a retried
+                # activity can't insert the same outcome twice.
+                outcome_ids=[f"out_{workflow.uuid4().hex[:20]}" for _ in ids],
+            ),
             start_to_close_timeout=_IO_TIMEOUT,
             retry_policy=_NODE_RETRY,
         )
@@ -606,6 +643,12 @@ class DynamicWorkflow:
             start_to_close_timeout=_IO_TIMEOUT,
             retry_policy=_NODE_RETRY,
         )
+
+
+def _status_of(result: Any) -> str:
+    """succeeded, or failed for a continue-on-fail node (its output is {"error": …})."""
+    out = getattr(result, "output", None) or {}
+    return "failed" if set(out) == {"error"} else "succeeded"
 
 
 def _is_timeout(exc: ActivityError) -> bool:

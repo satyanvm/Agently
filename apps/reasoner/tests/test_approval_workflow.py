@@ -47,6 +47,8 @@ class Fake:
         self.waiting: list[bool] = []
         self.rows: dict[str, dict[str, Any]] = {}          # approval id → row
         self.events: list[str] = []                        # open/wait ordering
+        self.outcomes: list[tuple[str, str, tuple[str, ...]]] = []  # (node, status, approval ids)
+        self.outcome_ids: list[str] = []
 
     def decide(self, approval_id: str, status: str, content: str | None = None, by: str = "Rahul") -> None:
         row = self.rows[approval_id]
@@ -128,8 +130,14 @@ class Fake:
                                            "approver": row["by"] or "", "passed": approved},
                                    gate_open=approved)
 
+        @activity.defn(name="record_outcome")
+        async def record_outcome(inp: AP.RecordOutcomeInput) -> None:
+            if not set(inp.outcome_ids) & set(f.outcome_ids):   # same ids on a retry → nothing new
+                f.outcomes.append((inp.key, inp.status, tuple(inp.approval_ids)))
+                f.outcome_ids.extend(inp.outcome_ids)
+
         return [load_graph, run_node, skip_node, use_output, fail_node, finish_run, add_edge,
-                set_progress, open_approval, set_waiting, resolve_approval]
+                set_progress, open_approval, set_waiting, resolve_approval, record_outcome]
 
 
 def llm(key: str, deps: list[str] | None = None) -> dict[str, Any]:
@@ -194,6 +202,7 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertIn("publish", fake.ran)
         self.assertEqual(fake.upstream["publish"]["ok"]["content"], "edited by Rahul")
         self.assertEqual(fake.waiting, [True, False])  # paused while blocked, running after
+        self.assertEqual(fake.outcomes, [("publish", "succeeded", ("apr_ok_0",))])
 
     def test_reject_skips_everything_downstream(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"]), llm("after", ["publish"])])
@@ -205,6 +214,8 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertEqual(fake.finish.status, "succeeded")
         self.assertNotIn("publish", fake.ran)
         self.assertEqual(sorted(fake.skipped), ["after", "publish"])
+        self.assertEqual(sorted(fake.outcomes), [("after", "skipped", ("apr_ok_0",)),
+                                                 ("publish", "skipped", ("apr_ok_0",))])
 
     def test_timeout_skips_by_default(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"], timeoutHours="1"), llm("publish", ["ok"])])
@@ -235,6 +246,9 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertIn("publish_post", fake.ran)
         self.assertNotIn("send_email", fake.ran)
         self.assertEqual(fake.skipped, ["send_email"])
+        # Each outcome is filed under its own approval, not the other branch's.
+        self.assertEqual(sorted(fake.outcomes), [("publish_post", "succeeded", ("apr_ok_post_0",)),
+                                                 ("send_email", "skipped", ("apr_ok_email_0",))])
 
     def test_approval_with_no_dependents_is_resolved_before_finishing(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("other", ["draft"])])
@@ -267,6 +281,8 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.loop.run_until_complete(go())
         self.assertEqual(fake.opened, [("ok", 0), ("ok", 1)])
         self.assertEqual(fake.ran.count("publish"), 1)  # item 0 approved, item 1 rejected
+        self.assertEqual(fake.outcomes, [("publish", "succeeded", ("apr_ok_0",)),
+                                         ("publish", "skipped", ("apr_ok_1",))])
 
     def test_worker_restart_while_waiting(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"])])
@@ -293,6 +309,22 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertEqual(fake.opened, [("ok", 0)], "the approval must not be opened twice")
         self.assertEqual(fake.ran.count("draft"), 1, "completed nodes must not re-run")
         self.assertEqual(fake.upstream["publish"]["ok"]["content"], "final")
+        self.assertEqual(fake.outcomes, [("publish", "succeeded", ("apr_ok_0",))])
+
+    def test_nodes_before_the_approval_record_no_outcome(self):
+        fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"]), llm("side", ["draft"])])
+
+        def decide(f):
+            f.decide("apr_ok_0", "approved")
+            return ["apr_ok_0"]
+        self.run_wf(fake, self.deciding(["ok"], decide))
+        self.assertEqual([o[0] for o in fake.outcomes], ["publish"])
+
+    def test_published_url_extraction(self):
+        self.assertEqual(AP.published_url({"result": {"id": "1", "permalink": "https://x.test/p/1"}}),
+                         "https://x.test/p/1")
+        self.assertEqual(AP.published_url({"result": [{"webViewLink": "https://docs.test/d"}]}), "https://docs.test/d")
+        self.assertEqual(AP.published_url({"url": "not a link", "text": "hi"}), "")
 
     def test_timeout_hours_validation(self):
         self.assertEqual(AP.timeout_seconds({}), 72 * 3600)

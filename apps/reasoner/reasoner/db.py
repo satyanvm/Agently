@@ -706,3 +706,28 @@ async def set_run_waiting(run_id: str, waiting: bool, current_step: str) -> None
                 where id = %s and status in ('running', 'paused')""",
             ("paused" if waiting else "running", current_step, run_id),
         )
+
+
+async def agent_row(agent_id: str) -> dict[str, Any] | None:
+    """A node's recorded status, summary and output (run_agents)."""
+    async with _conn() as conn:
+        cur = await conn.execute("select status, summary, output, error from run_agents where id = %s", (agent_id,))
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def insert_approval_outcome(
+    outcome_id: str, *, approval_id: str, run_id: str, node_key: str, node_type: str, status: str,
+    summary: str, url: str, output: Any,
+) -> None:
+    """Record what ran after a decision. The id is minted deterministically by
+    the workflow, so a retried activity inserts nothing new."""
+    async with _conn() as conn:
+        await conn.execute(
+            """insert into approval_outcomes
+                  (id, approval_id, run_id, node_key, node_type, status, summary, url, output, occurred_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+                on conflict (id) do nothing""",
+            (outcome_id, approval_id, run_id, node_key, node_type, status, summary, url,
+             None if output is None else json.dumps(output)),
+        )

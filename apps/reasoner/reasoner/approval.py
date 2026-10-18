@@ -234,4 +234,58 @@ async def resolve_approval(inp: ResolveApprovalInput) -> RunNodeResult:
     return RunNodeResult(output=out, gate_open=approved)
 
 
-ACTIVITIES = [open_approval, set_waiting, resolve_approval]
+@dataclass
+class RecordOutcomeInput:
+    run_id: str
+    agent_id: str
+    key: str
+    node_type: str
+    status: str                 # succeeded | failed | skipped
+    approval_ids: list[str] = field(default_factory=list)
+    outcome_ids: list[str] = field(default_factory=list)  # one per approval, minted by the workflow
+
+
+# Output fields that commonly hold a link to the thing a node created
+# (a post, a doc, a page). Searched a few levels deep.
+_URL_KEYS = ("url", "permalink", "link", "webViewLink", "htmlUrl", "html_url", "documentUrl",
+             "postUrl", "publicUrl", "href")
+MAX_OUTCOME_OUTPUT = 64_000
+
+
+def published_url(output: Any, depth: int = 0) -> str:
+    """Best-effort link to what a node produced; '' when there is none."""
+    if depth > 3:
+        return ""
+    if isinstance(output, dict):
+        for k in _URL_KEYS:
+            v = output.get(k)
+            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                return v
+        for v in output.values():
+            if isinstance(v, (dict, list)) and (found := published_url(v, depth + 1)):
+                return found
+    elif isinstance(output, list):
+        for v in output[:20]:
+            if found := published_url(v, depth + 1):
+                return found
+    return ""
+
+
+@activity.defn
+async def record_outcome(inp: RecordOutcomeInput) -> None:
+    """Link a node that ran (or was skipped) after a decision to that
+    approval — for a publish node, this row IS the published item."""
+    row = await db.agent_row(inp.agent_id) or {}
+    output = row.get("output")
+    if output is not None and len(json.dumps(output, default=str)) > MAX_OUTCOME_OUTPUT:
+        output = {"truncated": True, "note": "output too large to keep with the approval; see the run"}
+    summary = str(row.get("summary") or row.get("error") or "")[:500]
+    url = published_url(row.get("output")) if inp.status == "succeeded" else ""
+    for approval_id, outcome_id in zip(inp.approval_ids, inp.outcome_ids):
+        await db.insert_approval_outcome(
+            outcome_id, approval_id=approval_id, run_id=inp.run_id, node_key=inp.key, node_type=inp.node_type,
+            status=inp.status, summary=summary, url=url, output=output,
+        )
+
+
+ACTIVITIES = [open_approval, set_waiting, resolve_approval, record_outcome]
