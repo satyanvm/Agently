@@ -206,8 +206,11 @@ class ApprovalWorkflowTest(unittest.TestCase):
 
     @staticmethod
     def deciding(keys: list[str], fn):
-        """A decide callback that waits until approvals for `keys` are open."""
-        fn.ready = lambda f: all(any(k == o[0] for o in f.opened) for k in keys)
+        """A decide callback that waits until approvals for `keys` are open and
+        the run has paused on one. Deciding earlier races the workflow: a
+        decision that lands while an approval is still opening is (correctly)
+        taken without pausing, so the tests' waiting/event checks came up empty."""
+        fn.ready = lambda f: True in f.waiting and all(any(k == o[0] for o in f.opened) for k in keys)
         return fn
 
     def test_approve_with_edit_runs_downstream_with_final_text(self):
