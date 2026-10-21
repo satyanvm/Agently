@@ -30,7 +30,7 @@ from typing import Any
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.contrib.langgraph import graph
-from temporalio.exceptions import ActivityError, TimeoutError as TemporalTimeoutError
+from temporalio.exceptions import ActivityError, TimeoutError as TemporalTimeoutError, TimeoutType
 
 # Pure logic (reasoner.plan) and the activity definitions are imported under the
 # sandbox pass-through: they must not be re-validated/instrumented by the workflow
@@ -82,6 +82,13 @@ _PARALLEL_PATCH = "parallel-nodes-v1"
 # value as workflow input (RUN_MAX_PARALLEL) so a replay always sees the same one.
 _DEFAULT_MAX_PARALLEL = 8
 
+# Runs started after this patch (a) run publishing steps exactly once, with no
+# Temporal or node-level retry, since a retry after a timeout can post twice;
+# and (b) in runs with approvals, let a failed step skip only what depends on
+# it, so the run's other drafts still reach a decision and publish. Runs in
+# flight when it shipped replay the old behaviour.
+_PUBLISH_SAFETY_PATCH = "publish-safety-v1"
+
 
 def _activity_reason(exc: ActivityError) -> str:
     """The underlying reason of a failed activity. ActivityError's own message
@@ -119,6 +126,9 @@ class DynamicWorkflow:
         # decision is recorded against it (approval_outcomes).
         self._resolved: dict[str, str] = {}
         self._ancestors: dict[str, set[str]] = {}
+        # Set in run() under _PUBLISH_SAFETY_PATCH.
+        self._publishing: set[str] = set()
+        self._keep_going = False
 
     @workflow.signal
     def approval_decided(self, payload: dict[str, Any]) -> None:
@@ -159,13 +169,17 @@ class DynamicWorkflow:
             return await self._fail_run(run_id, "", loaded.error)
 
         self._target = target
+        has_approval = any(n.get("type") == _APPROVAL_TYPE for n in loaded.graph)
+        safety = workflow.patched(_PUBLISH_SAFETY_PATCH)
+        self._publishing = set(loaded.publishing) if safety else set()
+        # Builder test runs keep failing fast: they're for seeing one step work.
+        self._keep_going = safety and has_approval and not (target or self._use_pins)
         # Approvals and builder test runs keep the one-pass-at-a-time loop: it
         # opens every reachable approval before blocking on any, and step runs
         # / pins are served there. Everything else runs in parallel. The choice
         # depends only on the workflow input and load_graph's result (both in
         # history), so a replay takes the same path.
         if workflow.patched(_PARALLEL_PATCH):
-            has_approval = any(n.get("type") == _APPROVAL_TYPE for n in loaded.graph)
             if not (has_approval or target or self._use_pins):
                 max_parallel = max(1, int(params.get("max_parallel") or _DEFAULT_MAX_PARALLEL))
                 return await self._run_parallel(run_id, run_input, loaded, max_parallel)
@@ -189,6 +203,7 @@ class DynamicWorkflow:
         outputs: dict[str, dict[str, Any]] = {}
         skipped: set[str] = set()
         fanned_out: set[str] = set()  # loop-body nodes run by the fan-out below
+        failures: list[tuple[str, str]] = []  # (key, error) when _keep_going
         done = 0
         # Nodes waiting on an undecided approval are set aside and the pass
         # goes on, so every other branch (and every other approval request)
@@ -271,6 +286,14 @@ class DynamicWorkflow:
 
                 if result.failed:
                     await self._outcome(run_id, node, agent_id, "failed")
+                    if self._keep_going:
+                        # Only what depends on this step is lost; every other
+                        # draft still waits for its decision and publishes.
+                        failures.append((key, result.error))
+                        skipped.update(plan.descendants(key, dependents))
+                        done += 1
+                        await self._progress(run_id, done, total, f"Failed {key}; carrying on with the rest")
+                        continue
                     await workflow.execute_activity(
                         activities.finish_run,
                         activities.FinishInput(run_id=run_id, status="failed", step="Failed", error=result.error),
@@ -322,6 +345,11 @@ class DynamicWorkflow:
             decided = await self._resolve(run_id, key)
             if decided.failed:
                 return await self._fail_run(run_id, key, decided.error)
+
+        if failures:
+            first_key, first_error = failures[0]
+            more = f" ({len(failures)} steps failed; see the run)" if len(failures) > 1 else ""
+            return await self._fail_run(run_id, first_key, first_error + more)
 
         # 3) Finish the run.
         await workflow.execute_activity(
@@ -735,6 +763,8 @@ class DynamicWorkflow:
                 )
 
         retries, wait_s, timeout_s, continue_on_fail = plan.node_policy(node)
+        if key in self._publishing:
+            retries = 0  # never post twice (_PUBLISH_SAFETY_PATCH)
         attempt = 0
         while True:
             attempt += 1
@@ -789,13 +819,16 @@ class DynamicWorkflow:
                 # A user timeout is a hard bound: one Temporal attempt, and the
                 # node's own retries (_execute) decide whether to go again.
                 start_to_close_timeout=timedelta(seconds=timeout_s) if timeout_s else _NODE_TIMEOUT,
-                retry_policy=RetryPolicy(maximum_attempts=1) if timeout_s else _NODE_RETRY,
+                retry_policy=(RetryPolicy(maximum_attempts=1)
+                              if timeout_s or node["key"] in self._publishing else _NODE_RETRY),
             )
         except ActivityError as exc:
             # Timed out, or the worker kept dying: the activity never recorded
             # the failure itself, so do it here and fail the node cleanly.
             error = (f"timed out after {timeout_s:g}s" if timeout_s and _is_timeout(exc)
                      else f"node activity failed: {_activity_reason(exc)}")
+            if node["key"] in self._publishing:
+                error += _MAY_HAVE_PUBLISHED
             await workflow.execute_activity(
                 activities.fail_node,
                 activities.FailNodeInput(run_id=run_id, agent_id=agent_id, key=node["key"],
@@ -845,7 +878,8 @@ class DynamicWorkflow:
                     task_queue=self._pieces_queue,
                     schedule_to_start_timeout=_PIECE_SCHEDULE_TO_START,
                     start_to_close_timeout=timedelta(seconds=timeout_s) if timeout_s else _PIECE_TIMEOUT,
-                    retry_policy=RetryPolicy(maximum_attempts=1) if timeout_s else _PIECE_RETRY,
+                    retry_policy=(RetryPolicy(maximum_attempts=1)
+                                  if timeout_s or node["key"] in self._publishing else _PIECE_RETRY),
                 )
                 mode = "execute"
             except ActivityError as exc:
@@ -856,6 +890,10 @@ class DynamicWorkflow:
                     "error": (f"timed out after {timeout_s:g}s" if timed_out
                               else f"execute_piece failed: {_activity_reason(exc)}"),
                 }
+                # Never reached before scheduling (no worker polling) means it
+                # can't have run; otherwise it may have posted before failing.
+                if node["key"] in self._publishing and not _never_started(exc):
+                    result["error"] += _MAY_HAVE_PUBLISHED
                 mode = "execute"
         else:
             result, mode = prep.result, "trigger"
@@ -887,3 +925,13 @@ def _status_of(result: Any) -> str:
 
 def _is_timeout(exc: ActivityError) -> bool:
     return isinstance(exc.cause, TemporalTimeoutError)
+
+
+def _never_started(exc: ActivityError) -> bool:
+    """No worker picked the activity up (schedule-to-start timeout)."""
+    cause = exc.cause
+    return isinstance(cause, TemporalTimeoutError) and cause.type == TimeoutType.SCHEDULE_TO_START
+
+
+_MAY_HAVE_PUBLISHED = ("; it may have published before failing, so check the account before running "
+                       "it again (publishing steps are never retried automatically)")

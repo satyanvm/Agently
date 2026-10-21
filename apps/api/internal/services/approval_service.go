@@ -130,8 +130,16 @@ func (s *ApprovalService) Get(id domain.ApprovalId) (ApprovalDetail, error) {
 // Decide records a person's decision. The waiting run is woken by the
 // reasoner's relay within a couple of seconds; nothing is published here.
 func (s *ApprovalService) Decide(id domain.ApprovalId, in validate.DecisionInput) (ApprovalDetail, error) {
-	if _, err := s.get(id); err != nil {
+	a, err := s.get(id)
+	if err != nil {
 		return ApprovalDetail{}, err
+	}
+	// A run that has ended can't be woken, so an approval here would publish
+	// nothing while the Inbox said "Approved". Refuse it with the reason.
+	if run, ok := s.deps.Repos.Runs.GetByID(a.RunID); ok && a.Status == domain.ApprovalPending &&
+		domain.IsTerminalRunStatus(run.Status) {
+		return ApprovalDetail{}, domain.Conflict("the run that drafted this has already " + endedAs(run.Status) +
+			", so deciding now would publish nothing; run the playbook again for a new draft")
 	}
 	if _, err := s.deps.Repos.Approvals.Decide(id, domain.ApprovalDecision{
 		Status: in.Status, FinalContent: in.Content, DecidedBy: in.DecidedBy, Note: in.Note, DecidedAt: s.now(),
@@ -236,6 +244,16 @@ func actsExternally(nodeType string) bool {
 		return nodeType == "tool.http"
 	}
 	return true
+}
+
+func endedAs(st domain.RunStatus) string {
+	switch st {
+	case domain.RunSucceeded:
+		return "finished"
+	case domain.RunCanceled:
+		return "been canceled"
+	}
+	return "failed"
 }
 
 func deref(s *string) string {

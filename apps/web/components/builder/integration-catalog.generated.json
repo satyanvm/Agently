@@ -155744,7 +155744,7 @@
  {
   "id": "pieces.linkedin.create_company_update",
   "label": "Create Company Update",
-  "description": "Create a new company update for Company Page",
+  "description": "Post on a LinkedIn Company Page you manage",
   "kind": "action",
   "runtime": "pieces",
   "cluster": "marketing",
@@ -155756,33 +155756,34 @@
     "required": true,
     "control": "text",
     "dynamic": true,
-    "help": "Options load dynamically in Activepieces — enter the raw value/ID directly"
-   },
-   {
-    "key": "imageUrl",
-    "label": "Image",
-    "control": "text",
-    "help": "Enter a URL to the file"
+    "help": "Only pages where your account can post are listed. — Options load dynamically in Activepieces — enter the raw value/ID directly"
    },
    {
     "key": "text",
     "label": "Text",
     "required": true,
-    "control": "textarea"
+    "control": "textarea",
+    "help": "Up to 3,000 characters of plain text; an @ does not tag anyone."
+   },
+   {
+    "key": "imageUrl",
+    "label": "Image",
+    "control": "text",
+    "help": "With a Link URL, the image becomes the link's thumbnail. — Enter a URL to the file"
    },
    {
     "key": "link",
-    "label": "Content - URL",
+    "label": "Link URL",
     "control": "text"
    },
    {
     "key": "linkTitle",
-    "label": "Content - Title",
+    "label": "Link Title",
     "control": "text"
    },
    {
     "key": "linkDescription",
-    "label": "Content - Description",
+    "label": "Link Description",
     "control": "text"
    }
   ],
@@ -155790,9 +155791,28 @@
   "credentialType": "pieces.linkedin"
  },
  {
-  "id": "pieces.linkedin.create_share_update",
-  "label": "Create Share Update",
-  "description": "Create a share update on LinkedIn",
+  "id": "pieces.linkedin.create_image_upload_url",
+  "label": "Create Image Upload URL",
+  "description": "Reserve a LinkedIn image URN and a URL to upload the bytes to",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [
+   {
+    "key": "owner_urn",
+    "label": "Owner URN",
+    "control": "text",
+    "help": "Who will own the image. Defaults to the connected member."
+   }
+  ],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.create_member_post",
+  "label": "Create Member Post",
+  "description": "Publish a post on the connected LinkedIn member's personal profile",
   "kind": "action",
   "runtime": "pieces",
   "cluster": "marketing",
@@ -155802,7 +155822,67 @@
     "key": "text",
     "label": "Text",
     "required": true,
-    "control": "textarea"
+    "control": "textarea",
+    "help": "Body of the post."
+   },
+   {
+    "key": "visibility",
+    "label": "Visibility",
+    "required": true,
+    "control": "select",
+    "options": [
+     "PUBLIC",
+     "CONNECTIONS"
+    ],
+    "help": "Who can see the post."
+   },
+   {
+    "key": "link",
+    "label": "Link URL",
+    "control": "text",
+    "help": "Optional URL to attach as an article preview."
+   },
+   {
+    "key": "link_title",
+    "label": "Link Title",
+    "control": "text"
+   },
+   {
+    "key": "link_description",
+    "label": "Link Description",
+    "control": "text"
+   },
+   {
+    "key": "image",
+    "label": "Image",
+    "control": "text",
+    "help": "Enter a URL to the file"
+   },
+   {
+    "key": "image_urn",
+    "label": "Image URN",
+    "control": "text",
+    "help": "URN of an image already uploaded to LinkedIn, for example urn:li:image:D4E10AQ.... Obtain it from Create Image Upload URL and PUT the bytes to that upload URL before posting."
+   }
+  ],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.create_share_update",
+  "label": "Create Share Update",
+  "description": "Post on your personal LinkedIn profile",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [
+   {
+    "key": "text",
+    "label": "Text",
+    "required": true,
+    "control": "textarea",
+    "help": "Up to 3,000 characters of plain text; an @ does not tag anyone."
    },
    {
     "key": "visibility",
@@ -155810,27 +155890,27 @@
     "required": true,
     "control": "text",
     "dynamic": true,
-    "help": "Options load dynamically in Activepieces — enter the raw value/ID directly"
+    "help": "Who can see the post. — Options load dynamically in Activepieces — enter the raw value/ID directly"
    },
    {
     "key": "imageUrl",
     "label": "Image",
     "control": "text",
-    "help": "Enter a URL to the file"
+    "help": "With a Link URL, the image becomes the link's thumbnail. — Enter a URL to the file"
    },
    {
     "key": "link",
-    "label": "Content - URL",
+    "label": "Link URL",
     "control": "text"
    },
    {
     "key": "linkTitle",
-    "label": "Content - Title",
+    "label": "Link Title",
     "control": "text"
    },
    {
     "key": "linkDescription",
-    "label": "Content - Description",
+    "label": "Link Description",
     "control": "text"
    }
   ],
@@ -155871,26 +155951,21 @@
    {
     "key": "headers",
     "label": "Headers",
-    "required": true,
     "control": "json",
-    "help": "Authorization headers are injected automatically from your connection."
+    "help": "Calls to /rest/ need LinkedIn-Version: 202511 and X-Restli-Protocol-Version: 2.0.0. Authorization comes from your connection."
    },
    {
     "key": "queryParams",
     "label": "Query Parameters",
-    "required": true,
-    "control": "json"
+    "control": "json",
+    "help": "Appended to the URL as ?key=value."
    },
    {
     "key": "body_type",
     "label": "Body Type",
-    "control": "select",
-    "options": [
-     "none",
-     "json",
-     "form_data",
-     "raw"
-    ]
+    "control": "text",
+    "dynamic": true,
+    "help": "Options load dynamically in Activepieces — enter the raw value/ID directly"
    },
    {
     "key": "body",
@@ -155901,24 +155976,122 @@
    },
    {
     "key": "response_is_binary",
-    "label": "Response is Binary ?",
+    "label": "Response is Binary",
     "control": "checkbox",
     "help": "Enable for files like PDFs, images, etc."
    },
    {
     "key": "failsafe",
-    "label": "No Error on Failure",
-    "control": "checkbox"
+    "label": "Return Error as Output",
+    "control": "checkbox",
+    "help": "On a failed request, output the error instead of failing the step."
    },
    {
     "key": "timeout",
-    "label": "Timeout (in seconds)",
-    "control": "number"
+    "label": "Timeout",
+    "control": "number",
+    "help": "Seconds to wait for a response. Empty: up to the flow limit (10 min)."
    },
    {
     "key": "followRedirects",
     "label": "Follow redirects",
-    "control": "checkbox"
+    "control": "checkbox",
+    "help": "Follow 3xx redirects instead of returning them as the response."
+   }
+  ],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.delete_post",
+  "label": "Delete Post",
+  "description": "Permanently delete a LinkedIn post by its URN",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [
+   {
+    "key": "post_urn",
+    "label": "Post URN",
+    "required": true,
+    "control": "text",
+    "help": "URN of the post to delete, for example urn:li:share:7212345678901234567."
+   }
+  ],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.get_current_member_profile",
+  "label": "Get Current Member Profile",
+  "description": "Get the profile of the LinkedIn member who owns the connection",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.list_managed_organizations",
+  "label": "List Managed Organizations",
+  "description": "List the LinkedIn organization pages the connected member administers",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [],
+  "credentials": [],
+  "credentialType": "pieces.linkedin"
+ },
+ {
+  "id": "pieces.linkedin.update_post_commentary",
+  "label": "Update Post Commentary",
+  "description": "Edit the commentary, call-to-action label or landing page of an existing LinkedIn post",
+  "kind": "action",
+  "runtime": "pieces",
+  "cluster": "marketing",
+  "clusterLabel": "Marketing",
+  "config": [
+   {
+    "key": "post_urn",
+    "label": "Post URN",
+    "required": true,
+    "control": "text",
+    "help": "URN of the post to edit, for example urn:li:share:7212345678901234567."
+   },
+   {
+    "key": "commentary",
+    "label": "Commentary",
+    "control": "textarea",
+    "help": "New body text. Leave empty to keep the current text."
+   },
+   {
+    "key": "content_call_to_action_label",
+    "label": "Call To Action Label",
+    "control": "select",
+    "options": [
+     "APPLY",
+     "DOWNLOAD",
+     "VIEW_QUOTE",
+     "LEARN_MORE",
+     "SIGN_UP",
+     "SUBSCRIBE",
+     "REGISTER",
+     "JOIN",
+     "ATTEND",
+     "REQUEST_DEMO",
+     "SEE_MORE"
+    ],
+    "help": "New call-to-action button label. Leave empty to keep the current one."
+   },
+   {
+    "key": "content_landing_page",
+    "label": "Landing Page URL",
+    "control": "text",
+    "help": "New destination for the call-to-action button. Leave empty to keep the current one."
    }
   ],
   "credentials": [],

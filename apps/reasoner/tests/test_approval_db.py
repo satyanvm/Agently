@@ -202,17 +202,20 @@ class ApprovalDbTest(unittest.TestCase):
         asyncio.run(self._sql(
             "insert into run_agents (id, run_id, name, role, model, status, summary, output) values "
             "('ra_pub', %s, 'publish', 'browser', 'none', 'succeeded', 'Posted to LinkedIn', %s::jsonb)",
-            (self.run, '{"result": {"id": "urn:1", "permalink": "https://linkedin.test/p/1"}}')))
+            # What the LinkedIn piece (0.6.x) returns, as record_piece_result stores it.
+            (self.run, '{"success": true, "post_urn": "urn:li:share:1", '
+                       '"result": {"success": true, "post_urn": "urn:li:share:1"}}')))
         inp = approval.RecordOutcomeInput(run_id=self.run, agent_id="ra_pub", key="publish",
                                           node_type="pieces.linkedin.create_share_update", status="succeeded",
                                           approval_ids=[opened.approval_id], outcome_ids=["out_test0000000000000001"])
         asyncio.run(approval.record_outcome(inp))
         asyncio.run(approval.record_outcome(inp))  # a retried activity
         rows = asyncio.run(self._sql(
-            "select node_key, node_type, status, summary, url, output->'result'->>'id' from approval_outcomes "
+            "select node_key, node_type, status, summary, url, output->'result'->>'post_urn' from approval_outcomes "
             "where approval_id = %s", (opened.approval_id,)))
         self.assertEqual(rows, [("publish", "pieces.linkedin.create_share_update", "succeeded",
-                                 "Posted to LinkedIn", "https://linkedin.test/p/1", "urn:1")])
+                                 "Posted to LinkedIn", "https://www.linkedin.com/feed/update/urn:li:share:1/",
+                                 "urn:li:share:1")])
 
     def test_relay_to_a_finished_run_is_stamped(self):
         opened = self.open()

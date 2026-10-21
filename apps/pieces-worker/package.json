@@ -366,7 +366,7 @@
     "@activepieces/piece-line": "*",
     "@activepieces/piece-linear": "*",
     "@activepieces/piece-linka": "*",
-    "@activepieces/piece-linkedin": "*",
+    "@activepieces/piece-linkedin": "0.6.1",
     "@activepieces/piece-linkup": "*",
     "@activepieces/piece-livesession": "*",
     "@activepieces/piece-llmrails": "*",

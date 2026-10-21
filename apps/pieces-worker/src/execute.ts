@@ -93,7 +93,7 @@ export function makeExecutePiece(registry: Registry, resolveCredential?: Credent
         RUN_TIMEOUT_MS,
         `piece run exceeded ${RUN_TIMEOUT_MS / 1000}s`,
       );
-      return { ok: true, output: jsonSafe(output) };
+      return { ok: true, output: jsonSafe(responseBody(output)) };
     } catch (err) {
       const e = err as Error & { errorType?: string };
       return {
@@ -267,6 +267,21 @@ export function withDefaults(
     }
   }
   return out;
+}
+
+/**
+ * Pieces built on googleapis (Gmail, Drive, …) return the whole HTTP response:
+ * its `config` holds the request, including the Authorization header, and its
+ * `url` is the API endpoint, not the item created. Keep only the body and the
+ * status, so neither the token nor a misleading link reaches Temporal history
+ * or the stored node output.
+ */
+export function responseBody(v: unknown): unknown {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return v;
+  const r = v as Record<string, unknown>;
+  const looksLikeResponse =
+    'data' in r && typeof r.status === 'number' && typeof r.config === 'object' && r.config !== null && 'headers' in r;
+  return looksLikeResponse ? { data: r.data, status: r.status } : v;
 }
 
 /** Round-trip through JSON so Temporal's converter always accepts the output. */

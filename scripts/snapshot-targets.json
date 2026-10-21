@@ -1,0 +1,19 @@
+[
+  {"competitor": "Klue", "pages": [
+    {"kind": "changelog", "url": "https://klue.com/news"},
+    {"kind": "blog", "url": "https://klue.com/blog"},
+    {"kind": "careers", "url": "https://klue.com/careers"}
+  ]},
+  {"competitor": "Crayon", "pages": [
+    {"kind": "pricing", "url": "https://www.crayon.co/pricing-inquiry"},
+    {"kind": "news", "url": "https://www.crayon.co/news"},
+    {"kind": "blog", "url": "https://www.crayon.co/blog"},
+    {"kind": "careers", "url": "https://www.crayon.co/careers"}
+  ]},
+  {"competitor": "Jasper", "pages": [
+    {"kind": "pricing", "url": "https://www.jasper.ai/pricing"},
+    {"kind": "changelog", "url": "https://www.jasper.ai/topics/product-updates"},
+    {"kind": "blog", "url": "https://www.jasper.ai/blog"},
+    {"kind": "careers", "url": "https://www.jasper.ai/careers"}
+  ]}
+]

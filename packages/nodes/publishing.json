@@ -11,7 +11,7 @@
     "A Go test checks every entry exists in packages/nodes/pieces/index.json."
   ],
   "pieces": {
-    "linkedin": ["create_share_update", "create_company_update", "custom_api_call"],
+    "linkedin": ["create_share_update", "create_member_post", "create_company_update", "update_post_commentary", "custom_api_call"],
     "twitter": ["create-tweet", "create-reply"],
     "facebook-pages": ["create_post", "create_photo_post", "create_video_post"],
     "instagram-business": ["upload_photo", "upload_reel"],

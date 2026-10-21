@@ -51,6 +51,8 @@ class Fake:
         self.outcomes: list[tuple[str, str, tuple[str, ...]]] = []  # (node, status, approval ids)
         self.outcome_ids: list[str] = []
         self.waited: list[tuple[str, float, bool, str]] = []  # (node, hours, from start, resumed at)
+        self.fail: set[str] = set()                        # node keys whose run_node fails
+        self.publishing: list[str] = []                    # node keys load_graph reports as publishing
 
     def decide(self, approval_id: str, status: str, content: str | None = None, by: str = "Rahul") -> None:
         row = self.rows[approval_id]
@@ -63,7 +65,8 @@ class Fake:
         async def load_graph(inp: A.LoadGraphInput) -> A.LoadGraphResult:
             g = [A._lift_reserved(dict(n)) for n in plan.build_plan(f.graph).ordered]
             return A.LoadGraphResult(dynamic=True, graph=g, ordered_keys=[n["key"] for n in g],
-                                     agent_ids={n["key"]: f"ra_{n['key']}" for n in g}, prior_status={})
+                                     agent_ids={n["key"]: f"ra_{n['key']}" for n in g}, prior_status={},
+                                     publishing=list(f.publishing))
 
         @activity.defn(name="run_node")
         async def run_node(inp: A.RunNodeInput) -> A.RunNodeResult:
@@ -72,6 +75,8 @@ class Fake:
             f.upstream[key] = inp.upstream
             if inp.node.get("type") == "logic.loop":
                 return A.RunNodeResult(output={"items": ["a", "b"], "count": 2})
+            if key in f.fail:
+                return A.RunNodeResult(failed=True, error=f"{key}: the service said no")
             return A.RunNodeResult(output={"text": f"{key} output"})
 
         @activity.defn(name="skip_node")
@@ -206,8 +211,11 @@ class ApprovalWorkflowTest(unittest.TestCase):
 
     @staticmethod
     def deciding(keys: list[str], fn):
-        """A decide callback that waits until approvals for `keys` are open."""
-        fn.ready = lambda f: all(any(k == o[0] for o in f.opened) for k in keys)
+        """A decide callback that waits until approvals for `keys` are open
+        and the run is blocked on one. Deciding before the block lets the
+        signal land first, so the run never waits and the waiting
+        assertions race."""
+        fn.ready = lambda f: all(any(k == o[0] for o in f.opened) for k in keys) and "wait" in f.events
         return fn
 
     def test_approve_with_edit_runs_downstream_with_final_text(self):
@@ -394,11 +402,86 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.run_wf(fake, self.deciding(["ok"], decide))
         self.assertEqual([o[0] for o in fake.outcomes], ["publish"])
 
+    def test_failed_publish_does_not_strand_other_drafts(self):
+        fake = Fake([llm("analyse"),
+                     llm("post", ["analyse"]), approve("ok_post", ["post"]), llm("publish_post", ["ok_post"]),
+                     llm("after_post", ["publish_post"]),
+                     llm("email", ["analyse"]), approve("ok_email", ["email"]), llm("send_email", ["ok_email"])])
+        fake.fail = {"publish_post"}
+
+        def decide(f):
+            f.decide("apr_ok_post_0", "approved")
+            f.decide("apr_ok_email_0", "approved")
+            return ["apr_ok_post_0", "apr_ok_email_0"]
+        res = self.run_wf(fake, self.deciding(["ok_post", "ok_email"], decide))
+        # The email still goes out; only what depended on the failed post is skipped.
+        self.assertIn("send_email", fake.ran)
+        self.assertEqual(fake.skipped, ["after_post"])
+        self.assertIn(("publish_post", "failed", ("apr_ok_post_0",)), fake.outcomes)
+        self.assertIn(("send_email", "succeeded", ("apr_ok_email_0",)), fake.outcomes)
+        # The run still ends failed, naming the step that failed.
+        self.assertFalse(res["done"])
+        self.assertEqual(fake.finish.status, "failed")
+        self.assertIn("publish_post", fake.finish.error)
+
+    def test_publishing_step_is_never_retried(self):
+        def graph():
+            return [llm("draft"), approve("ok", ["draft"]),
+                    {**llm("publish", ["ok"]), "settings": {"retries": 2, "retryWaitSec": 1}}]
+
+        def decide(f):
+            f.decide("apr_ok_0", "approved")
+            return ["apr_ok_0"]
+        # An ordinary step is retried as its settings say...
+        plain = Fake(graph())
+        plain.fail = {"publish"}
+        self.run_wf(plain, self.deciding(["ok"], decide))
+        self.assertEqual(plain.ran.count("publish"), 3)
+        # ...a publishing step runs once: a retry could post twice.
+        pub = Fake(graph())
+        pub.fail, pub.publishing = {"publish"}, ["publish"]
+        self.run_wf(pub, self.deciding(["ok"], decide))
+        self.assertEqual(pub.ran.count("publish"), 1)
+        self.assertEqual(pub.finish.status, "failed")
+
     def test_published_url_extraction(self):
         self.assertEqual(AP.published_url({"result": {"id": "1", "permalink": "https://x.test/p/1"}}),
                          "https://x.test/p/1")
         self.assertEqual(AP.published_url({"result": [{"webViewLink": "https://docs.test/d"}]}), "https://docs.test/d")
         self.assertEqual(AP.published_url({"url": "not a link", "text": "hi"}), "")
+
+    def test_published_link_per_integration(self):
+        # Output shapes as record_piece_result stores them: the piece's return
+        # value spread at the top level and kept whole under `result`.
+        def stored(raw):
+            return {**raw, "result": raw, "executed": True}
+        docs = stored({"documentId": "1AbC", "replies": [{}], "writeControl": {}})
+        self.assertEqual(AP.published_link("pieces.google-docs.create_document", docs),
+                         "https://docs.google.com/document/d/1AbC/edit")
+        self.assertEqual(AP.published_link("pieces.google-docs.append_text", docs),
+                         "https://docs.google.com/document/d/1AbC/edit")
+        draft = stored({"data": {"id": "r-55", "message": {"id": "18c0ffee", "threadId": "18c0ffee"}}, "status": 200})
+        self.assertEqual(AP.published_link("pieces.gmail.send_email", draft),
+                         "https://mail.google.com/mail/u/0/#drafts?compose=18c0ffee")
+        sent = stored({"data": {"id": "18c0beef", "threadId": "18c0beef", "labelIds": ["SENT"]}, "status": 200})
+        self.assertEqual(AP.published_link("pieces.gmail.send_email", sent),
+                         "https://mail.google.com/mail/u/0/#all/18c0beef")
+        self.assertEqual(AP.published_link("pieces.linkedin.create_share_update",
+                                           stored({"success": True, "post_urn": "urn:li:share:7000"})),
+                         "https://www.linkedin.com/feed/update/urn:li:share:7000/")
+        self.assertEqual(AP.published_link("pieces.twitter.create-tweet",
+                                           stored({"data": {"id": "1850000000000000000", "text": "hi"}})),
+                         "https://x.com/i/web/status/1850000000000000000")
+        # No id in the output → no link, never a guessed one (the LinkedIn
+        # 0.2.x piece returned only {success: true}).
+        self.assertEqual(AP.published_link("pieces.linkedin.create_share_update", stored({"success": True})), "")
+        # A Gmail response's request URL is not the published item.
+        self.assertEqual(AP.published_link("pieces.gmail.send_email",
+                                           stored({"config": {"url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts"}})),
+                         "")
+        # Other integrations still use a link their output contains.
+        self.assertEqual(AP.published_link("output.slack", {"permalink": "https://slack.test/p/1"}),
+                         "https://slack.test/p/1")
 
     def test_timeout_hours_validation(self):
         self.assertEqual(AP.timeout_seconds({}), 72 * 3600)
