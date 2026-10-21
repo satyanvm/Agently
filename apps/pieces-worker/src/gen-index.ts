@@ -168,6 +168,9 @@ export interface BuildIndexResult {
   nodes: IndexNode[];
   pieceCount: number;
   skipped: Array<{ packageName: string; error: string }>;
+  // Triggers left out because an action already has their id. Expected, not an
+  // error: every consumer resolves the id to the action.
+  collisions: string[];
 }
 
 export function buildIndex(baseDir?: string): BuildIndexResult {
@@ -176,6 +179,7 @@ export function buildIndex(baseDir?: string): BuildIndexResult {
   // Import failures were already recorded per-package by loadRegistry; carry
   // them through so the run reports every skipped piece instead of dying.
   const skipped = [...registry.failures];
+  const collisions: string[] = [];
   for (const piece of [...registry.pieces.values()].sort((a, b) => a.slug.localeCompare(b.slug))) {
     try {
       const seenIds = new Set<string>();
@@ -202,7 +206,7 @@ export function buildIndex(baseDir?: string): BuildIndexResult {
         if (seenIds.has(id)) {
           // Same name declared as action AND trigger — the action keeps the id
           // (the resolution order every consumer already implements).
-          skipped.push({ packageName: piece.packageName, error: `trigger "${name}" collides with an action id — skipped` });
+          collisions.push(id);
           continue;
         }
         const label = String(trig.displayName ?? name);
@@ -230,7 +234,7 @@ export function buildIndex(baseDir?: string): BuildIndexResult {
       skipped.push({ packageName: piece.packageName, error: String(err) });
     }
   }
-  return { nodes, pieceCount: registry.pieces.size, skipped };
+  return { nodes, pieceCount: registry.pieces.size, skipped, collisions };
 }
 
 function repoRoot(): string {
@@ -246,7 +250,10 @@ function repoRoot(): string {
 }
 
 if (require.main === module) {
-  const { nodes, pieceCount, skipped } = buildIndex();
+  const { nodes, pieceCount, skipped, collisions } = buildIndex();
+  for (const id of collisions) {
+    console.warn(`trigger ${id} left out: an action has the same id`);
+  }
   for (const s of skipped) {
     console.error(`piece index generation failed for ${s.packageName}: ${s.error.split('\n')[0]}`);
   }
