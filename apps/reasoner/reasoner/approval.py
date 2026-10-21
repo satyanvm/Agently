@@ -271,6 +271,65 @@ def published_url(output: Any, depth: int = 0) -> str:
     return ""
 
 
+def _piece_result(output: Any) -> dict[str, Any]:
+    """What the piece itself returned (record_piece_result keeps it under `result`)."""
+    if not isinstance(output, dict):
+        return {}
+    inner = output.get("result")
+    return inner if isinstance(inner, dict) else output
+
+
+def _docs_link(out: dict[str, Any]) -> str:
+    doc_id = out.get("documentId")
+    return f"https://docs.google.com/document/d/{doc_id}/edit" if isinstance(doc_id, str) and doc_id else ""
+
+
+def _gmail_link(out: dict[str, Any]) -> str:
+    # users.drafts.create → {id, message: {id, threadId}}; users.messages.send → {id, threadId}.
+    # The worker keeps only the response body (`data`) of a Google API call.
+    data = out.get("data") if isinstance(out.get("data"), dict) else out
+    message = data.get("message")
+    if isinstance(message, dict) and isinstance(message.get("id"), str):
+        return f"https://mail.google.com/mail/u/0/#drafts?compose={message['id']}"
+    msg_id = data.get("id")
+    return f"https://mail.google.com/mail/u/0/#all/{msg_id}" if isinstance(msg_id, str) and msg_id else ""
+
+
+def _linkedin_link(out: dict[str, Any]) -> str:
+    urn = out.get("post_urn")
+    return f"https://www.linkedin.com/feed/update/{urn}/" if isinstance(urn, str) and urn.startswith("urn:li:") else ""
+
+
+def _x_link(out: dict[str, Any]) -> str:
+    data = out.get("data")
+    tweet_id = data.get("id") if isinstance(data, dict) else None
+    return f"https://x.com/i/web/status/{tweet_id}" if isinstance(tweet_id, str) and tweet_id.isdigit() else ""
+
+
+# Integrations whose output carries an id but no link: the link is built from
+# the id, the way the service itself forms it. Anything else falls back to
+# published_url (a link the output already contains).
+_LINK_BUILDERS = {
+    "pieces.google-docs.create_document": _docs_link,
+    "pieces.google-docs.append_text": _docs_link,
+    "pieces.gmail.send_email": _gmail_link,
+    "pieces.linkedin.create_share_update": _linkedin_link,
+    "pieces.linkedin.create_member_post": _linkedin_link,
+    "pieces.linkedin.create_company_update": _linkedin_link,
+    "pieces.twitter.create-tweet": _x_link,
+    "pieces.twitter.create-reply": _x_link,
+}
+
+
+def published_link(node_type: str, output: Any) -> str:
+    """Link to what a node published: built from the integration's own id
+    when it returns one, else a link found in its output, else ''."""
+    build = _LINK_BUILDERS.get(node_type)
+    if build is not None:
+        return build(_piece_result(output))
+    return published_url(output)
+
+
 @activity.defn
 async def record_outcome(inp: RecordOutcomeInput) -> None:
     """Link a node that ran (or was skipped) after a decision to that
@@ -280,7 +339,7 @@ async def record_outcome(inp: RecordOutcomeInput) -> None:
     if output is not None and len(json.dumps(output, default=str)) > MAX_OUTCOME_OUTPUT:
         output = {"truncated": True, "note": "output too large to keep with the approval; see the run"}
     summary = str(row.get("summary") or row.get("error") or "")[:500]
-    url = published_url(row.get("output")) if inp.status == "succeeded" else ""
+    url = published_link(inp.node_type, row.get("output")) if inp.status == "succeeded" else ""
     for approval_id, outcome_id in zip(inp.approval_ids, inp.outcome_ids):
         await db.insert_approval_outcome(
             outcome_id, approval_id=approval_id, run_id=inp.run_id, node_key=inp.key, node_type=inp.node_type,
