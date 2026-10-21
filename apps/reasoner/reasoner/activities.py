@@ -52,6 +52,9 @@ class LoadGraphResult:
     # Set when the graph must not run at all (a publishing node with no
     # human.approval upstream — publishing.py); the workflow fails the run.
     error: str = ""
+    # Keys of nodes that publish publicly (publishing.json). The workflow runs
+    # them exactly once: a retry after a timeout could post twice.
+    publishing: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -213,6 +216,7 @@ async def load_graph(inp: LoadGraphInput) -> LoadGraphResult:
         ordered_keys=[n["key"] for n in plan.ordered],
         agent_ids=agent_ids,
         prior_status=prior,
+        publishing=sorted(n["key"] for n in plan.ordered if n.get("type") in publishing.publishing_types()),
     )
 
 

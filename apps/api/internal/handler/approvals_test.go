@@ -94,6 +94,26 @@ func TestApprovalsAPI(t *testing.T) {
 	}
 }
 
+func TestDecisionOnEndedRunIsRefused(t *testing.T) {
+	p, h := intelServer(t)
+	run := p.Repos.Runs.Insert(domain.Run{
+		ID: domain.NewRunId(), WorkspaceID: p.WorkspaceID, WorkflowName: "Competitor pricing",
+		WorkflowSlug: "competitor-pricing", Number: 2, Status: domain.RunFailed, QueuedAt: "2026-10-18T09:00:00.000Z",
+	})
+	a := p.Repos.Approvals.Insert(domain.Approval{
+		ID: domain.NewApprovalId(), WorkspaceID: p.WorkspaceID, RunID: run.ID, NodeKey: "approve_email",
+		Title: "Customer email", Draft: "Hello", CreatedAt: "2026-10-18T09:01:00.000Z",
+	})
+	rec, _ := call(t, h, http.MethodPost, "/api/approvals/"+string(a.ID)+"/decision",
+		map[string]any{"decision": "approved", "decidedBy": "Rahul"})
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already failed") {
+		t.Fatalf("decision on a failed run = %d %s, want 409 naming the failure", rec.Code, rec.Body.String())
+	}
+	if got, _ := p.Repos.Approvals.GetByID(a.ID); got.Status != domain.ApprovalPending {
+		t.Fatalf("approval should stay undecided, got %s", got.Status)
+	}
+}
+
 func TestApprovalHistory(t *testing.T) {
 	p, h := intelServer(t)
 	ws := p.WorkspaceID
