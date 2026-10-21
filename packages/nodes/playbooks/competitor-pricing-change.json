@@ -11,7 +11,7 @@
     { "key": "at_risk_customer_emails", "label": "At-risk customer emails", "required": true, "type": "list", "help": "Who the email draft is addressed to. It is saved as a Gmail draft; you send it." },
     { "key": "email_subject", "label": "Email subject", "required": true, "example": "A quick note about pricing" },
     { "key": "sales_slack_webhook", "label": "Sales channel Slack webhook URL", "required": true, "help": "An incoming webhook for the sales channel (Slack → Apps → Incoming Webhooks)." },
-    { "key": "competitors", "label": "Only these competitors (optional)", "required": false, "help": "Comma-separated names from the Competitors page. Blank = all." }
+    { "key": "competitors", "label": "Only these competitors", "required": false, "help": "Comma-separated names from the Competitors page. Blank = all." }
   ],
   "defaultInput": {
     "approver": "", "battlecard_doc_id": "", "at_risk_customer_emails": [], "email_subject": "A quick note about pricing",

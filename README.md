@@ -69,8 +69,9 @@ Built and tested end to end on a local stack:
 - **Scheduling:** weekly and cron schedules.
 - **Approval rule:** no publishing step without an approval before it,
   enforced when planning, saving and running.
-- **Playbooks:** three ready-made ones (competitor pricing change, competitor
-  feature launch, weekly content plan).
+- **Playbooks:** four ready-made ones (competitor pricing change, competitor
+  feature launch, weekly content plan, and competitor update to campaign
+  brief: the approved update is turned into a campaign brief).
 
 **Not yet tested against real accounts:** publishing to Google Docs, Gmail,
 LinkedIn and X. Every integration loads and its sign-in is ready; see

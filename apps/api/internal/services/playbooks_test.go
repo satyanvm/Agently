@@ -14,8 +14,8 @@ func TestPlaybookTemplatesValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 3 {
-		t.Fatalf("want 3 playbooks, got %d", len(all))
+	if len(all) != 4 {
+		t.Fatalf("want 4 playbooks, got %d", len(all))
 	}
 	cat := LoadCatalog()
 	for _, pb := range all {
@@ -69,7 +69,7 @@ func TestPlaybookTemplatesValidate(t *testing.T) {
 func TestInstallPlaybook(t *testing.T) {
 	p := NewPlatform(Options{})
 	list, err := p.Playbooks.List()
-	if err != nil || len(list) != 3 {
+	if err != nil || len(list) != 4 {
 		t.Fatalf("list = %v, %v", list, err)
 	}
 	var pricing PlaybookSummary
@@ -120,5 +120,41 @@ func TestInstallPlaybook(t *testing.T) {
 	}
 	if _, err := p.Playbooks.Install("nope", "", nil); err == nil {
 		t.Fatal("unknown playbook should 404")
+	}
+}
+
+// The competitor update is approved first; the campaign brief is drafted from
+// the APPROVED (possibly edited) update, so a rejected update drafts no brief.
+func TestCompetitorUpdateBriefPlaybook(t *testing.T) {
+	p := NewPlatform(Options{})
+	pb, err := p.Playbooks.Get("competitor-update-campaign-brief")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Approvals != 2 || len(pb.Logins) != 1 || pb.Logins[0].Type != "pieces.google-docs" {
+		t.Fatalf("summary = %+v (2 approvals; one Google Docs login)", pb.PlaybookSummary)
+	}
+	byKey := map[string]domain.GraphNode{}
+	for _, n := range pb.Nodes {
+		byKey[n.Key] = n
+	}
+	if deps := byKey["brief"].DependsOn; len(deps) != 1 || deps[0] != "approve_update" {
+		t.Fatalf("brief should follow the update's approval, depends on %v", deps)
+	}
+	if !strings.Contains(byKey["brief"].Config["prompt"].(string), "{{outputs.approve_update.content}}") {
+		t.Fatal("brief should be drafted from the approved update text")
+	}
+
+	if _, err := p.Playbooks.Install("competitor-update-campaign-brief", "", map[string]any{}); err == nil ||
+		!strings.Contains(err.Error(), "Who approves the drafts") {
+		t.Fatalf("missing approver should be named, got %v", err)
+	}
+	sum, err := p.Playbooks.Install("competitor-update-campaign-brief", "", map[string]any{"approver": "Rahul"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, _ := p.Repos.Workflows.GetBySlug(sum.Slug)
+	if wf.Schedule == nil || *wf.Schedule != "weekly mon 09:00" || wf.DefaultInput["campaign_goal"] != "" {
+		t.Fatalf("installed schedule=%v input=%v", wf.Schedule, wf.DefaultInput)
 	}
 }

@@ -8,7 +8,7 @@
   "inputs": [
     { "key": "approver", "label": "Who approves the drafts", "required": true, "example": "Rahul" },
     { "key": "product_slack_webhook", "label": "Product team Slack webhook URL", "required": true, "help": "Where 'they shipped something we don't have' alerts go." },
-    { "key": "competitors", "label": "Only these competitors (optional)", "required": false, "help": "Comma-separated names from the Competitors page. Blank = all." }
+    { "key": "competitors", "label": "Only these competitors", "required": false, "help": "Comma-separated names from the Competitors page. Blank = all." }
   ],
   "defaultInput": { "approver": "", "product_slack_webhook": "", "competitors": "" },
   "nodes": [
