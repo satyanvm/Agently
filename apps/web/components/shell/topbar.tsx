@@ -98,7 +98,7 @@ export function NewRunButton() {
   return (
     <button
       onClick={() => router.push("/workflows")}
-      className="flex h-9 items-center gap-2 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+      className="flex h-9 items-center gap-2 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
     >
       <Plus className="size-4" />
       New run

@@ -70,7 +70,7 @@ function toWorkflowRun(r: ApiRun): WorkflowRun {
   };
 }
 
-async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
+export async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -212,7 +212,7 @@ interface ApiBrowserSession {
 
 // A few gradient tones so the (screenshot-less) filmstrip thumbnails look varied.
 const SHOT_TONES = [
-  "from-indigo-500/20 to-violet-500/10",
+  "from-amber-700/20 to-stone-500/10",
   "from-sky-500/20 to-cyan-500/10",
   "from-emerald-500/20 to-teal-500/10",
   "from-amber-500/20 to-orange-500/10",
@@ -265,10 +265,16 @@ export async function fetchRunLogsAfter(runId: string, sinceSeq: number): Promis
 export async function launchRun(
   slug: string,
   input?: Record<string, unknown>,
-  opts?: { skipCredentialCheck?: boolean },
+  opts?: {
+    /** Builder test runs: run only up to targetNode, and/or use pinned data. */
+    exec?: { targetNode?: string; usePins?: boolean };
+    /** Launch even if the preflight finds nodes without an account. */
+    skipCredentialCheck?: boolean;
+  },
 ): Promise<string> {
   const body: Record<string, unknown> = {};
   if (input) body.input = input;
+  if (opts?.exec) body.exec = opts.exec;
   if (opts?.skipCredentialCheck) body.skipCredentialCheck = true;
   const run = await getJSON<{ id: string }>(`/api/workflows/${slug}/runs`, {
     method: "POST",

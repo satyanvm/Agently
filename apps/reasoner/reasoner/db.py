@@ -94,6 +94,21 @@ async def claim_queued_runs(limit: int = 10) -> list[dict[str, Any]]:
 
 # ─────────────────────────── credentials ───────────────────────────
 
+async def fetch_credential_row(credential_id: str) -> tuple[str, dict[str, Any]] | None:
+    """Like fetch_credential_data, plus the credential type (for OAuth refresh)."""
+    if not credential_id:
+        return None
+    async with _conn() as conn:
+        cur = await conn.execute(
+            "select type, data from credentials where id = %s", (credential_id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        data = row[1]
+        return str(row[0] or ""), (open_credential_data(data) if isinstance(data, dict) else {})
+
+
 async def fetch_credential_data(credential_id: str) -> dict[str, Any] | None:
     """Return the secret key/values of a stored credential, or None if unknown.
 
@@ -306,11 +321,11 @@ async def upsert_agent(
     async with _conn() as conn:
         await conn.execute(
             """
-            insert into run_agents (id, run_id, name, role, model, status, depends_on, col, "row", summary, metrics)
-            values (%s, %s, %s, %s, %s, 'idle', %s, %s, %s, '', '{}'::jsonb)
+            insert into run_agents (id, run_id, node_key, name, role, model, status, depends_on, col, "row", summary, metrics)
+            values (%s, %s, %s, %s, %s, %s, 'idle', %s, %s, %s, '', '{}'::jsonb)
             on conflict (id) do nothing
             """,
-            (agent_id, run_id, name, role, model, dep_ids, col, row),
+            (agent_id, run_id, key, name, role, model, dep_ids, col, row),
         )
     return agent_id
 
@@ -361,6 +376,38 @@ async def set_agent_status(agent_id: str, status: str, summary: str | None = Non
             await conn.execute(
                 "update run_agents set status = %s where id = %s", (status, agent_id)
             )
+
+
+# Node outputs larger than this are stored as a truncated preview so one huge
+# scrape can't bloat the run row the builder loads.
+_MAX_OUTPUT_BYTES = 512 * 1024
+
+
+def _clip_output(output: Any) -> str:
+    raw = json.dumps(output, default=str)
+    if len(raw) <= _MAX_OUTPUT_BYTES:
+        return raw
+    return json.dumps({"__truncated": True, "bytes": len(raw), "preview": raw[:_MAX_OUTPUT_BYTES]})
+
+
+async def set_agent_result(
+    agent_id: str,
+    output: Any = None,
+    error: str | None = None,
+    attempts: int | None = None,
+) -> None:
+    """Store a node's full output / error for the builder's data inspector."""
+    async with _conn() as conn:
+        await conn.execute(
+            """
+            update run_agents
+               set output = coalesce(%s::jsonb, output),
+                   error = %s,
+                   attempts = coalesce(%s, attempts)
+             where id = %s
+            """,
+            (None if output is None else _clip_output(output), error, attempts, agent_id),
+        )
 
 
 async def add_message(run_id: str, from_agent_id: str, to_agent_id: str, label: str) -> None:
@@ -455,3 +502,258 @@ async def finish_browser_session(session_id: str, status: str) -> None:
             "update browser_sessions set status = %s, finished_at = now() where id = %s",
             (status, session_id),
         )
+
+
+# ───────────────────── competitors, snapshots, signals (0015) ─────────────────────
+
+def _rows(cur: Any, rows: list[Any]) -> list[dict[str, Any]]:
+    cols = [d.name for d in cur.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+async def run_workspace_id(run_id: str) -> str:
+    """The workspace a run belongs to; every intel row is scoped by it."""
+    async with _conn() as conn:
+        cur = await conn.execute("select workspace_id from runs where id = %s", (run_id,))
+        row = await cur.fetchone()
+    if not row:
+        raise RuntimeError(f"run {run_id} not found")
+    return str(row[0])
+
+
+async def list_competitors(workspace_id: str) -> list[dict[str, Any]]:
+    """Active (not archived) competitors, by name."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """select id, name, website, pages from competitors
+                where workspace_id = %s and archived_at is null order by name""",
+            (workspace_id,),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+_SNAPSHOT_COLS = "id, competitor_id, page_kind, url, run_id, fetched_via, status_code, title, content_hash, content, fetched_at, last_seen_at"
+
+
+async def latest_snapshots(workspace_id: str, url: str, limit: int = 2) -> list[dict[str, Any]]:
+    """The newest versions of a page, newest first."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_SNAPSHOT_COLS} from page_snapshots
+                 where workspace_id = %s and url = %s
+                 order by fetched_at desc limit %s""",
+            (workspace_id, url, limit),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+async def snapshot_by_id(snapshot_id: str) -> dict[str, Any] | None:
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"select workspace_id, {_SNAPSHOT_COLS} from page_snapshots where id = %s", (snapshot_id,)
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def snapshot_before(workspace_id: str, url: str, fetched_at: Any) -> dict[str, Any] | None:
+    """The version of a page that came before the one fetched at `fetched_at`."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_SNAPSHOT_COLS} from page_snapshots
+                 where workspace_id = %s and url = %s and fetched_at < %s
+                 order by fetched_at desc limit 1""",
+            (workspace_id, url, fetched_at),
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def insert_snapshot(
+    workspace_id: str, *, competitor_id: str | None, page_kind: str | None, url: str, run_id: str,
+    fetched_via: str, status_code: int | None, title: str, content_hash: str, content: str,
+) -> dict[str, Any]:
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""insert into page_snapshots
+                  (id, workspace_id, competitor_id, page_kind, url, run_id, fetched_via, status_code,
+                   title, content_hash, content, fetched_at, last_seen_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                returning {_SNAPSHOT_COLS}""",
+            (gen_id("snap"), workspace_id, competitor_id, page_kind, url, run_id, fetched_via,
+             status_code, title, content_hash, content),
+        )
+        return _rows(cur, [await cur.fetchone()])[0]
+
+
+async def touch_snapshot(snapshot_id: str) -> None:
+    """The page was fetched again and hadn't changed."""
+    async with _conn() as conn:
+        await conn.execute("update page_snapshots set last_seen_at = now() where id = %s", (snapshot_id,))
+
+
+async def insert_signal(
+    workspace_id: str, *, source: str, title: str, run_id: str, summary: str = "", url: str = "",
+    detail: dict[str, Any] | None = None, competitor_id: str | None = None,
+    snapshot_id: str | None = None, previous_snapshot_id: str | None = None,
+    dedupe_key: str | None = None,
+) -> tuple[str, bool]:
+    """Record a signal; returns (signal id, created). A dedupe_key already
+    recorded in the workspace returns the existing signal (created=False), so a
+    re-run never reports the same change or article twice."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """insert into signals
+                  (id, workspace_id, source, competitor_id, title, summary, url, detail,
+                   snapshot_id, previous_snapshot_id, run_id, dedupe_key, detected_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, now())
+                on conflict (workspace_id, dedupe_key) where dedupe_key is not null do nothing
+                returning id""",
+            (gen_id("sig"), workspace_id, source, competitor_id, title, summary, url,
+             json.dumps(detail or {}), snapshot_id, previous_snapshot_id, run_id, dedupe_key),
+        )
+        row = await cur.fetchone()
+        if row:
+            return str(row[0]), True
+        cur = await conn.execute(
+            "select id from signals where workspace_id = %s and dedupe_key = %s",
+            (workspace_id, dedupe_key),
+        )
+        existing = await cur.fetchone()
+    if not existing:
+        raise RuntimeError(f"signal insert for {dedupe_key!r} neither created nor found")
+    return str(existing[0]), False
+
+
+# ─────────────────────────── approvals (0015) ───────────────────────────
+
+_APPROVAL_COLS = ("id, run_id, node_key, iteration, title, channel, draft, final_content, status, "
+                  "assignee, notify, signal_ids, decided_by, decision_note, decided_at, expires_at")
+
+
+async def signal_ids_for_run(run_id: str) -> list[str]:
+    """Signals recorded earlier in this run — what a draft is responding to."""
+    async with _conn() as conn:
+        cur = await conn.execute("select id from signals where run_id = %s order by detected_at", (run_id,))
+        return [str(r[0]) for r in await cur.fetchall()]
+
+
+async def open_approval(
+    workspace_id: str, *, run_id: str, node_key: str, iteration: int, title: str, channel: str,
+    draft: str, assignee: str, signal_ids: list[str], timeout_s: float,
+) -> tuple[dict[str, Any], bool]:
+    """Insert a pending approval; returns (row, created). Idempotent on
+    (run, node, iteration): a retried activity gets the row it already made."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""insert into approvals (id, workspace_id, run_id, node_key, iteration, title, channel, draft,
+                                       status, assignee, signal_ids, expires_at, created_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s,
+                        now() + make_interval(secs => %s), now())
+                on conflict (run_id, node_key, iteration) do nothing
+                returning {_APPROVAL_COLS}""",
+            (gen_id("apr"), workspace_id, run_id, node_key, iteration, title, channel, draft, assignee,
+             signal_ids, timeout_s),
+        )
+        row = await cur.fetchone()
+        created = row is not None
+        if not created:
+            cur = await conn.execute(
+                f"select {_APPROVAL_COLS} from approvals where run_id = %s and node_key = %s and iteration = %s",
+                (run_id, node_key, iteration),
+            )
+            row = await cur.fetchone()
+        return _rows(cur, [row])[0], created
+
+
+async def set_approval_notify(approval_id: str, notify: dict[str, Any]) -> None:
+    async with _conn() as conn:
+        await conn.execute("update approvals set notify = %s::jsonb where id = %s",
+                           (json.dumps(notify), approval_id))
+
+
+async def approval_by_id(approval_id: str) -> dict[str, Any] | None:
+    async with _conn() as conn:
+        cur = await conn.execute(f"select {_APPROVAL_COLS} from approvals where id = %s", (approval_id,))
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def time_out_approval(approval_id: str) -> dict[str, Any] | None:
+    """Mark a still-pending approval timed out. Returns the row as it stands
+    afterwards: if a person decided at the last moment, their decision wins and
+    the row comes back approved/rejected. signaled_at is stamped too — the run
+    already knows the outcome, so the relay must not deliver it."""
+    async with _conn() as conn:
+        await conn.execute(
+            """update approvals set status = 'timed_out', decided_at = now(), signaled_at = now()
+                where id = %s and status = 'pending'""",
+            (approval_id,),
+        )
+    return await approval_by_id(approval_id)
+
+
+async def undelivered_decisions(limit: int = 50) -> list[dict[str, Any]]:
+    """Decisions people made that the waiting run hasn't been told about."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            f"""select {_APPROVAL_COLS} from approvals
+                 where decided_at is not null and signaled_at is null
+                   and status in ('approved', 'rejected')
+                 order by decided_at limit %s""",
+            (limit,),
+        )
+        return _rows(cur, await cur.fetchall())
+
+
+async def mark_approval_signaled(approval_id: str) -> None:
+    async with _conn() as conn:
+        await conn.execute("update approvals set signaled_at = now() where id = %s", (approval_id,))
+
+
+async def set_run_waiting(run_id: str, waiting: bool, current_step: str) -> None:
+    """'paused' while a run waits for a person, back to 'running' after. Never
+    touches a run that has already finished."""
+    async with _conn() as conn:
+        await conn.execute(
+            """update runs set status = %s, current_step = %s
+                where id = %s and status in ('running', 'paused')""",
+            ("paused" if waiting else "running", current_step, run_id),
+        )
+
+
+async def agent_row(agent_id: str) -> dict[str, Any] | None:
+    """A node's recorded status, summary and output (run_agents)."""
+    async with _conn() as conn:
+        cur = await conn.execute("select status, summary, output, error from run_agents where id = %s", (agent_id,))
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None
+
+
+async def insert_approval_outcome(
+    outcome_id: str, *, approval_id: str, run_id: str, node_key: str, node_type: str, status: str,
+    summary: str, url: str, output: Any,
+) -> None:
+    """Record what ran after a decision. The id is minted deterministically by
+    the workflow, so a retried activity inserts nothing new."""
+    async with _conn() as conn:
+        await conn.execute(
+            """insert into approval_outcomes
+                  (id, approval_id, run_id, node_key, node_type, status, summary, url, output, occurred_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+                on conflict (id) do nothing""",
+            (outcome_id, approval_id, run_id, node_key, node_type, status, summary, url,
+             None if output is None else json.dumps(output)),
+        )
+
+
+async def brand_context(workspace_id: str) -> dict[str, Any] | None:
+    """The workspace's brand context (0015 brand_context), or None if never saved."""
+    async with _conn() as conn:
+        cur = await conn.execute(
+            """select voice, product_facts, positioning, avoid_claims, updated_at, updated_by
+                 from brand_context where workspace_id = %s""",
+            (workspace_id,),
+        )
+        rows = _rows(cur, await cur.fetchall())
+    return rows[0] if rows else None

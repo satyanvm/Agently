@@ -16,6 +16,12 @@ export interface CredentialTypeDef {
   source?: string;
   /** Pieces only: secret_text | basic_auth | oauth2 | custom_auth. */
   authType?: string;
+  /** True when the provider supports browser sign-in (GET /api/oauth/{id}/start). */
+  oauth?: boolean;
+  /** Catalog types only: the piece whose OAuth flow signs this type in. */
+  oauthVia?: string;
+  /** Catalog types only: the field the signed-in access token is stored under. */
+  oauthTokenKey?: string;
   fields: NodeField[];
 }
 
@@ -41,4 +47,19 @@ export function credentialTypeDef(id: string): CredentialTypeDef {
   const def = CREDENTIAL_TYPES[id];
   if (def) return { ...def, fields: def.fields ?? [] };
   return { id, label: prettyTypeLabel(id), fields: [] };
+}
+
+/** Token fields the OAuth callback writes itself — hidden behind "paste a token". */
+export function oauthTokenKeys(def: CredentialTypeDef): Set<string> {
+  return def.oauthTokenKey ? new Set([def.oauthTokenKey]) : new Set(["access_token", "refresh_token"]);
+}
+
+/** The field a pasted token must fill for this type to work. */
+export function oauthAccessKey(def: CredentialTypeDef): string {
+  return def.oauthTokenKey ?? "access_token";
+}
+
+/** Does this credential type log in (OAuth / account) rather than take a key? */
+export function isLoginType(def: CredentialTypeDef): boolean {
+  return Boolean(def.oauth) || def.authType === "oauth2";
 }

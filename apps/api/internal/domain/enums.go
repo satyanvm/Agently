@@ -13,7 +13,7 @@ const (
 	RunFailed    RunStatus = "failed"
 	RunCanceled  RunStatus = "canceled"
 	RunPaused    RunStatus = "paused"
-)
+)                                                                                    
 
 var ValidRunStatuses = map[string]bool{
 	"queued": true, "running": true, "succeeded": true,

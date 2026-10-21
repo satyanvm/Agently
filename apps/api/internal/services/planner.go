@@ -84,7 +84,7 @@ func CompilePrompt(ctx context.Context, prompt, name, email, schedule string) (P
 	if err := RequirePlannerKeys(); err != nil {
 		return Plan{}, err
 	}
-	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule
+	cacheKey := prompt + "\x00" + name + "\x00" + email + "\x00" + schedule + "\x00" + credentialFingerprint(ctx)
 	planCache.Lock()
 	if p, ok := planCache.m[cacheKey]; ok {
 		planCache.Unlock()
@@ -259,6 +259,30 @@ used to fulfill the request. Be selective — at most %d. Return {"nodes": []} i
 	}
 	wg.Wait()
 
+	// A destination the prompt names (named_destinations.go) always offers its
+	// actions, even when the per-cluster model picked none of them.
+	available := make(map[string]bool, len(clusterKeys))
+	for _, k := range clusterKeys {
+		available[k] = true
+	}
+	for _, k := range namedClusters(prompt, available) {
+		if len(byCluster[k]) > 0 {
+			continue
+		}
+		var ids []string
+		for _, n := range cat.Clusters[k].Nodes {
+			if n.Kind == "action" {
+				ids = append(ids, n.ID)
+			}
+			if len(ids) == perCluster {
+				break
+			}
+		}
+		if len(ids) > 0 {
+			byCluster[k] = ids
+		}
+	}
+
 	if len(failures) > 0 {
 		// Deterministic message regardless of goroutine completion order.
 		msgs := make([]string, len(failures))
@@ -272,6 +296,14 @@ used to fulfill the request. Be selective — at most %d. Return {"nodes": []} i
 
 	// routed doubles as the relevance order for the cap: most relevant cluster first.
 	return capFairly(byCluster, routed, totalCap()), nil
+}
+
+// CandidateNodes runs the router + map phases alone and returns the node ids
+// the reduce model would be offered (beyond the built-ins). For
+// cmd/planeval's diagnostics: when a graph lacks a node, this shows whether
+// it was never a candidate or the reduce model passed it over.
+func CandidateNodes(ctx context.Context, prompt string) ([]string, error) {
+	return mapPhase(ctx, LoadCatalog(), prompt)
 }
 
 // capFairly trims the union of per-cluster selections to max. Its predecessor
@@ -357,7 +389,7 @@ func compileGraphLLM(ctx context.Context, cat *Catalog, prompt string, p *Plan) 
 	if err != nil {
 		return nil, err
 	}
-	return authorGraph(ctx, cat, reduceSystemPrompt(cat, selected), prompt, p)
+	return authorGraph(ctx, cat, reduceSystemPrompt(cat, selected, credentialAvailability(ctx)), prompt, p)
 }
 
 // authorGraph runs the reduce phase over an assembled system prompt.
@@ -412,7 +444,11 @@ func authorGraphSingle(ctx context.Context, cat *Catalog, system, prompt string,
 		for k := range spec.DefaultInput {
 			inputKeys[k] = true
 		}
-		if errs := graphProblems(nodes, cat, inputKeys); len(errs) > 0 {
+		errs := graphProblems(nodes, cat, inputKeys)
+		if len(errs) == 0 {
+			errs = validateCredentials(nodes, cat, credentialAvailability(ctx), prompt)
+		}
+		if len(errs) > 0 {
 			lastComplaint = strings.Join(errs, "; ")
 			msgs = append(msgs,
 				llmMsg{Role: "assistant", Content: raw},
@@ -441,7 +477,7 @@ func graphProblems(nodes []domain.GraphNode, cat *Catalog, inputKeys map[string]
 // the built-in core and every map-selected integration node. This is the ONLY
 // world knowledge we give the model — no source cookbook, no examples of "good"
 // services. The model is trusted to design; the contract keeps it executable.
-func reduceSystemPrompt(cat *Catalog, selected []string) string {
+func reduceSystemPrompt(cat *Catalog, selected []string, has func(CatalogNode, string) bool) string {
 	var b strings.Builder
 	b.WriteString(`You are an expert workflow architect. Convert the user's request into a directed
 acyclic graph of typed nodes that the execution engine runs. Design the best possible workflow:
@@ -451,7 +487,7 @@ Return ONE JSON object:
 {
   "name": "short title",
   "description": "one sentence",
-  "schedule": "daily HH:MM" | "hourly" | "",
+  "schedule": "hourly" | "daily HH:MM" | "weekdays HH:MM" | "weekly <mon..sun> HH:MM" | "<5-field cron>" | "",
   "defaultInput": { "topic": "...", ... },
   "nodes": [
     { "key": "snake_case_unique", "type": "<node type id>", "name": "Human label",
@@ -464,7 +500,9 @@ GRAPH RULES (validated mechanically — violations are returned to you to fix):
 - "key" values are unique; every "dependsOn" entry names an existing key; no cycles.
 - Fill every required config field of a node's schema.
 - Start with exactly one trigger node: trigger.schedule when the user wants a cadence
-  (also set "schedule"), else trigger.manual. Triggers have no dependsOn.
+  (also set "schedule"; 24-hour times, e.g. "weekly mon 09:00" for "every Monday
+  morning", "0 9 1 * *" for "on the 1st of each month"), else trigger.manual.
+  Triggers have no dependsOn.
 - End with output node(s) matching how the user wants results delivered (email, slack,
   report). When in doubt, finish with output.report.
 
@@ -497,20 +535,53 @@ DESIGN GUIDANCE:
   its action fits the request more precisely.
 - Keep graphs as small as the request allows. Parallel branches that later join are good.
 
+MARKETING PLAYBOOKS (watch → decide → draft → approve → publish):
+- Competitor changes: start from intel.watchCompetitors (it covers every registered
+  competitor page; set config.competitors / pageKinds only when the user names them),
+  or intel.snapshotPage + intel.diffPage for one specific URL. News, RSS, Reddit and
+  Hacker News items that a draft responds to go through intel.recordSignal so the draft
+  is traceable to them.
+- Gate on whether anything happened: logic.branch on outputs.watch.changed == true (or
+  outputs.diff.changed == true) before any AI or drafting work.
+- Decide what it means with an agent.llm (brand false): analysis, classification,
+  "are we better or missing it". Draft each piece of content with its own agent.llm
+  with config.brand = "true" so it uses the workspace's voice, facts and banned claims.
+- NOTHING PUBLISHES WITHOUT APPROVAL. Put a human.approval between every draft and
+  anything that publishes publicly (the validator rejects the graph otherwise):
+  config.draft = "{{outputs.<draft node>.text}}", config.title says what it is,
+  config.channel names where it goes, config.assignee is the person the user named
+  ("send it to Rahul to approve" → "Rahul"). One approval per draft. The publishing
+  node depends on the approval and publishes "{{outputs.<approval node>.content}}" —
+  the approved (possibly edited) text, never the raw draft.
+- Approvals also guard customer-facing email and anything else the user says should be
+  reviewed; internal notifications (Slack to the team, a report to the user) need none.
+- Publish through the integration node for the destination (pieces.linkedin.*,
+  pieces.twitter.*, pieces.google-docs.*, pieces.gmail.*, …): it carries the signed-in
+  account. Never post through tool.http to a publishing API (the validator rejects it).
+  "Save it in a Google Doc" means a pieces.google-docs node, not output.report.
+- Never invent competitor names or other facts the user didn't give. Leave
+  intel.watchCompetitors' competitors empty (= every registered competitor) unless the
+  user named specific ones; never put example names like "Acme" in defaultInput.
+
 NODE TYPES AVAILABLE:
 
 `)
 	// Built-in core first, always.
 	for _, n := range cat.Clusters["builtin"].Nodes {
-		b.WriteString(nodeSchema(n))
+		b.WriteString(nodeSchema(n, has))
 		b.WriteString("\n")
 	}
 	// Then the map-selected integrations.
 	for _, id := range selected {
 		if n, ok := cat.ByID[id]; ok {
-			b.WriteString(nodeSchema(n))
+			b.WriteString(nodeSchema(n, has))
 			b.WriteString("\n")
 		}
+	}
+	if pub := PublishingTypes(selected); len(pub) > 0 {
+		b.WriteString("\nTHESE NODES PUBLISH PUBLICLY — each needs a human.approval upstream: ")
+		b.WriteString(strings.Join(pub, ", "))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -564,7 +635,7 @@ func overlayMeta(spec reduceGraphSpec, p *Plan) {
 // "github", …) for the UI preview chip row. Built-in kinds are skipped; a
 // pieces.<slug>.<action> node counts as its slug.
 func servicesOf(nodes []domain.GraphNode) []string {
-	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true}
+	builtin := map[string]bool{"trigger": true, "agent": true, "tool": true, "logic": true, "output": true, "intel": true, "human": true}
 	seen := map[string]bool{}
 	var out []string
 	for _, n := range nodes {
@@ -679,18 +750,45 @@ func parseTimeOfDay(lower string) (hh, mm int, ok bool) {
 	return hh, mm, true
 }
 
-// scheduleFrom infers a schedule string from the prompt. Daily cadence carries the
-// stated time of day ("every day at 9 am" → "daily 09:00"); a bare "morning" with no
-// time defaults to 09:00. The scheduler (services/scheduler.go) parses these strings.
+// scheduleFrom infers a schedule string from the prompt: hourly, daily, weekdays
+// ("every weekday", "business days") or weekly ("every Monday", "weekly" → Monday),
+// carrying the stated time of day ("every day at 9 am" → "daily 09:00"); a cadence
+// with no time defaults to 09:00. schedule.go parses these strings.
 func scheduleFrom(lower string) *string {
 	hh, mm, hasTime := parseTimeOfDay(lower)
 	daily := strings.Contains(lower, "every morning") || strings.Contains(lower, "each morning") ||
 		strings.Contains(lower, "morning") || strings.Contains(lower, "daily") ||
 		strings.Contains(lower, "every day") || strings.Contains(lower, "each day") ||
 		strings.Contains(lower, "every evening") || strings.Contains(lower, "every night")
+	weekday := -1
+	for _, w := range strings.FieldsFunc(lower, func(r rune) bool { return r < 'a' || r > 'z' }) {
+		if len(w) >= 6 && strings.HasSuffix(w, "day") { // monday … sunday (not "today")
+			if d, ok := dayFromWord(w); ok {
+				weekday = d
+				break
+			}
+		}
+	}
+	weekly := weekday >= 0 || strings.Contains(lower, "weekly") || strings.Contains(lower, "every week") ||
+		strings.Contains(lower, "each week")
+	weekdaysOnly := strings.Contains(lower, "weekday") || strings.Contains(lower, "every workday") ||
+		strings.Contains(lower, "business day")
+	if !hasTime {
+		hh, mm = 9, 0 // a cadence with no time of day runs at 09:00
+	}
+	at := pad2(hh) + ":" + pad2(mm)
 	switch {
 	case strings.Contains(lower, "every hour") || strings.Contains(lower, "hourly"):
 		s := "hourly"
+		return &s
+	case weekdaysOnly:
+		s := "weekdays " + at
+		return &s
+	case weekly:
+		if weekday < 0 {
+			weekday = 1 // "weekly" with no day: Monday
+		}
+		s := "weekly " + [7]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}[weekday] + " " + at
 		return &s
 	case daily || hasTime:
 		if !hasTime {

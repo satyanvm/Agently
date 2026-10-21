@@ -28,6 +28,8 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Get("/workflows/{slug}", getWorkflow(p))
 		r.Get("/workflows/{slug}/graph", graphWorkflow(p))
 		r.Put("/workflows/{slug}/graph", saveWorkflowGraph(p))
+		r.Get("/workflows/{slug}/node-data", workflowNodeData(p))
+		r.Put("/workflows/{slug}/settings", updateWorkflowSettings(p))
 		r.Post("/workflows/{slug}/runs", launchRun(p))
 		// Run preflight: which accounts the graph still needs, and a one-step
 		// "use this credential on every node that needs it".
@@ -67,6 +69,38 @@ func NewRouter(p *services.Platform) chi.Router {
 		r.Post("/credentials", createCredential(p))
 		r.Put("/credentials/{id}", updateCredential(p))
 		r.Delete("/credentials/{id}", deleteCredential(p))
+
+		// Market intelligence: competitors we watch, the page versions and
+		// signals the reasoner's intel.* nodes record (services/intel_service.go).
+		r.Get("/competitors", listCompetitors(p))
+		r.Post("/competitors", createCompetitor(p))
+		r.Get("/competitors/{id}", getCompetitor(p))
+		r.Put("/competitors/{id}", updateCompetitor(p))
+		r.Delete("/competitors/{id}", archiveCompetitor(p))
+		r.Get("/competitors/{id}/snapshots", listCompetitorSnapshots(p))
+		r.Get("/snapshots/{id}", getSnapshot(p))
+		r.Get("/signals", listSignals(p))
+		r.Get("/signals/{id}", getSignal(p))
+		r.Get("/brand", getBrand(p))
+		r.Put("/brand", updateBrand(p))
+
+		// Ready-made playbooks to start from (services/playbooks.go).
+		r.Get("/playbooks", listPlaybooks(p))
+		r.Get("/playbooks/{id}", getPlaybook(p))
+		r.Post("/playbooks/{id}/install", installPlaybook(p))
+
+		// Approvals: drafts waiting for a person (services/approval_service.go).
+		r.Get("/approvals", listApprovals(p))
+		r.Get("/approvals/{id}", getApproval(p))
+		r.Get("/approvals/{id}/history", approvalHistory(p))
+		r.Post("/approvals/{id}/decision", decideApproval(p))
+
+		// Browser sign-in for credential types whose piece declares OAuth2.
+		// start/callback are popup navigations (302s), not JSON endpoints.
+		r.Get("/oauth/callback", oauthCallback(p))
+		r.Get("/oauth/apps", oauthApps(p))
+		r.Get("/oauth/{type}", oauthStatus(p))
+		r.Get("/oauth/{type}/start", oauthStart(p))
 
 		// Dynamic-prop options for pieces.* nodes (proxied to the pieces worker).
 		r.Post("/pieces/options", piecesOptions(p))

@@ -57,7 +57,7 @@ export default function BrowserPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {cards.map(({ runId, runLabel, session: s }) => {
-              const tone = s.shots.at(-1)?.tone ?? "from-indigo-500 via-violet-500 to-sky-500";
+              const tone = s.shots.at(-1)?.tone ?? "from-amber-700 via-orange-300 to-stone-400";
               return (
                 <Link key={s.id} href={`/browser/${runId}`} className="group block">
                   <Card hover className="overflow-hidden p-0">

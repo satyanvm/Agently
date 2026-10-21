@@ -29,6 +29,10 @@ async def run_dispatcher(client: Client, stop: asyncio.Event) -> None:
         except Exception:  # noqa: BLE001 — keep the loop alive across transient errors
             log.exception("dispatch poll failed")
         try:
+            await relay_decisions(client)
+        except Exception:  # noqa: BLE001 — same: retried on the next tick
+            log.exception("approval relay failed")
+        try:
             await asyncio.wait_for(stop.wait(), timeout=CONFIG.dispatch_interval_s)
         except asyncio.TimeoutError:
             pass
@@ -39,10 +43,14 @@ async def _dispatch_once(client: Client) -> None:
     for run in runs:
         run_id = run["id"]
         workflow_id = f"agently-run-{run_id}"
+        run_input = dict(run.get("input") or {})
+        # Builder test-run options (apps/api node_data.go): never template input.
+        exec_opts = run_input.pop("__exec", None) or {}
         params = {
             "run_id": run_id,
             "slug": run.get("slug", ""),
-            "input": run.get("input") or {},
+            "input": run_input,
+            "exec": exec_opts,
             # Deterministic workflow input (never read env in workflow code):
             # where the Node pieces worker listens for execute_piece.
             "pieces_task_queue": CONFIG.pieces_task_queue,
@@ -72,3 +80,29 @@ async def _dispatch_once(client: Client) -> None:
             if "ALREADY_EXISTS" in str(exc) or "already started" in str(exc).lower():
                 continue
             raise
+
+
+async def relay_decisions(client: Client) -> int:
+    """Deliver Inbox decisions to the runs waiting on them.
+
+    The Go API only writes the decision to Postgres (keeping Temporal out of
+    the control plane, like run dispatch). This sends the `approval_decided`
+    signal to `agently-run-<run id>` and stamps signaled_at. A run that no
+    longer exists or has finished can't be woken; the decision stays recorded
+    and is stamped so it isn't retried forever. Any other error leaves the row
+    for the next tick. Returns how many decisions were handled.
+    """
+    handled = 0
+    for row in await db.undelivered_decisions():
+        handle = client.get_workflow_handle(f"agently-run-{row['run_id']}")
+        try:
+            await handle.signal(DynamicWorkflow.approval_decided, {"approvalId": row["id"]})
+        except RPCError as exc:
+            text = str(exc).lower()
+            if "not found" not in text and "already completed" not in text:
+                raise
+            log.warning("approval %s decided but run %s is not waiting (%s)", row["id"], row["run_id"], exc)
+        await db.mark_approval_signaled(row["id"])
+        log.info("approval %s (%s) delivered to run %s", row["id"], row["status"], row["run_id"])
+        handled += 1
+    return handled

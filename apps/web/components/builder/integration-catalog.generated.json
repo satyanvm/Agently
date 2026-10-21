@@ -4779,7 +4779,7 @@
     "key": "timespan",
     "label": "Timespan",
     "control": "text",
-    "placeholder": "24h",
+    "placeholder": "7d",
     "help": "How far back to search, e.g. 1h, 24h, 7d, 3m"
    }
   ],

@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import * as React from "react";
 import {
   LayoutDashboard,
+  Inbox,
+  Radar,
+  Megaphone,
   Workflow,
   ListTree,
   Bot,
@@ -14,10 +18,15 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchApprovals } from "@/lib/marketing";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/workflows", label: "Workflows", icon: Workflow },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
+  // "Playbooks" is the UI name for workflows; routes and the API keep /workflows.
+  { href: "/workflows", label: "Playbooks", icon: Workflow },
+  { href: "/competitors", label: "Competitors", icon: Radar },
+  { href: "/brand", label: "Brand", icon: Megaphone },
   { href: "/runs", label: "Runs", icon: ListTree },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/browser", label: "Browser Sessions", icon: Globe },
@@ -26,13 +35,14 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const pending = usePendingApprovals();
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-[244px] flex-col border-r border-border bg-bg">
       {/* Brand + workspace switcher */}
       <div className="px-3 pt-3.5">
         <button className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2">
-          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft shadow-[0_4px_14px_-2px_rgba(94,79,242,0.5)]">
+          <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-soft">
             <Logo className="h-4 w-4 text-white" />
           </span>
           <span className="min-w-0 flex-1">
@@ -40,21 +50,21 @@ export function Sidebar() {
               Agently
             </span>
             <span className="block truncate text-[11px] leading-tight text-faint">
-              Durable workflows
+              Signals → approved actions
             </span>
           </span>
           <ChevronsUpDown className="size-3.5 text-faint group-hover:text-muted" />
         </button>
       </div>
 
-      {/* New workflow */}
+      {/* New playbook */}
       <div className="px-3 py-3">
         <Link
           href="/workflows?new=1"
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft glow-accent"
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-medium text-accent-fg transition-colors hover:bg-accent-soft"
         >
           <Plus className="size-4" />
-          New workflow
+          New playbook
         </Link>
       </div>
 
@@ -85,6 +95,11 @@ export function Sidebar() {
                 )}
               />
               <span className="flex-1">{item.label}</span>
+              {item.href === "/inbox" && pending > 0 && (
+                <span className="rounded-full bg-warn-bg px-1.5 text-[11px] font-semibold text-warn ring-1 ring-warn/25">
+                  {pending}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -106,6 +121,25 @@ export function Sidebar() {
       </div>
     </aside>
   );
+}
+
+/** Drafts waiting for a decision, refreshed every 15s (0 while unknown). */
+function usePendingApprovals(): number {
+  const [n, setN] = React.useState(0);
+  React.useEffect(() => {
+    let active = true;
+    const load = () =>
+      fetchApprovals("pending")
+        .then((rows) => active && setN(rows.length))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, []);
+  return n;
 }
 
 function Logo({ className }: { className?: string }) {

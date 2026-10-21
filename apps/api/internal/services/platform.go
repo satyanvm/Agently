@@ -29,6 +29,10 @@ type Platform struct {
 	Stats         *StatsService
 	Integrations  *IntegrationService
 	Credentials   *CredentialService
+	OAuth         *OAuthService
+	Intel         *IntelService
+	Approvals     *ApprovalService
+	Playbooks     *PlaybookService
 }
 
 // Options configure platform construction. Tests may provide in-memory
@@ -93,13 +97,16 @@ func NewPlatform(opts Options) *Platform {
 
 	logs := NewLogService(deps, emit)
 
+	credentials := NewCredentialService(deps)
+	intel := NewIntelService(deps)
+	workflows := NewWorkflowService(deps)
 	return &Platform{
 		Repos:         repos,
 		Bus:           bus,
 		Clock:         clock,
 		Logger:        logger,
 		WorkspaceID:   workspaceID,
-		Workflows:     NewWorkflowService(deps),
+		Workflows:     workflows,
 		Agents:        NewAgentService(deps),
 		Runs:          NewRunService(deps, emit, logs),
 		Logs:          logs,
@@ -108,6 +115,10 @@ func NewPlatform(opts Options) *Platform {
 		Activity:      NewActivityService(deps),
 		Stats:         NewStatsService(deps),
 		Integrations:  NewIntegrationService(deps, &http.Client{Timeout: 20 * time.Second}),
-		Credentials:   NewCredentialService(deps),
+		Credentials:   credentials,
+		OAuth:         NewOAuthService(deps, credentials, &http.Client{Timeout: 20 * time.Second}),
+		Intel:         intel,
+		Approvals:     NewApprovalService(deps, intel),
+		Playbooks:     NewPlaybookService(deps, workflows),
 	}
 }

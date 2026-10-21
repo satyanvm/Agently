@@ -92,9 +92,19 @@ type Workflow struct {
 	AgentCount       int                `json:"agentCount"`
 	CurrentVersionID *WorkflowVersionId `json:"currentVersionId"`
 	DefaultInput     map[string]any     `json:"defaultInput"`
+	Settings         WorkflowSettings   `json:"settings"`
 	CreatedAt        Timestamp          `json:"createdAt"`
 	UpdatedAt        Timestamp          `json:"updatedAt"`
 	ArchivedAt       *Timestamp         `json:"archivedAt"`
+}
+
+// WorkflowSettings is workflow-level failure handling (services/failures.go):
+// when a run fails, start ErrorWorkflow (by slug) with the failure as input and
+// alert the given targets.
+type WorkflowSettings struct {
+	ErrorWorkflow     string `json:"errorWorkflow,omitempty"`
+	AlertEmail        string `json:"alertEmail,omitempty"`
+	AlertSlackWebhook string `json:"alertSlackWebhook,omitempty"`
 }
 
 type WorkflowStats struct {
@@ -133,6 +143,12 @@ type RunAgent struct {
 	Metrics           AgentMetrics       `json:"metrics"`
 	StartedAt         *Timestamp         `json:"startedAt"`
 	FinishedAt        *Timestamp         `json:"finishedAt"`
+	// Builder data inspector: the graph node this agent ran, its full output
+	// (absent until it succeeds) and error, and how many attempts it took.
+	NodeKey  string         `json:"nodeKey,omitempty"`
+	Output   map[string]any `json:"output,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Attempts int            `json:"attempts,omitempty"`
 }
 
 type AgentMessage struct {

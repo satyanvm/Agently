@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "miarouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "MiaRouter",
+      "options": {
+        "baseURL": "https://miarouter.online/v1"
+      },
+      "models": {
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5"
+        }
+      }
+    }
+  }
+}

@@ -731,6 +731,7 @@
     "@activepieces/pieces-framework": "^0.32.0",
     "@temporalio/activity": "^1.20.3",
     "@temporalio/worker": "^1.20.3",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "zod": "4.1.13"
   }
 }

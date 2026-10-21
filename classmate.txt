@@ -8,11 +8,21 @@ Rough time: 1 hour for Part 1, 3–4 hours for Part 2, Part 3 when you need it.
 
 0. THE PROJECT IN ONE PARAGRAPH
 --------------------------------
-Agently turns a plain-English prompt ("every morning, research AI papers and email
-me a digest") into a typed DAG (graph) of nodes — LLM agents, tools, logic, and
-700+ third-party integrations — and runs that graph durably on Temporal. If a
-worker dies mid-run, Temporal's event history lets the run resume at the exact
-node it was on. Durability is the whole point; lead with it when explaining.
+Agently is competitor intelligence + marketing intelligence + marketing
+automation for small B2B software teams (1–5 marketers). It runs one loop:
+detect a market signal (a competitor's pricing page changed, a news story, a
+Reddit thread) → decide what it means → draft the marketing response → a
+person approves → publish → record what happened. "Intelligence tools tell you
+what happened. Agently does something about it."
+Under the hood it is the same engine as before: a plain-English prompt (now
+called a "playbook": "when a competitor launches anything AI-related, draft a
+LinkedIn post and send it to Rahul to approve") becomes a typed DAG (graph) of
+nodes — LLM agents, tools, logic, and 700+ third-party integrations — run
+durably on Temporal. If a worker dies mid-run, Temporal's event history lets
+the run resume at the exact node it was on, and a run can wait days for an
+approver without holding a worker. Lead with two things when explaining:
+durability (approvals take days) and traceability (every published item links
+back to its signal, run, cost and approver). Part 11 covers the loop.
 
 Four apps, one Postgres, one Temporal:
 
@@ -79,7 +89,12 @@ PART 1 — READING LIST FOR INFO (docs, in order)
     activities), §22 (credentials). Skip the chunk-by-chunk history unless you
     want the story of how it evolved.
 
- Optional background: product.md (what it is for), DEMO.md (demo script),
+ 9. product.md, then docs/product-direction.md
+    What Agently is FOR now: the problem, the target user, the signal → draft →
+    approve → publish loop, first-version scope, how success is measured; then
+    why, and how it compares to Klue, Crayon, Jasper, HubSpot Breeze, Sprinklr…
+
+ Optional background: DEMO.md (demo script),
  BACKEND.md (history: the API was ported from TypeScript to Go 1:1 — older, some
  details are stale), plan_for_prompt_to_workflow.md and plan_intelligent_dag.md
  (design notes behind the compiler).
@@ -148,6 +163,12 @@ Pass B — The control plane: how a prompt becomes a graph (Go, apps/api)
      Cron schedules and webhook/polling triggers that create runs automatically.
  B10. apps/api/internal/services/credential_service.go
      DB credential store used by piece nodes.
+ B10b. apps/api/internal/services/oauth_service.go, oauth_apps.go, handler/oauth.go
+     "Sign in with Slack/Google/…": the OAuth2 authorization-code flow (Part 7).
+ B10c. apps/api/internal/services/credavail.go
+     Tells the planner which logins you HAVE, so it prefers nodes that will run.
+ B10d. apps/api/internal/services/node_data.go, failures.go, platform/schema.go
+     Builder debugging data + "Run step" (Part 8) and failure handling (Part 9).
  B11. apps/api/cmd/planeval/main.go
      Recall eval harness: measures whether the router/embeddings find the right
      integrations for test prompts. Good for understanding "how do we know the
@@ -180,7 +201,10 @@ Pass C — The data plane: how a graph RUNS (Python, apps/reasoner)
      cost estimates (local = $0). _content_text flattens Gemini 3's content
      blocks. Note: errors RAISE — a failed model call never becomes a fake success.
  C10. apps/reasoner/reasoner/db.py
-     All Postgres reads/writes from the reasoner.
+     All Postgres reads/writes from the reasoner. set_agent_result stores each
+     node's full output/error (what the builder's Data tab shows).
+ C11. apps/reasoner/reasoner/oauth.py
+     Refreshes expired OAuth access tokens for catalog nodes before they run.
  Tests: apps/reasoner/tests/test_engine.py, test_dynamic_nodes.py, test_pieces.py,
         test_llm.py
 
@@ -206,6 +230,11 @@ Pass E — The UI (Next.js, apps/web)
      between the UI graph and the API graph.
  E4. apps/web/components/run-detail.tsx, live.tsx, log-viewer.tsx — live run view
      (SSE from apps/api/internal/handler/events.go).
+ E5. apps/web/components/builder/credential-section.tsx, login-prompt.tsx,
+     app/oauth/done/page.tsx, app/(app)/settings/sign-in/page.tsx — sign-in UI.
+ E6. apps/web/components/builder/node-inspector.tsx (Parameters/Data/Settings
+     tabs), node-data-panel.tsx, json-tree.tsx, node-settings-panel.tsx,
+     workflow-settings-dialog.tsx, lib/builder-debug.ts — the debugging loop.
 
 
 PART 3 — ONE TRACE THAT TIES IT ALL TOGETHER
@@ -255,7 +284,7 @@ PART 4 — HOW TO RUN AND TEST
   Try the durability demo: start a run, `pnpm agently:stop`, then
   `pnpm agently` again — the run finishes where it left off.
 
-  Tests:   cd apps/api && go test ./...
+  Tests:   cd apps/api && go test ./...         (OAuth, failures, step runs)
            cd apps/reasoner && ./.venv/bin/python -m unittest discover -s tests
            cd apps/pieces-worker && npm run build && npm test
   CI runs all of these (plus the web build and Docker image builds) on every
@@ -323,3 +352,396 @@ PART 6 — LAUNCH HARDENING (access control, encryption, deploy)
       docker-compose.app.yml (the four services on top of docker-compose.yml).
       RUNBOOK.md "Deploying" has the launch checklist.
 
+
+
+PART 7 — SIGN-IN WITH SLACK / GOOGLE / … (OAuth instead of pasted tokens)
+=========================================================================
+  The problem: nodes used to ask for a pasted access token. Nobody does that.
+  Now a node that needs a login shows "Sign in with Slack"; a popup opens
+  Slack's consent screen; you click Allow; the node is connected.
+
+  The flow (OAuth2 authorization code), file by file:
+    1. You drop a Slack node → workflow-builder.tsx queues a login; if you
+       already have a Slack account it is attached, else the sign-in modal
+       opens (login-prompt.tsx → credential-section.tsx CredentialModal).
+    2. "Sign in with Slack" → lib/credentials.ts signInWithPopup opens
+       GET /api/oauth/slack/start in a popup.
+    3. oauth_service.go StartURL builds Slack's consent URL: client_id,
+       redirect_uri, scopes, a random `state` (anti-CSRF, single use, 15 min),
+       and a PKCE challenge when the provider wants one. 302 to Slack.
+    4. Slack redirects to /api/oauth/callback?code&state. HandleCallback
+       checks the state, swaps the code for tokens at the provider's token
+       URL (exchange), and stores a credential row (encrypted, Part 6) with
+       access_token, refresh_token, expires_at, token_url.
+    5. The popup lands on /oauth/done, which tells the builder tab over a
+       BroadcastChannel (not window.opener: Google's COOP header severs it).
+       The builder attaches the new credential id to every Slack node.
+    6. At run time an expired token is refreshed first: pieces worker
+       (src/credentials.ts makeOAuthRefresher) for pieces.* nodes, reasoner
+       (reasoner/oauth.py) for hand-written catalog nodes.
+
+  Where the provider details come from: Activepieces pieces declare their
+  OAuth URLs/scopes; gen-index.ts copies them into pieces/index.json
+  (auth.oauth). Hand-written catalog types (slack, github, notion, hubspot,
+  asana, dropbox, intercom, todoist, typeform, clickup) borrow their piece's
+  flow — packages/nodes/build-web.mjs CATALOG_OAUTH maps e.g. slack →
+  pieces.slack and stores the token under SLACK_BOT_TOKEN, the key the
+  catalog template already reads.
+
+  What YOU (the operator) do once per provider: register an OAuth app with
+  redirect URL $APP_BASE_URL/api/oauth/callback, set
+  OAUTH_<SLUG>_CLIENT_ID/_SECRET (see .env.example), restart. One Google app
+  (GOOGLE_CLIENT_ID) covers Gmail/Sheets/Drive/Calendar/…; one Microsoft app
+  (MICROSOFT_CLIENT_ID) covers Outlook/Teams/Excel/OneDrive. Settings →
+  Sign-in apps (/settings/sign-in, backed by GET /api/oauth/apps) is the
+  checklist of the top 31 providers with each one's env names and console
+  link. Until a provider is configured, its modal says so and falls back to
+  pasting a token. This is the "hosted shared app" model n8n Cloud uses.
+
+  Interview angles: why `state` (CSRF), why PKCE (code interception), why
+  refresh tokens + expires_at (short-lived access), why the token never
+  touches the browser (server-side exchange, encrypted at rest).
+
+
+PART 8 — BUILD & DEBUG LIKE n8n (run one node, pin data, inspect, drag-to-map)
+==============================================================================
+  The builder inspector has three tabs: Parameters, Data, Settings, and a
+  "Run step" button.
+
+  Node data is now stored: run_agents got node_key, output (full JSON, up to
+  512 KB), error, attempts (migration 0014; the API also applies it at
+  startup — platform/schema.go EnsureSchema). The reasoner writes them in
+  activities.run_node / record_piece_result via db.set_agent_result.
+  GET /api/workflows/{slug}/node-data (node_data.go NodeData) returns each
+  node's newest output across the last 25 runs.
+
+  Run step (n8n "execute step"):
+    builder saves the graph → POST /runs with exec {targetNode, usePins}
+    → run_service.Launch → node_data.go stepExec computes the target's
+      ancestors and copies their last successful outputs into `seed`, all
+      stored under the reserved run-input key __exec
+    → dispatcher.py pops __exec out of the input (templates never see it)
+    → workflow.py DynamicWorkflow: nodes outside {target + ancestors} are
+      skipped; ancestors with a seed get it via the use_output activity
+      instead of running; only the target really executes.
+    The builder polls the run (builder-debug.ts runAndWait), shows a status
+    pill, refreshes node data, and marks nodes ✓/✗ on the canvas.
+
+  Pinned data: Data tab → "Pin output" (or "Set mock data") stores the JSON
+  under config.__pinned. Test runs (Test run / Run step, usePins=true) serve
+  it via use_output instead of calling the service; scheduled and
+  production runs ignore pins. load_graph's _lift_reserved moves __pinned /
+  __settings off the config so templates never see them.
+
+  Drag-to-map: the Parameters tab's "Map from upstream" and the Data tab
+  show each DIRECT dependency's output (pinned data wins) as a JSON tree
+  (json-tree.tsx). Drag a key onto a field → the browser inserts
+  {{outputs.<node>.<path>}} at the drop point (or it is appended for
+  dropdowns: node-inspector.tsx MapDropTarget). Paths may index lists —
+  outputs.fetch.result.0.title — via nodes.py walk_path. Only direct
+  dependencies, because that's all a node's templates can see (graphrefs.go).
+
+  Tested for real: tests/test_workflow_policy.py runs DynamicWorkflow on
+  Temporal's time-skipping test server with fake activities.
+
+
+PART 9 — HANDLING FAILURES (retry, timeout, continue on fail, error workflow)
+============================================================================
+  Per node (inspector Settings tab → config.__settings, read by
+  plan.node_policy, applied in workflow.py _execute):
+    retries + retryWaitSec  the node runs again; the wait is workflow.sleep —
+                            a durable Temporal timer, so it survives a crash.
+    timeoutSec              one Temporal attempt with that start_to_close
+                            timeout; on timeout fail_node records it.
+    continueOnFail          after the last attempt the node outputs
+                            {"error": "..."}, is marked failed "(continued)",
+                            and the run goes on.
+  Note the two retry layers: Temporal's RetryPolicy retries an activity that
+  CRASHED (worker died); the node setting retries a node that ran and
+  FAILED (API returned 500). run_node returns failures as data, so only our
+  loop sees them.
+
+  Per workflow ("On failure" in the builder toolbar → PUT
+  /api/workflows/{slug}/settings → workflows.settings jsonb):
+    error workflow, email alert, Slack incoming-webhook alert.
+  services/failures.go FailureWatcher (a goroutine next to the scheduler)
+  claims failed runs with one UPDATE … SET failure_handled_at … RETURNING
+  (each failure handled exactly once, even across restarts), launches the
+  error workflow with {{input.failedRun}} (workflow, runId, failedNode,
+  error, url) and sends the alerts. An error-workflow run never triggers
+  another error workflow (no loops).
+
+
+PART 10 — THE WHOLE SYSTEM ON ONE PAGE (say this in an interview)
+=================================================================
+  1. AUTHOR: prompt → Go planner (embed prefilter → route → map → reduce →
+     validate refs + credentials → repair) → typed DAG saved as a version.
+     Or draw/edit it in the builder.
+  2. CONNECT: nodes that need accounts get "Sign in with X" (Part 7).
+  3. DEBUG: Run step / pin / inspect / drag-to-map until each node is right
+     (Part 8).
+  4. RUN: manual, schedule (scheduler.go), webhook/polling triggers → a
+     queued run row in Postgres.
+  5. EXECUTE: reasoner dispatcher → Temporal DynamicWorkflow → one activity
+     per node (Python handlers, or the Node pieces worker for 700
+     Activepieces integrations). Kill a worker; the run resumes.
+  6. RECOVER: node retries/timeouts/continue-on-fail, then the error
+     workflow + alerts (Part 9).
+  7. OBSERVE: live SSE run view, Temporal UI per run, Langfuse per LLM call.
+
+
+PART 11 — THE INTELLIGENCE → ACTION LOOP (what Agently is for now)
+==================================================================
+  The pitch: "Intelligence tools tell you what happened. Agently does
+  something about it." Klue/Crayon (intelligence) stop at "here's what
+  changed"; Jasper/HubSpot Breeze/Typeface (execution) start from a blank
+  brief. Agently is the loop in between, for teams of 1–5 marketers:
+
+      signal  → meaning  → draft  → human approval → publish → record
+      (watch)   (AI)       (AI,     (a person:       (real     (signal, run,
+                           brand    edit / approve /  integra-  cost, approver,
+                           voice)   reject)           tions)    time)
+
+  Three rules hold the loop together:
+    * Nothing publishes without a person's approval. The only exception is a
+      short list of "safe" actions, such as pausing scheduled posts in a crisis.
+    * Signals are collected by us (websites, GDELT, RSS, Reddit/HN, reviews),
+      never bought from a paid intelligence vendor like Meltwater.
+    * Same strict failure model as everywhere else (Part 5): a missing
+      integration fails with its real reason; a publish is never faked.
+
+  Why this needs THIS engine (good interview answer):
+    * Durability: an approval can take days. A Temporal workflow waiting on a
+      signal survives restarts and deploys and holds no worker while it waits.
+    * Traceability: run_agents already stores every node's output (Part 8),
+      runs carry cost and a Langfuse trace id — the approval record links a
+      published item back to all of it.
+    * Prompt → DAG becomes "describe your own playbook in plain English".
+
+  Read first: product.md (scope + success metrics), docs/product-direction.md
+  (competitors, our angle, risks).
+
+  What already exists and the loop reuses, in reading order:
+   L1. packages/nodes/catalog/research-news.json (gdelt.searchDocs,
+       googlenews.fetchRss), data-web.json, social.json (reddit.*,
+       hackernews.*, rss.fetchFeed, x.searchPosts / linkedin.getCompanyPage
+       via the browser). The SIGNAL side: mostly keyless HTTP nodes.
+   L2. apps/reasoner/reasoner/nodes.py — _http (tool.http) and the catalog
+       runner below it (spec.get("runtime")): how a catalog JSON entry becomes
+       a real HTTP call. browser.py: tool.browser on Browserbase, for pages
+       that need JavaScript.
+   L3. apps/api/internal/services/scheduler.go + schedule.go — when signals
+       get checked. Every schedule string (hourly, daily 09:00, weekdays
+       08:30, weekly mon 09:00, or a 5-field cron) compiles to one cron spec;
+       dueAt = the most recent fire within 12 h, and alreadyFired (a scan of
+       the runs table) makes it fire once. The schedule node's cron field is
+       copied onto the workflow when the graph is saved (graphSchedule).
+   L4. packages/nodes/pieces/index.json — search it for linkedin, twitter,
+       wordpress, webflow, hubspot (create-blog-post), buffer, typefully,
+       google-docs, notion, gmail. The PUBLISH side: real Activepieces pieces
+       run by the pieces worker (Part 2, Pass D), logged in via Part 7.
+   L5. apps/reasoner/reasoner/engine.py (db.add_usage) and db.py
+       set_langfuse_trace — the cost + trace half of traceability.
+
+  Built so far (Phase 2, in reading order):
+   M1. packages/db/migrations/0015_marketing_loop.sql — read the table
+       comments: competitors, page_snapshots (one row per DISTINCT version of
+       a page), signals (dedupe_key stops the same news item counting twice),
+       brand_context, approvals (unique per run+node+iteration, so a retried
+       activity can't open two), approval_outcomes (what got published).
+   M2. apps/api/internal/domain/marketing.go — the Go nouns for those tables.
+   M3. apps/api/internal/platform/repositories.go (bottom), memory_marketing.go,
+       postgres_marketing.go — look at pgApprovalRepo.Decide: the
+       `where status='pending'` guard makes a decision atomic, so two people
+       clicking Approve at once can't both win (the second gets 409 Conflict).
+   M4. apps/api/internal/platform/schema.go + schema_test.go — the API applies
+       0015 at startup from an embedded copy; the test fails if the copy and
+       packages/db/migrations drift apart.
+   Test: marketing_repos_test.go runs ONE contract against both the memory
+   store and real Postgres (AGENTLY_TEST_DATABASE_URL, see RUNBOOK.md).
+   M5. apps/reasoner/reasoner/intel.py — the SIGNAL engine, pure functions:
+       html_to_text (stdlib HTMLParser, drops script/style/nav noise),
+       normalize_text (drops "5 minutes ago", "© 2026", bare timestamps — but
+       KEEPS numbers, because prices are the signal), diff_text (difflib), and
+       fetch_http (robots.txt honoured; 4xx/5xx/non-HTML raise FetchError).
+   M6. apps/reasoner/reasoner/intel_nodes.py — the four intel.* nodes. Read
+       snapshot_page (store a row only when the content hash changed) then
+       diff_snapshot: `changed` is true only when THIS run created the new
+       version, so an old change is never reported twice; the signal's
+       dedupe_key is the snapshot id for the same reason. _watch reports a
+       dead page in `failed` instead of failing the whole node.
+       browser.py browse_pages is the JavaScript-page path (Browserbase).
+   M7. packages/nodes/catalog/builtin.json (intel.*) — what the planner sees;
+       apps/web/components/builder/node-catalog.ts — what the builder shows.
+   M8. apps/api/internal/services/intel_service.go + handler/intel.go +
+       domain/validate/marketing.go — /api/competitors, /api/signals,
+       /api/snapshots. DELETE archives (history must survive for traceability).
+   Tests: apps/reasoner/tests/test_intel.py (a local HTTP server whose pricing
+   page changes between runs: baseline → unchanged → changed → signal),
+   apps/api/internal/handler/intel_test.go, services/intel_graph_test.go.
+   M9. apps/reasoner/reasoner/workflow.py — human.approval inside
+       DynamicWorkflow. Read in this order:
+         approval_decided (the @workflow.signal: it only WAKES the run; the
+           decision itself is read back from Postgres, the source of truth)
+         the `while remaining:` pass loop — a node waiting on an undecided
+           approval is set aside and the pass goes on, so every other branch
+           and every other approval request moves first. Why: the loop is
+           sequential; without this, draft #2 wouldn't reach the Inbox until
+           draft #1 was decided (a test caught exactly that).
+         _open_approval → _resolve: workflow.wait_condition(..., timeout=)
+           is a durable timer. No worker is held while waiting; a restarted
+           worker replays history and keeps waiting.
+   M10. apps/reasoner/reasoner/approval.py — the three activities:
+        open_approval (render draft, idempotent insert, Slack/email with the
+        Inbox link — best effort, recorded in approvals.notify),
+        set_waiting (runs.status paused ↔ running), resolve_approval (a
+        timeout that races a last-second decision keeps the decision).
+   M11. apps/reasoner/reasoner/dispatcher.py relay_decisions — the API never
+        talks to Temporal: it writes the decision; this loop sends the signal
+        and stamps signaled_at (same pattern as dispatching runs).
+   M12. apps/api/internal/services/approval_service.go + handler/approvals.go
+        — GET /api/approvals, GET /api/approvals/{id} (with signals, run cost,
+        Langfuse trace, outcomes), POST /api/approvals/{id}/decision.
+   Tests: tests/test_approval_workflow.py (Temporal time-skipping server:
+   approve-with-edit, reject, timeout skip/fail, two approvals open at once,
+   loops, worker restart while waiting), tests/test_approval_db.py (real
+   Postgres + a fake Slack webhook), handler/approvals_test.go (409 when two
+   people decide).
+   M13. Traceability — what happened AFTER the decision:
+        workflow.py _outcome: every node that runs, fails or is skipped
+        downstream of a decided approval is recorded against it
+        (approval.py record_outcome → approval_outcomes, with the link to the
+        published item when the output has one: url / permalink /
+        webViewLink …). Outcome ids are minted in workflow code with
+        workflow.uuid4() — deterministic on replay — so a retried activity
+        can't insert a duplicate.
+        services/approval_service.go History → GET /api/approvals/{id}/history:
+        the whole story oldest first (signal → run started → draft → decision →
+        outcomes → run finished with its cost) plus `published`: the outcomes
+        that succeeded AND acted outside Agently (integrations, output.*,
+        tool.http) — internal logic/AI steps are in the timeline, not there.
+   M14. The web side (apps/web):
+        lib/marketing.ts — every call above, typed; rememberedName keeps the
+        approver's name in localStorage (no user accounts yet).
+        app/(app)/inbox/page.tsx (list, polls every 5s) and inbox/[id]/page.tsx
+        (edit → "Approve with edits" sends `content` only when the text
+        changed; keeps polling after a decision so outcomes appear live).
+        app/(app)/competitors/page.tsx, app/(app)/brand/page.tsx.
+        components/shell/sidebar.tsx — "Playbooks" is only a LABEL: routes
+        and the API still say /workflows.
+        components/ui/dialog.tsx — portaled to <body> (a dialog inside the
+        page's stacking layer was drawn under the fixed sidebar).
+   M15. Brand context — apps/reasoner/reasoner/nodes.py _agent: when an
+        agent.llm node has config.brand = true, brand_block() appends the
+        Brand page (voice, product facts, positioning, claims to avoid) to the
+        SYSTEM prompt, and the output records brandContextUpdatedAt (which
+        version shaped the draft). Opt-in per node so analysis steps don't
+        pick up marketing voice. An empty Brand page FAILS the node — the
+        no-fake-output rule: a "brand-aware" draft without the brand would be
+        generic text pretending otherwise. Test: tests/test_brand.py.
+        Limits worth saying out loud: it steers, it doesn't verify — a draft
+        can still invent a detail; the human approval is the check.
+   M16. apps/api/internal/services/schedule.go — a small 5-field cron parser
+        (no dependency): bitsets per field, the standard "day-of-month OR
+        day-of-week when both are restricted" rule, prev() searches back at
+        most 12 h (the catch-up window: a fire missed while the API was down
+        runs once if <12 h late, else it's skipped), next() for "next run".
+        Tests: schedule_test.go (incl. a Monday-only weekly schedule driven
+        through SaveGraph + Scheduler.Tick, and switching to manual stopping it).
+   M17. "Nothing publishes without approval", enforced three times from ONE
+        list — packages/nodes/publishing.json (which piece actions post
+        publicly: LinkedIn, X, WordPress, Webflow, Mailchimp send_campaign …;
+        Slack-to-team, email and docs deliberately NOT on it):
+          apps/api/internal/services/publishing.go publishingErrors — every
+            publishing node needs a human.approval among its ANCESTORS (an
+            approval on a sibling branch doesn't count). Called from
+            validateGraph, so the planner's repair loop must fix it, and from
+            SaveGraph, so the builder can't save it.
+          apps/reasoner/reasoner/publishing.py — load_graph refuses to run an
+            old graph that breaks the rule (defence in depth).
+          A Go test fails if the list names an action the pieces index lacks.
+        planner.go reduceSystemPrompt "MARKETING PLAYBOOKS" — the guidance that
+        makes prompts come out as watch → branch → analyse → draft (brand) →
+        approve (assignee from the prompt) → publish {{outputs.<approval>.content}}.
+   M18. Integrations reality check — docs/integrations-status.md. All 707
+        Activepieces packages load; what each publishing integration needs to
+        sign in. oauth_service.go oauthScopeOverride: OAUTH_<SLUG>_SCOPES —
+        LinkedIn's piece asks for company-page scopes only LinkedIn-approved
+        apps get, and LinkedIn rejects the WHOLE sign-in otherwise; asking for
+        "openid profile email w_member_social" makes personal posts work.
+   M19. Ready-made playbooks — packages/nodes/playbooks/*.json (pricing change,
+        feature launch, weekly content plan), served and installed by
+        apps/api/internal/services/playbooks.go (no AI compile: the template's
+        graph + your inputs; a single stored login is attached automatically).
+        playbooks_test.go runs every template through validateGraph +
+        validateRefs and checks every integration step sits behind an
+        approval — it caught a real template bug (steps reading
+        outputs.assess without depending on it).
+        Web: components/playbook-picker.tsx in the new-playbook dialog.
+   M20. Three engine features the playbooks needed:
+        * agent.llm responseFormat=json (nodes.py parse_json_reply) → the
+          reply lands in outputs.<key>.data, so a branch can test
+          outputs.assess.data.verdict == better and a loop can iterate
+          outputs.rank.data.opportunities. Not JSON → the node fails.
+        * logic.wait (waits.py + workflow.py _wait) — a durable Temporal timer
+          (workflow.sleep). from=run_start gives absolute slots: post 1 at
+          +24 h, post 2 at +48 h, instead of waits piling up in a loop.
+        * workflow.py _fan_out/_advance — a loop's items each open their
+          approvals FIRST, then finish in order. Without it, post 2 couldn't
+          reach the Inbox until post 1 was approved, waited AND published.
+   M21. apps/api/cmd/planeval/graphs.go (`go run ./cmd/planeval -graphs`) —
+        compiles ten plain-English playbook prompts through the real planner
+        and checks the graphs: right signal steps, an approval assigned to the
+        person named, brand on drafts, the right schedule, no invented
+        competitor names. An eval (costs model calls), not a CI test.
+        What its first runs exposed, and the fixes (a good interview story):
+          * "save it in a Google Doc" / "post it on X" came out as a report
+            or a raw HTTP call. The integrations WERE candidates; the
+            credential validator (credavail.go promptNamesService) threw
+            them out because "on X" doesn't spell "twitter" and "Google Doc"
+            doesn't spell "google-docs". named_destinations.go now teaches
+            both the router (always offer a named destination) and that
+            check how people actually name these products.
+          * a raw tool.http POST to a publishing API is rejected
+            (publishing.go publishingAPIHosts) — it would publish around the
+            signed-in integration and the approval list.
+          * the planner invented competitor names ("Acme, Globex") as a
+            filter; the prompt now forbids it and the eval checks for it.
+   DEMO.md walks the whole loop on the pricing playbook, with
+   scripts/demo_competitor_site.py standing in for a competitor and Slack.
+   Interview angle: "why a signal and not polling the DB from the workflow?"
+   — workflow code can't do IO; polling would be an activity per tick filling
+   history. A signal is one event, and wait_condition's timeout gives the
+   deadline for free.
+
+  What the loop still needed when Phase 2 started (all built now — see M1–M21
+  above for where each one lives):
+    * Competitor registry + page snapshots in Postgres + "what changed since
+      last time" diffs, exposed as planner nodes.
+    * A human-approval node: the run pauses durably (Temporal signal with a
+      timeout) until someone approves, edits or rejects; Slack/email link.
+      Today nothing can pause: the pieces worker deliberately throws on
+      Activepieces' run.pause (apps/pieces-worker/src/execute.ts), so AP's own
+      "request approval" Slack/Gmail actions fail.
+    * An approval inbox in the web app with full history.
+    * Per-workspace brand context injected into AI drafting nodes.
+    * Three ready-made playbooks (pricing change, feature launch, weekly
+      content plan) and planner eval cases for marketing prompts.
+
+  Likely interview questions:
+    Q: Why not just buy a Meltwater/Klue feed?
+       Price (quote-only, five figures a year) puts it out of reach for the
+       target user, and it only covers half the loop.
+    Q: Why must approval be durable? Why not a polling loop or a DB flag?
+       The run's state (upstream outputs, the draft, what comes next) lives in
+       Temporal history. A signal resumes the exact workflow; no worker is
+       held while waiting, and a restart doesn't lose the place.
+    Q: How do you stop page diffs from being noise?
+       Normalise before diffing (strip scripts, timestamps, rotating banners)
+       and track "signal precision" as a product metric (product.md).
+    Q: What if LinkedIn/X won't give API access?
+       Use the closest working integration (Buffer, Typefully, a HubSpot blog
+       draft, a Google Doc) and say so — never pretend it was posted.
+    Q: How do you prove where a post came from?
+       signal → run → node outputs → draft → approver → publish time → cost,
+       all rows we already record or will record on the approval.

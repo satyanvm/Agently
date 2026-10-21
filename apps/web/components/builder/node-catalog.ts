@@ -23,6 +23,12 @@ import {
   Megaphone,
   CalendarCheck,
   FlaskConical,
+  Radar,
+  Camera,
+  GitCompare,
+  Flag,
+  UserCheck,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,7 +88,7 @@ export const NODE_CATALOG: NodeSpec[] = [
   {
     id: "trigger.schedule",
     label: "Schedule",
-    description: "Run on a cron schedule (e.g. every weekday at 9am).",
+    description: "Run hourly, daily, weekly or on a cron schedule.",
     kind: "trigger",
     icon: Clock,
     tone: "text-running",
@@ -107,6 +113,44 @@ export const NODE_CATALOG: NodeSpec[] = [
     icon: MessageSquare,
     tone: "text-accent",
     toneBg: "bg-accent-bg",
+  },
+
+  // ── Market intelligence (apps/reasoner/reasoner/intel_nodes.py) ─────────
+  {
+    id: "intel.watchCompetitors",
+    label: "Watch competitors",
+    description: "Check every registered competitor page and report what changed.",
+    kind: "tool",
+    icon: Radar,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.snapshotPage",
+    label: "Snapshot page",
+    description: "Store a page's visible text when it has a new version.",
+    kind: "tool",
+    icon: Camera,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.diffPage",
+    label: "Diff against last snapshot",
+    description: "Lines added and removed since the previous version.",
+    kind: "tool",
+    icon: GitCompare,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
+  },
+  {
+    id: "intel.recordSignal",
+    label: "Record signal",
+    description: "Save news, posts or reviews as traceable signals.",
+    kind: "tool",
+    icon: Flag,
+    tone: "text-success",
+    toneBg: "bg-success-bg",
   },
 
   // ── Tools ───────────────────────────────────────────────────────────────
@@ -163,6 +207,24 @@ export const NODE_CATALOG: NodeSpec[] = [
     description: "Pass items through only if they match a rule.",
     kind: "logic",
     icon: Filter,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
+    id: "human.approval",
+    label: "Human approval",
+    description: "Wait for a person to approve, edit or reject a draft.",
+    kind: "logic",
+    icon: UserCheck,
+    tone: "text-warn",
+    toneBg: "bg-warn-bg",
+  },
+  {
+    id: "logic.wait",
+    label: "Wait",
+    description: "Pause on a durable timer, then continue.",
+    kind: "logic",
+    icon: Timer,
     tone: "text-warn",
     toneBg: "bg-warn-bg",
   },
@@ -322,12 +384,14 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
     { key: "path", label: "Path", control: "text", placeholder: "/hooks/my-workflow" },
   ],
   "trigger.schedule": [
-    { key: "cron", label: "Cron", control: "text", placeholder: "0 9 * * 1-5" },
+    { key: "cron", label: "Schedule", control: "text", placeholder: "weekly mon 09:00", help: "hourly, daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or a 5-field cron like 0 9 * * 1-5. Saved with the playbook; times use SCHEDULER_TZ." },
   ],
   "agent.llm": [
     { key: "system", label: "System prompt", control: "textarea", placeholder: "You are a helpful agent…" },
     { key: "prompt", label: "Prompt", control: "textarea", placeholder: "Use {{input.topic}} and upstream outputs…" },
     { key: "model", label: "Model", control: "select", options: ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"] },
+    { key: "responseFormat", label: "Response format", control: "select", options: ["text", "json"], help: "json: the reply is parsed into outputs.<key>.data for branches and loops." },
+    { key: "brand", label: "Use brand context", control: "select", options: ["false", "true"], help: "On for drafting steps: adds the Brand page (voice, product facts, positioning, claims to avoid) to the system prompt. Fails if the Brand page is empty." },
   ],
   "agent.chat": [
     { key: "system", label: "System prompt", control: "textarea" },
@@ -336,6 +400,34 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   ],
   "tool.browser": [
     { key: "urls", label: "URLs (one per line)", control: "textarea", placeholder: "https://example.com" },
+  ],
+  "intel.watchCompetitors": [
+    { key: "competitors", label: "Competitors (blank = all)", control: "text", placeholder: "Acme, Globex" },
+    { key: "pageKinds", label: "Page kinds (blank = all)", control: "text", placeholder: "pricing, changelog" },
+    { key: "ignore", label: "Ignore lines matching (one regex per line)", control: "textarea", help: "Timestamps, \"x minutes ago\" and copyright years are already ignored." },
+  ],
+  "intel.snapshotPage": [
+    { key: "url", label: "URL", control: "text", placeholder: "https://competitor.com/pricing" },
+    { key: "competitor", label: "Competitor (optional)", control: "text" },
+    { key: "pageKind", label: "Page kind", control: "select", options: ["pricing", "changelog", "blog", "careers", "other"] },
+    { key: "render", label: "Fetch with", control: "select", options: ["http", "browser"], help: "browser = Browserbase, for pages that only render with JavaScript." },
+    { key: "ignore", label: "Ignore lines matching (one regex per line)", control: "textarea", help: "Timestamps, \"x minutes ago\" and copyright years are already ignored." },
+  ],
+  "intel.diffPage": [
+    { key: "snapshotId", label: "Snapshot id", control: "text", placeholder: "{{outputs.snapshot.snapshotId}}" },
+    { key: "url", label: "URL (instead of snapshot id)", control: "text" },
+    { key: "recordSignal", label: "Record a signal on change", control: "select", options: ["true", "false"] },
+  ],
+  "intel.recordSignal": [
+    { key: "source", label: "Source", control: "select", options: ["news", "rss", "reddit", "hackernews", "review", "page_change", "other"] },
+    { key: "items", label: "Items expression (optional)", control: "text", placeholder: "outputs.news.articles" },
+    { key: "titleField", label: "Title field (with items)", control: "text", placeholder: "title" },
+    { key: "urlField", label: "URL field (with items)", control: "text", placeholder: "url" },
+    { key: "summaryField", label: "Summary field (with items)", control: "text" },
+    { key: "title", label: "Title (single signal)", control: "text" },
+    { key: "url", label: "URL (single signal)", control: "text" },
+    { key: "summary", label: "Summary (single signal)", control: "textarea" },
+    { key: "competitor", label: "Competitor (optional)", control: "text" },
   ],
   "tool.http": [
     { key: "method", label: "Method", control: "select", options: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
@@ -355,6 +447,21 @@ export const NODE_FIELDS: Record<string, NodeField[]> = {
   ],
   "logic.filter": [
     { key: "condition", label: "Keep when", control: "text", placeholder: "item.score > 0.5" },
+  ],
+  "human.approval": [
+    { key: "draft", label: "Draft to approve", control: "textarea", placeholder: "{{outputs.write_post.text}}", help: "The approver can edit it; the final text is outputs.<this node>.content." },
+    { key: "title", label: "Title", control: "text", placeholder: "LinkedIn post: Acme cut prices" },
+    { key: "channel", label: "Publishes to", control: "text", placeholder: "LinkedIn" },
+    { key: "assignee", label: "Approver", control: "text", placeholder: "Rahul" },
+    { key: "notifySlackWebhook", label: "Notify Slack (incoming webhook URL)", control: "text", help: "Defaults to APPROVAL_SLACK_WEBHOOK_URL." },
+    { key: "notifyEmail", label: "Notify email", control: "text", placeholder: "rahul@example.com" },
+    { key: "timeoutHours", label: "Timeout (hours)", control: "text", placeholder: "72" },
+    { key: "onTimeout", label: "When it times out", control: "select", options: ["skip", "fail"] },
+    { key: "signalIds", label: "Signals (ids, optional)", control: "text", help: "Defaults to every signal recorded earlier in this run." },
+  ],
+  "logic.wait": [
+    { key: "hours", label: "Hours", control: "text", placeholder: "24", help: "Can come from upstream, e.g. {{item.delayHours}}." },
+    { key: "from", label: "Counted from", control: "select", options: ["now", "run_start"] },
   ],
   "logic.loop": [
     { key: "items", label: "Items expression", control: "text", placeholder: "outputs.fetch.items" },

@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import browser, catalog, db, llm, pieces, sandbox
+from . import browser, catalog, db, llm, oauth, pieces, sandbox
 from .config import CONFIG
 
 HTTP_TIMEOUT_S = float(os.environ.get("HTTP_TIMEOUT_S", "") or 60)
@@ -144,6 +144,20 @@ def supported_types() -> list[str]:
 _TOKEN = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
 
 
+def walk_path(root: Any, expr: str, what: str = "template reference") -> Any:
+    """Follow a dotted path; numeric parts index lists (`outputs.f.items.0.title`,
+    the paths the builder's drag-to-map inserts). Unknown parts raise."""
+    cur: Any = root
+    for part in expr.strip().split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            raise ValueError(f"{what} not found: {expr}")
+    return cur
+
+
 def render(template: Any, ctx: NodeContext) -> str:
     """Resolve {{input.x}} / {{outputs.key.field}} references in a string.
 
@@ -156,11 +170,7 @@ def render(template: Any, ctx: NodeContext) -> str:
     root = {"input": ctx.run_input, "outputs": ctx.upstream, **ctx.extra}
 
     def resolve(expr: str) -> str:
-        cur: Any = root
-        for part in expr.split("."):
-            if not isinstance(cur, dict) or part not in cur:
-                raise ValueError(f"template reference not found: {expr}")
-            cur = cur[part]
+        cur = walk_path(root, expr)
         if cur is None:
             raise ValueError(f"template reference is null: {expr}")
         return cur if isinstance(cur, str) else json.dumps(cur)
@@ -183,12 +193,7 @@ def render_tpl(template: Any, ctx: NodeContext, extra_roots: dict[str, Any]) -> 
     root = {"input": ctx.run_input, "outputs": ctx.upstream, **ctx.extra, **extra_roots}
 
     def lookup(expr: str) -> Any:
-        cur: Any = root
-        for part in expr.split("."):
-            if not isinstance(cur, dict) or part not in cur:
-                raise ValueError(f"template reference not found: {expr}")
-            cur = cur[part]
-        return cur
+        return walk_path(root, expr)
 
     def resolve(raw: str) -> str:
         expr = raw.strip()
@@ -266,12 +271,14 @@ async def _credential_values(run_id: str, key: str, cred_id: str) -> dict[str, A
     if not cred_id:
         return {}
     try:
-        data = await db.fetch_credential_data(cred_id)
+        row = await db.fetch_credential_row(cred_id)
     except Exception as exc:  # noqa: BLE001 - preserve the database reason
         raise RuntimeError(f"could not resolve credential {cred_id}: {exc}") from exc
-    if data is None:
+    if row is None:
         raise RuntimeError(f"credential {cred_id} not found")
-    return data
+    cred_type, data = row
+    # Signed-in (OAuth) credentials carry an expiry; swap in a fresh token first.
+    return await oauth.refresh_if_expired(cred_id, cred_type, data)
 
 
 # ─────────────────────────── handlers ───────────────────────────
@@ -282,9 +289,63 @@ async def _trigger(ctx: NodeContext) -> NodeResult:
     return NodeResult(output={"input": ctx.run_input}, summary="Triggered")
 
 
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+
+
+def parse_json_reply(text: str) -> Any:
+    """A model's JSON reply → the value. Tolerates one wrapping code fence."""
+    body = text.strip()
+    if m := _FENCE.match(body):
+        body = m.group(1)
+    try:
+        value = json.loads(body)
+    except ValueError as exc:
+        raise ValueError(f"the model was asked for JSON but replied with something else: {_clip(text, 200)}") from exc
+    if not isinstance(value, (dict, list)):
+        raise ValueError(f"the model was asked for a JSON object or list, got {type(value).__name__}")
+    return value
+
+
+def wants_brand(ctx: NodeContext) -> bool:
+    """config.brand: true (bool or the string the builder stores)."""
+    val = ctx.node.get("config", {}).get("brand")
+    return val is True or str(val).strip().lower() in ("true", "1", "yes")
+
+
+_BRAND_SECTIONS = (
+    ("voice", "Voice — write in this tone"),
+    ("product_facts", "Product facts — the only product claims you may make"),
+    ("positioning", "Positioning — who we are for and why we win"),
+    ("avoid_claims", "Never say — claims to avoid"),
+)
+
+
+def brand_block(brand: dict[str, Any]) -> str:
+    """The system-prompt section a brand-aware drafting node gets."""
+    parts = [f"### {label}\n{str(brand.get(key) or '').strip()}"
+             for key, label in _BRAND_SECTIONS if str(brand.get(key) or "").strip()]
+    return ("## Brand context (from the workspace's Brand page — follow it strictly; "
+            "if the task conflicts with it, follow the brand context)\n\n" + "\n\n".join(parts))
+
+
+async def _brand_for(ctx: NodeContext) -> dict[str, Any]:
+    """Load the brand context or fail: a node marked brand-aware never
+    silently drafts without it."""
+    ws = await db.run_workspace_id(ctx.run_id)
+    brand = await db.brand_context(ws)
+    if not brand or not any(str(brand.get(k) or "").strip() for k, _ in _BRAND_SECTIONS):
+        raise RuntimeError("this step uses brand context (brand: true), but the Brand page is empty; "
+                           "fill in at least the voice, or turn brand off for this step")
+    return brand
+
+
 @handles("agent.llm", "agent.chat")
 async def _agent(ctx: NodeContext) -> NodeResult:
     system = render(_cfg(ctx, "system") or "You are a helpful agent.", ctx)
+    brand: dict[str, Any] | None = None
+    if wants_brand(ctx):
+        brand = await _brand_for(ctx)
+        system = f"{system}\n\n{brand_block(brand)}"
     prompt = render(_cfg(ctx, "prompt"), ctx)
     if not prompt.strip():
         # No explicit prompt: fall back to the run topic + upstream text so the
@@ -295,10 +356,27 @@ async def _agent(ctx: NodeContext) -> NodeResult:
         )
         prompt = f"Task: {topic}\n\n{upstream}".strip()
 
+    json_mode = _cfg(ctx, "responseFormat").strip().lower() == "json"
+    if json_mode:
+        system += ("\n\nRespond with ONE valid JSON value and nothing else: no prose, no code fences. "
+                   "Use exactly the fields the task asks for.")
     model = _cfg(ctx, "model") or CONFIG.model
     out = await llm.complete(ctx.run_id, ctx.node["key"], system=system, user=prompt, model=model)
+    output: dict[str, Any] = {"text": out.text, "model": model}
+    if json_mode:
+        # Downstream branches and loops read outputs.<key>.data; a reply that
+        # isn't JSON fails the node (node retries can ask again) rather than
+        # letting a branch quietly compare against nothing.
+        output["data"] = parse_json_reply(out.text)
+    if brand is not None:
+        # Which version of the brand context shaped this draft (traceability).
+        saved = brand.get("updated_at")
+        output["brandContextUpdatedAt"] = saved.isoformat() if hasattr(saved, "isoformat") else str(saved or "")
+        await db.append_log(ctx.run_id, "info", "system", ctx.node["key"],
+                            f"Drafted with brand context saved {output['brandContextUpdatedAt']}"
+                            + (f" by {brand['updated_by']}" if brand.get("updated_by") else ""))
     return NodeResult(
-        output={"text": out.text, "model": model},
+        output=output,
         summary=_clip(out.text),
         tokens_in=out.tokens_in,
         tokens_out=out.tokens_out,
@@ -752,13 +830,7 @@ def _resolve_ref(expr: str, ctx: NodeContext) -> Any:
     """Resolve a dotted reference like `outputs.fetch.items` to a value."""
     if not expr:
         return None
-    root = {"input": ctx.run_input, "outputs": ctx.upstream}
-    cur: Any = root
-    for part in expr.strip().split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            raise ValueError(f"reference not found: {expr}")
-        cur = cur[part]
-    return cur
+    return walk_path({"input": ctx.run_input, "outputs": ctx.upstream}, expr, "reference")
 
 
 # A deliberately tiny comparison evaluator — NOT a general expression engine.
@@ -825,3 +897,7 @@ def _coerce(val: Any) -> Any:
 def _slug(s: str) -> str:
     out = "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-")
     return out or "report"
+
+
+# intel.* handlers live in their own module; importing it registers them.
+from . import intel_nodes  # noqa: E402,F401

@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "Node types that PUBLISH to the public: social posts, blog/CMS pages, community posts,",
+    "newsletter sends and social schedulers. Every one of these must have a human.approval",
+    "node upstream of it (docs/phase-2-plan.md, decided 2026-10-18). Enforced by the planner's",
+    "validator (apps/api services/publishing.go), on every builder save, and again by the",
+    "reasoner when a run loads its graph (apps/reasoner reasoner/publishing.py).",
+    "Not listed on purpose: Slack / Teams / Discord messages to your own team, email",
+    "(output.email, Gmail), CRM updates, docs and sheets — internal or one-to-one, not public.",
+    "custom_api_call is listed for publishing pieces because a raw API call can post too.",
+    "A Go test checks every entry exists in packages/nodes/pieces/index.json."
+  ],
+  "pieces": {
+    "linkedin": ["create_share_update", "create_company_update", "custom_api_call"],
+    "twitter": ["create-tweet", "create-reply"],
+    "facebook-pages": ["create_post", "create_photo_post", "create_video_post"],
+    "instagram-business": ["upload_photo", "upload_reel"],
+    "bluesky": ["createPost", "repostPost"],
+    "mastodon": ["post_status"],
+    "pinterest": ["createPin"],
+    "reddit": ["createRedditPost", "createRedditComment", "editRedditPost", "editRedditComment", "custom_api_call"],
+    "discourse": ["create_post", "create_topic", "custom_api_call"],
+    "circle": ["create_post", "create_comment", "custom_api_call"],
+    "wordpress": ["create_post", "update_post", "create_page", "custom_api_call"],
+    "webflow": ["create_collection_item", "update_collection_item", "publish_collection_item", "custom_api_call"],
+    "ghostcms": ["create_post", "custom_api_call"],
+    "hubspot": ["create-blog-post", "create-page"],
+    "buffer": ["create_post", "custom_api_call"],
+    "typefully": ["typefully_publish_draft_now", "typefully_schedule_draft", "custom_api_call"],
+    "hootsuite": ["create_message", "custom_api_call"],
+    "mailchimp": ["send_campaign"],
+    "convertkit": ["broadcasts_create_broadcast", "broadcasts_update_broadcast"]
+  },
+  "types": []
+}
