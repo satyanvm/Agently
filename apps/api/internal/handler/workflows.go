@@ -153,6 +153,29 @@ func launchRun(p *services.Platform) http.HandlerFunc {
 	}
 }
 
+func runPreflight(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			pf, err := p.Runs.Preflight(chi.URLParam(r, "slug"))
+			return pf, http.StatusOK, err
+		})
+	}
+}
+
+func applyWorkflowCredential(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			body, _ := decodeBody(r)
+			id, _ := body["credentialId"].(string)
+			if id == "" {
+				return nil, 0, domain.BadRequest("credentialId is required")
+			}
+			pf, err := p.Workflows.ApplyCredential(chi.URLParam(r, "slug"), domain.CredentialId(id))
+			return pf, http.StatusOK, err
+		})
+	}
+}
+
 func createAgent(p *services.Platform) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handle(w, func() (any, int, error) {

@@ -12,6 +12,7 @@ volume a single run produces.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -251,10 +252,15 @@ async def set_run_running(run_id: str, current_step: str) -> None:
 
 
 async def set_run_progress(run_id: str, steps_done: int, steps_total: int, current_step: str) -> None:
+    # Nodes finish concurrently, so progress writes can land out of order; never
+    # let a late, smaller count overwrite a newer one.
     async with _conn() as conn:
         await conn.execute(
-            "update runs set steps_done = %s, steps_total = %s, current_step = %s where id = %s",
-            (steps_done, steps_total, current_step, run_id),
+            """
+            update runs set steps_done = %s, steps_total = %s, current_step = %s
+             where id = %s and coalesce(steps_done, 0) <= %s
+            """,
+            (steps_done, steps_total, current_step, run_id, steps_done),
         )
 
 
@@ -341,9 +347,17 @@ async def fetch_agent_statuses(run_id: str) -> dict[str, str]:
 def _stable_agent_id(run_id: str, key: str) -> str:
     """Deterministic per-(run,node) agent id so replays don't duplicate rows."""
     # run ids look like run_<20>; derive a stable, schema-shaped agent id.
-    suffix = run_id.split("_", 1)[-1][:12]
-    safe_key = "".join(c for c in key if c in _BASE36)[:6] or "node"
-    return f"ra_{suffix}{safe_key}".ljust(23, "0")[:23]
+    # The key part is a hash of the WHOLE key. It used to be the key's first six
+    # characters, so langgraph_pypi, langgraph_profile and langgraph_sentiment
+    # all landed on one row: the run view showed a fraction of the nodes, and a
+    # resume trusted one finished sibling for all of them.
+    suffix = run_id.split("_", 1)[-1][:12].ljust(12, "0")
+    n = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big")
+    digest = ""
+    for _ in range(8):
+        n, r = divmod(n, 36)
+        digest += _BASE36[r]
+    return f"ra_{suffix}{digest}"
 
 
 async def set_agent_status(agent_id: str, status: str, summary: str | None = None) -> None:

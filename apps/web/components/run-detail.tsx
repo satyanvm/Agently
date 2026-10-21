@@ -180,6 +180,12 @@ export function RunDetail({
         />
       </div>
 
+      {run.status === "failed" && run.error && (
+        <Card className="border-danger/30 bg-danger-bg px-5 py-3 text-[13px] text-danger">
+          <span className="font-medium">Run failed:</span> <span className="break-words">{run.error}</span>
+        </Card>
+      )}
+
       {/* Progress bar */}
       {isLive && (
         <Card className="px-5 py-4">

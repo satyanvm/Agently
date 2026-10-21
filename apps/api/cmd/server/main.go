@@ -1,6 +1,7 @@
 // Command server runs the Agently HTTP API: a single self-contained Go binary
 // that serves the same contract the TypeScript backend served. It assembles the
-// in-memory seeded platform and listens on API_ADDR (default :8080).
+// in-memory seeded platform and listens on API_ADDR (default :8090;
+// :8080 belongs to the Temporal UI in docker-compose.yml).
 package main
 
 import (
@@ -128,7 +129,7 @@ func main() {
 
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":8090"
 	}
 
 	srv := &http.Server{

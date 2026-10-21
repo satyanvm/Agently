@@ -128,23 +128,28 @@ function WorkflowBuilderInner({ workflowSlug }: WorkflowBuilderProps) {
       setRunGateOpen(true);
       return;
     }
-    void launchTestRun();
+    void startTestRun();
   };
 
   /**
    * Save, launch a test run and follow it here instead of leaving the editor
    * (n8n-style). `targetNode` = "Run step": only that node and its ancestors
    * run, ancestors reuse their last outputs. Test runs always honour pins.
+   * `skipCredentialCheck`: the person chose to run despite missing sign-ins.
    */
-  const startTestRun = async (targetNode?: string) => {
+  const startTestRun = async (targetNode?: string, skipCredentialCheck = false) => {
     setRunGateOpen(false);
     setIsRunning(true);
     setStepRunning(targetNode ?? null);
     try {
       const saved = await saveWorkflow();
       if (!saved) return;
-      const done = await runAndWait(workflowSlug, { targetNode, usePins: true }, (r) =>
-        setLastRun({ id: r.id, number: r.number, status: r.status, step: r.currentStep, target: targetNode, error: r.error }),
+      const done = await runAndWait(
+        workflowSlug,
+        { targetNode, usePins: true },
+        (r) => setLastRun({ id: r.id, number: r.number, status: r.status, step: r.currentStep, target: targetNode, error: r.error }),
+        undefined,
+        skipCredentialCheck,
       );
       setLastRun({ id: done.id, number: done.number, status: done.status, step: done.currentStep, target: targetNode, error: done.error });
     } catch (err) {
@@ -156,7 +161,8 @@ function WorkflowBuilderInner({ workflowSlug }: WorkflowBuilderProps) {
     }
   };
 
-  const launchTestRun = () => startTestRun();
+  // From the sign-in gate: run even though some nodes have no account.
+  const launchTestRun = () => startTestRun(undefined, true);
 
   const onConnect: OnConnect = React.useCallback(
     (connection: Connection) => {

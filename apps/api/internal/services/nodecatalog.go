@@ -61,6 +61,10 @@ type CatalogNode struct {
 	Outputs     []string            `json:"outputs"`
 	Credentials []CatalogCredential `json:"credentials"`
 	Cluster     string              `json:"-"` // filled at load from the file
+	// Pieces only: the auth type (oauth2, secret_text, …) and whether the piece
+	// runs without it. Read by the run preflight.
+	AuthType     string `json:"-"`
+	AuthOptional bool   `json:"-"`
 }
 
 type catalogFile struct {

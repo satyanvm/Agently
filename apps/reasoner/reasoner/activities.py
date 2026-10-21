@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from . import db, engine, obs, pieces, publishing
 from .nodes import NodeContext, render_tpl, split_credential
@@ -305,6 +306,24 @@ def _clip_summary(s: str, n: int = 280) -> str:
 
 @activity.defn
 async def prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
+    """Resolve a piece node (see _prepare_piece_node), failing it for good on a
+    configuration error.
+
+    A missing credential, an unknown piece or a bad template reference will not
+    fix itself on retry, so the node is marked failed with the reason and the
+    activity fails non-retryably carrying that message. Anything else (a DB
+    hiccup) propagates and is retried as before.
+    """
+    try:
+        return await _prepare_piece_node(inp)
+    except (RuntimeError, KeyError, ValueError, TypeError) as exc:
+        reason = str(exc) or type(exc).__name__
+        await db.set_agent_status(inp.agent_id, "failed", summary=reason[:280])
+        await db.append_log(inp.run_id, "error", "system", inp.node["key"], f"Node failed: {reason}")
+        raise ApplicationError(reason, type="PieceNodeConfigError", non_retryable=True) from exc
+
+
+async def _prepare_piece_node(inp: PreparePieceInput) -> PreparePieceResult:
     """Resolve a piece node into an execute_piece payload or trigger event.
 
     Mirrors the head of engine.execute_one_node (status → running, log line) so

@@ -6,8 +6,9 @@ import { Play, Loader2 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { launchRun } from "@/lib/api";
+import { fetchPreflight, launchRun, type RunPreflight } from "@/lib/api";
 import { fetchPlaybooks, type PlaybookInput } from "@/lib/marketing";
+import { ConnectAccounts } from "@/components/connect-accounts";
 import type { Workflow } from "@/lib/types";
 
 type Field = { key: string; label: string; help?: string; list: boolean; initial: string };
@@ -62,6 +63,8 @@ export function RunWorkflowDialog({
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [launching, setLaunching] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // null while loading or when the check itself failed (launch then decides).
+  const [preflight, setPreflight] = React.useState<RunPreflight | null>(null);
   const fields = fieldsFor(defaults, labels);
 
   React.useEffect(() => {
@@ -69,6 +72,8 @@ export function RunWorkflowDialog({
     setValues(Object.fromEntries(fieldsFor(defaults, new Map()).map((f) => [f.key, f.initial])));
     setError(null);
     setLaunching(false);
+    setPreflight(null);
+    fetchPreflight(workflow.slug).then(setPreflight).catch(() => setPreflight(null));
     if (playbookId) {
       fetchPlaybooks()
         .then((all) => {
@@ -80,7 +85,9 @@ export function RunWorkflowDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onLaunch = async () => {
+  const blocked = preflight !== null && !preflight.ready;
+
+  const onLaunch = async (skipCredentialCheck = false) => {
     setLaunching(true);
     setError(null);
     try {
@@ -90,7 +97,7 @@ export function RunWorkflowDialog({
         if (v === f.initial.trim()) continue;
         input[f.key] = f.list ? v.split(/[,\n;]/).map((x) => x.trim()).filter(Boolean) : v;
       }
-      const runId = await launchRun(workflow.slug, input);
+      const runId = await launchRun(workflow.slug, input, { skipCredentialCheck });
       onOpenChange(false);
       router.push(`/runs/${runId}`);
     } catch (e) {
@@ -118,6 +125,9 @@ export function RunWorkflowDialog({
             />
           </FieldRow>
         ))}
+        {preflight && !preflight.ready && (
+          <ConnectAccounts slug={workflow.slug} preflight={preflight} onChange={setPreflight} />
+        )}
         {error && (
           <div className="rounded-md border border-danger/30 bg-danger-bg px-3 py-2 text-[12px] text-danger">
             {error}
@@ -125,10 +135,21 @@ export function RunWorkflowDialog({
         )}
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+        {blocked && (
+          <button
+            type="button"
+            className="mr-auto text-[12px] text-faint underline-offset-2 hover:underline"
+            title="Launch anyway, e.g. when the server's environment already provides these tokens"
+            onClick={() => onLaunch(true)}
+            disabled={launching}
+          >
+            Run anyway
+          </button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button variant="primary" size="sm" onClick={onLaunch} disabled={launching}>
+        <Button variant="primary" size="sm" onClick={() => onLaunch()} disabled={launching || blocked}>
           {launching ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
           Launch run
         </Button>

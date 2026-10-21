@@ -57,8 +57,9 @@ export async function runAndWait(
   exec: { targetNode?: string; usePins?: boolean },
   onUpdate: (run: RunPoll) => void,
   signal?: { cancelled: boolean },
+  skipCredentialCheck = false,
 ): Promise<RunPoll> {
-  const id = await launchRun(slug, undefined, exec);
+  const id = await launchRun(slug, undefined, { exec, skipCredentialCheck });
   for (;;) {
     const run = await getJSON<RunPoll>(`/api/runs/${id}`);
     onUpdate(run);

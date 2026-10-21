@@ -54,6 +54,9 @@ async def _dispatch_once(client: Client) -> None:
             # Deterministic workflow input (never read env in workflow code):
             # where the Node pieces worker listens for execute_piece.
             "pieces_task_queue": CONFIG.pieces_task_queue,
+            # Likewise the concurrency cap: a replay must see the value the run
+            # started with, whatever the env says now.
+            "max_parallel": CONFIG.run_max_parallel,
         }
         # Route composed (user-built) runs to the per-node DynamicWorkflow so each
         # node is its own durable Temporal unit; everything else runs the static

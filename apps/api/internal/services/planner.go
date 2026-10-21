@@ -668,21 +668,29 @@ func extractJSON(raw string) string {
 // "AI" (the overwhelming common case for this product).
 func topicFrom(lower string) string {
 	for _, kw := range []string{" about ", " on the topic of ", " regarding "} {
-		if i := strings.Index(lower, kw); i >= 0 {
-			rest := lower[i+len(kw):]
-			rest = strings.TrimSpace(strings.SplitN(rest, " and ", 2)[0])
-			if cut := strings.IndexAny(rest, ".,;\n"); cut > 0 {
-				rest = rest[:cut]
+		for from := 0; ; {
+			i := strings.Index(lower[from:], kw)
+			if i < 0 {
+				break
 			}
-			if rest != "" {
+			from += i + len(kw)
+			rest := strings.TrimSpace(strings.SplitN(lower[from:], " and ", 2)[0])
+			if cut := strings.IndexAny(rest, ".,;:()\n"); cut >= 0 {
+				rest = strings.TrimSpace(rest[:cut])
+			}
+			// "questions about it (stackexchange…" names no subject: skip
+			// pronoun references and keep looking.
+			if first, _, _ := strings.Cut(rest, " "); rest != "" && !topicPronouns[first] {
 				return truncateStr(rest, 60)
 			}
 		}
 	}
-	if strings.Contains(lower, "ai") || strings.Contains(lower, "artificial intelligence") || strings.Contains(lower, "machine learning") {
-		return "AI"
-	}
-	return "AI"
+	return "AI" // the overwhelming common case for this product
+}
+
+var topicPronouns = map[string]bool{
+	"it": true, "its": true, "this": true, "that": true, "these": true, "those": true,
+	"them": true, "they": true, "each": true, "which": true, "what": true, "how": true,
 }
 
 func titleFrom(topic string) string {

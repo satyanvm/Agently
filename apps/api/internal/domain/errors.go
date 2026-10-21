@@ -24,20 +24,24 @@ const (
 	// failed and usually what to do about it — where internal errors are
 	// deliberately opaque.
 	CodeUpstreamFailed ErrorCode = "upstream_failed"
+	// CodeCredentialsRequired refuses a launch whose graph has nodes that cannot
+	// resolve their account; details name each node and what it is missing.
+	CodeCredentialsRequired ErrorCode = "credentials_required"
 )
 
 // ErrorStatus is the HTTP status mapping for each code — decided in one place.
 var ErrorStatus = map[ErrorCode]int{
-	CodeBadRequest:       400,
-	CodeValidationFailed: 422,
-	CodeUnauthorized:     401,
-	CodeForbidden:        403,
-	CodeNotFound:         404,
-	CodeConflict:         409,
-	CodeRateLimited:      429,
-	CodeInternal:         500,
-	CodeNotImplemented:   501,
-	CodeUpstreamFailed:   502,
+	CodeBadRequest:          400,
+	CodeValidationFailed:    422,
+	CodeUnauthorized:        401,
+	CodeForbidden:           403,
+	CodeNotFound:            404,
+	CodeConflict:            409,
+	CodeRateLimited:         429,
+	CodeInternal:            500,
+	CodeNotImplemented:      501,
+	CodeUpstreamFailed:      502,
+	CodeCredentialsRequired: 409,
 }
 
 // ErrorDetail carries field-level validation context.

@@ -153,7 +153,9 @@ class IntegrationHandlerTest(unittest.TestCase):
         finally:
             nodes.httpx.AsyncClient = orig
 
-        self.assertTrue(sent["url"].endswith("&mailto="))
+        # The empty value renders, then the empty pair is dropped from the URL.
+        self.assertNotIn("mailto", sent["url"])
+        self.assertIn("rows=5", sent["url"])
 
     def test_absent_mapped_output_is_empty_and_default_applies(self):
         sent = {}

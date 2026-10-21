@@ -152,6 +152,8 @@ func mergePiecesIndex(cat *Catalog, path string) {
 			node.Outputs = []string{"result"}
 		}
 		if n.Auth != nil && n.Auth.Type != "" && n.Auth.Type != "none" && n.Auth.CredentialKey != "" {
+			node.AuthType = n.Auth.Type
+			node.AuthOptional = !n.Auth.Required
 			node.Credentials = []CatalogCredential{{
 				Key:  n.Auth.CredentialKey,
 				Help: n.Auth.Type + " credential for the " + slug + " piece",

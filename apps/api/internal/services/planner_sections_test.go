@@ -269,3 +269,17 @@ func TestWithQuotaFallback(t *testing.T) {
 		t.Fatalf("got %q, %v after %v", out, err, models)
 	}
 }
+
+func TestTopicFrom(t *testing.T) {
+	cases := map[string]string{
+		"send me a digest about rust async runtimes, daily":                        "rust async runtimes",
+		"4. stack overflow questions about it (stackexchange, site stackoverflow)": "AI",
+		"posts about it (reddit). then news about langgraph agents.":               "langgraph agents",
+		"summarize hacker news": "AI",
+	}
+	for prompt, want := range cases {
+		if got := topicFrom(prompt); got != want {
+			t.Errorf("topicFrom(%q) = %q, want %q", prompt, got, want)
+		}
+	}
+}

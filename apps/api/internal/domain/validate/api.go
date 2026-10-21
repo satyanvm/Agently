@@ -375,6 +375,9 @@ type LaunchRunInput struct {
 	// from the last run), and/or let pinned nodes return their pinned data.
 	TargetNode string
 	UsePins    bool
+	// SkipCredentialCheck launches even when the preflight finds nodes without
+	// an account (the operator knows the runtime env provides them).
+	SkipCredentialCheck bool
 }
 
 func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
@@ -392,6 +395,9 @@ func ParseLaunchRunInput(body map[string]any) (LaunchRunInput, error) {
 	if exec := getMap(body, "exec"); exec != nil {
 		out.TargetNode, _ = exec["targetNode"].(string)
 		out.UsePins, _ = exec["usePins"].(bool)
+	}
+	if b, ok := body["skipCredentialCheck"].(bool); ok {
+		out.SkipCredentialCheck = b
 	}
 	if hasKey(body, "region") {
 		r := getString(body, "region")
