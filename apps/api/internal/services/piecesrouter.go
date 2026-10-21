@@ -156,7 +156,13 @@ Return {"clusters": []} if none apply.`
 		return nil, fmt.Errorf("cluster router picked %d cluster(s), none of them in the offered directory: %s",
 			len(picked), truncateStr(strings.Join(picked, ", "), 200))
 	}
-	return selected, nil
+	// Destinations the prompt names outright are always candidates
+	// (named_destinations.go), even when the prefilter didn't offer them.
+	available := make(map[string]bool, len(clusterKeys))
+	for _, k := range clusterKeys {
+		available[k] = true
+	}
+	return pinNamed(selected, namedClusters(prompt, available), max), nil
 }
 
 // PieceSelectionMethods runs each piece-selection strategy against prompt and

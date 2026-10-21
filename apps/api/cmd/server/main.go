@@ -55,6 +55,7 @@ func main() {
 	for _, check := range []func() error{
 		services.RequirePlannerKeys,
 		services.RequireNodeCatalog,
+		services.RequirePublishingList,
 		services.RequirePiecesIndex,
 		services.RequirePieceEmbeddings,
 	} {
@@ -84,6 +85,13 @@ func main() {
 	}
 	defer pool.Close()
 	logger.Info("connected to Postgres", "store", "postgres")
+	schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = platform.EnsureSchema(schemaCtx, pool)
+	schemaCancel()
+	if err != nil {
+		logger.Error("could not upgrade the database schema", "error", err.Error())
+		os.Exit(1)
+	}
 	sealCtx, sealCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	sealed, err := platform.EncryptPlaintextCredentials(sealCtx, pool)
 	sealCancel()
@@ -111,6 +119,12 @@ func main() {
 	// launches runs for new events (services/piecespoller.go). PIECES_POLLER=0 disables.
 	if os.Getenv("PIECES_POLLER") != "0" {
 		go plat.NewPiecesPoller().Start(schedCtx)
+	}
+
+	// Failed runs: start the workflow's error workflow and send its alerts
+	// (services/failures.go). Runs alongside the scheduler, same off switch.
+	if os.Getenv("SCHEDULER") != "0" {
+		go plat.NewFailureWatcher().Start(schedCtx)
 	}
 
 	addr := os.Getenv("API_ADDR")

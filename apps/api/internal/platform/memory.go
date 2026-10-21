@@ -59,6 +59,14 @@ type store struct {
 	activity     []domain.ActivityEvent
 	integrations []domain.Integration
 	credentials  []domain.Credential
+	competitors  []domain.Competitor
+	snapshots    []domain.PageSnapshot
+	signals      []domain.Signal
+	brand        map[domain.WorkspaceId]domain.BrandContext
+	approvals    []domain.Approval
+	outcomes     []domain.ApprovalOutcome
+	// failureHandled marks failed runs the failure watcher already claimed.
+	failureHandled map[domain.RunId]bool
 }
 
 // NewMemoryRepositories builds a complete in-memory Repositories from seed data.
@@ -97,6 +105,11 @@ func NewMemoryRepositories(data MemoryData) *Repositories {
 		Activity:      &activityRepo{s},
 		Integrations:  &integrationRepo{s},
 		Credentials:   &credentialRepo{s},
+		Competitors:   &competitorRepo{s},
+		Snapshots:     &snapshotRepo{s},
+		Signals:       &signalRepo{s},
+		Brand:         &brandRepo{s},
+		Approvals:     &approvalRepo{s},
 	}
 }
 
@@ -212,6 +225,15 @@ func (r *workflowRepo) Update(id domain.WorkflowId, patch WorkflowPatch) (domain
 			}
 			if patch.DefaultInput != nil {
 				w.DefaultInput = *patch.DefaultInput
+			}
+			if patch.Settings != nil {
+				w.Settings = *patch.Settings
+			}
+			if patch.Trigger != nil {
+				w.Trigger = *patch.Trigger
+			}
+			if patch.Schedule != nil {
+				w.Schedule = *patch.Schedule
 			}
 			if patch.UpdatedAt != nil {
 				w.UpdatedAt = *patch.UpdatedAt
@@ -333,6 +355,25 @@ func (r *runRepo) Update(id domain.RunId, patch RunPatch) (domain.Run, error) {
 		}
 	}
 	return domain.Run{}, domain.NotFound("run")
+}
+
+func (r *runRepo) ClaimFailures(limit int) []domain.Run {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.failureHandled == nil {
+		r.s.failureHandled = map[domain.RunId]bool{}
+	}
+	var out []domain.Run
+	for _, run := range r.s.runs {
+		if len(out) >= limit {
+			break
+		}
+		if run.Status == domain.RunFailed && !r.s.failureHandled[run.ID] {
+			r.s.failureHandled[run.ID] = true
+			out = append(out, run)
+		}
+	}
+	return out
 }
 
 func (r *runRepo) NextNumber(workflowID domain.WorkflowId) int {

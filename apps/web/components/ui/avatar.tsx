@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 const TONES = [
-  "from-indigo-500 to-violet-600",
+  "from-amber-700 to-stone-700",
   "from-sky-500 to-blue-600",
   "from-emerald-500 to-teal-600",
   "from-rose-500 to-pink-600",

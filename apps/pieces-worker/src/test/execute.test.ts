@@ -288,3 +288,22 @@ test('buildIndex emits contract-conformant nodes for installed pieces', () => {
     }
   }
 });
+
+test('piece that failed to load returns PieceLoadFailed with the load error', async () => {
+  const registry = registryWith(fakePiece());
+  registry.failures.push({
+    packageName: '@activepieces/piece-duckdb',
+    error: 'Error: dlopen(...): Library not loaded: @rpath/libduckdb.dylib',
+  });
+  const exec = makeExecutePiece(registry);
+  const res = await exec({ piece: '@activepieces/piece-duckdb', action: 'query', props: {} });
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.equal(res.errorType, 'PieceLoadFailed');
+    assert.match(res.error, /piece-duckdb failed to load/);
+    assert.match(res.error, /libduckdb\.dylib/);
+  }
+  // Other pieces in the same registry still run.
+  const ok = await exec({ piece: '@activepieces/piece-fake', action: 'echo', props: { text: 'hi' } });
+  assert.equal(ok.ok, true);
+});

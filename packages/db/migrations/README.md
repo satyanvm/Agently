@@ -13,6 +13,14 @@ Important current migrations:
 - `0012_piece_trigger_state.sql`: durable Activepieces trigger cursors/state.
 - `0013_drop_retired_execution_columns.sql`: removes the retired run engine and
   Postgres-queue lease columns.
+- `0014_node_data_and_failure_settings.sql`: per-node output/error for the
+  builder and workflow failure settings.
+- `0015_marketing_loop.sql`: competitors, page snapshots, signals, brand
+  context, approvals and their outcomes (the signal → approval → publish loop).
+
+The API also applies `0014` and `0015` at startup (`platform.EnsureSchema`);
+`0015` is embedded from `apps/api/internal/platform/schema/`, which must stay a
+byte-for-byte copy (a Go test checks it).
 
 Apply an upgrade without resetting data:
 

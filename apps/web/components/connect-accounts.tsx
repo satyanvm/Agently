@@ -42,7 +42,7 @@ export function ConnectAccounts({
           slug={slug}
           account={a}
           stored={stored.filter((c) => c.type === a.credentialType)}
-          onStored={(c) => setStored((prev) => [...prev.filter((p) => p.id !== c.id), c])}
+          onStored={() => listCredentials().then(setStored).catch(() => {})}
           onChange={onChange}
         />
       ))}
@@ -60,7 +60,8 @@ function AccountRow({
   slug: string;
   account: PreflightAccount;
   stored: CredentialSummary[];
-  onStored: (c: CredentialSummary) => void;
+  /** A credential was created; reload the stored list. */
+  onStored: () => void;
   onChange: (next: RunPreflight) => void | Promise<void>;
 }) {
   const [creating, setCreating] = React.useState(false);
@@ -135,10 +136,10 @@ function AccountRow({
         <CredentialModal
           typeDef={credentialTypeDef(account.credentialType)}
           onClose={() => setCreating(false)}
-          onSaved={async (cred) => {
+          onSaved={async (id) => {
             setCreating(false);
-            onStored(cred);
-            await apply(cred.id);
+            onStored();
+            await apply(id);
           }}
           onDeleted={() => setCreating(false)}
         />

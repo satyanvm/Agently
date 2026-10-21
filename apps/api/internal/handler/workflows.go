@@ -219,3 +219,29 @@ func activityFeed(p *services.Platform) http.HandlerFunc {
 
 // asRunID casts a path string into a RunId at the trust boundary.
 func asRunID(s string) domain.RunId { return domain.RunId(s) }
+
+// GET /api/workflows/{slug}/node-data — each node's latest output/error.
+func workflowNodeData(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			data, err := p.Runs.NodeData(chi.URLParam(r, "slug"))
+			return data, http.StatusOK, err
+		})
+	}
+}
+
+// PUT /api/workflows/{slug}/settings — failure handling (error workflow, alerts).
+func updateWorkflowSettings(p *services.Platform) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handle(w, func() (any, int, error) {
+			body, _ := decodeBody(r)
+			str := func(k string) string { v, _ := body[k].(string); return v }
+			summary, err := p.Workflows.UpdateSettings(chi.URLParam(r, "slug"), domain.WorkflowSettings{
+				ErrorWorkflow:     str("errorWorkflow"),
+				AlertEmail:        str("alertEmail"),
+				AlertSlackWebhook: str("alertSlackWebhook"),
+			})
+			return summary, http.StatusOK, err
+		})
+	}
+}

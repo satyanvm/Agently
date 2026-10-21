@@ -29,7 +29,6 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 notion.md
-product.md
 # planning docs (local only)
 plan_for_prompt_to_workflow.md
 practice.go
@@ -46,3 +45,6 @@ __pycache__/
 # build output and local logs
 /bin/
 /logs/
+
+# local env backups (contain live keys)
+.env.bak*

@@ -2,15 +2,18 @@
 
 import * as React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { KeyRound, TriangleAlert } from "lucide-react";
+import { CheckCircle2, KeyRound, Pin, TriangleAlert, XCircle } from "lucide-react";
 import { CREDENTIAL_ID_KEY, findNodeSpec } from "./node-catalog";
 import { useCredentials } from "./credentials-context";
+import { useRunData } from "./run-data-context";
+import { PINNED_KEY } from "@/lib/builder-debug";
 import { cn } from "@/lib/utils";
 import type { WorkflowNodeType } from "./workflow-builder";
 
-export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeType>) {
   const spec = findNodeSpec(data.typeId);
   const { credentials } = useCredentials();
+  const sample = useRunData()?.[id];
   if (!spec) return null;
 
   const Icon = spec.icon;
@@ -25,10 +28,10 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
   const needsCredentials = Boolean(spec.credentialType) && (!hasCredId || dangling);
   const credentialsConfigured = Boolean(spec.credentialType) && hasCredId && !dangling;
 
-  // "n/m configured" over real config fields only — never __credentialId.
-  const configEntries = Object.entries(data.config).filter(
-    ([key]) => key !== CREDENTIAL_ID_KEY,
-  );
+  // "n/m configured" over real config fields only — never the reserved
+  // builder keys (__credentialId, __pinned, __settings, _position).
+  const configEntries = Object.entries(data.config).filter(([key]) => !key.startsWith("_"));
+  const pinned = Boolean(data.config[PINNED_KEY]);
   const configuredCount = configEntries.filter(([, v]) => v !== "").length;
 
   return (
@@ -62,15 +65,25 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
               {credentialsConfigured && (
                 <KeyRound className="size-3 text-faint" aria-label="Credentials configured" />
               )}
+              {pinned && <Pin className="size-3 text-accent" aria-label="Output pinned" />}
             </div>
           </div>
+          {/* Last run result for this node (from the Data tab's samples). */}
+          {sample?.status === "succeeded" && (
+            <CheckCircle2 className="size-4 shrink-0 text-success" aria-label={`Succeeded in run #${sample.runNumber}`} />
+          )}
+          {sample?.status === "failed" && (
+            <span title={sample.error}>
+              <XCircle className="size-4 shrink-0 text-danger" aria-label={`Failed in run #${sample.runNumber}`} />
+            </span>
+          )}
         </div>
 
         {/* Needs-credentials warning (n8n-style) */}
         {needsCredentials && (
           <div className="mt-2 flex items-center gap-1.5 rounded-md bg-warn-bg px-2 py-1">
             <TriangleAlert className="size-3 shrink-0 text-warn" />
-            <span className="text-[10px] font-medium text-warn">Set up credentials</span>
+            <span className="text-[10px] font-medium text-warn">Sign in required</span>
           </div>
         )}
 

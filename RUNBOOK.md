@@ -90,6 +90,21 @@ cd apps/pieces-worker && npm run build && npm test
 cd apps/web && pnpm build
 ```
 
+The Postgres repository tests skip unless `AGENTLY_TEST_DATABASE_URL` points at
+a migrated **test** database (they create and delete a throwaway workspace).
+Create one once, next to the dev database:
+
+```bash
+docker exec agently-postgres createdb -U agently agently_test
+for f in 0001_init 0003_queue 0005_worker_claim 0006_run_input 0007_workflow_default_input \
+         0008_integrations 0009_temporal_engine 0010_retire_native_engine 0011_credentials \
+         0012_piece_trigger_state 0013_drop_retired_execution_columns; do
+  docker exec -i agently-postgres psql -q -U agently -d agently_test < packages/db/migrations/$f.sql
+done
+AGENTLY_TEST_DATABASE_URL=postgres://agently:<password>@localhost:5433/agently_test \
+  go -C apps/api test ./internal/platform/
+```
+
 ## Deploying
 
 Each service has a Dockerfile (build context: repo root). The full stack runs

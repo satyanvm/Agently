@@ -41,6 +41,19 @@ interface IndexAuth {
   displayName?: string;
   description?: string;
   props?: IndexAuthProp[];
+  // oauth2 only: what the API needs to run the authorization-code flow. URLs
+  // and scopes may carry {propKey} placeholders filled from `props`.
+  oauth?: IndexOAuth;
+}
+
+interface IndexOAuth {
+  authUrl: string;
+  tokenUrl: string;
+  scope: string[];
+  pkce?: boolean;
+  /** "header" = client creds via HTTP Basic on the token call; default body. */
+  authorizationMethod?: string;
+  extra?: Record<string, string>;
 }
 
 interface IndexNode {
@@ -81,7 +94,7 @@ function authBlock(piece: LoadedPiece): IndexAuth {
   };
   if (piece.auth?.displayName) auth.displayName = String(piece.auth.displayName);
   if ((piece.auth as any)?.description) auth.description = String((piece.auth as any).description);
-  if (t === 'custom_auth') {
+  if (t === 'custom_auth' || t === 'oauth2') {
     const props: IndexAuthProp[] = [];
     for (const [key, def] of Object.entries((piece.auth as any)?.props ?? {})) {
       if (!def || typeof def !== 'object') continue;
@@ -95,7 +108,25 @@ function authBlock(piece: LoadedPiece): IndexAuth {
       if (d.description) p.description = String(d.description);
       props.push(p);
     }
-    auth.props = props;
+    if (props.length > 0 || t === 'custom_auth') auth.props = props;
+  }
+  if (t === 'oauth2') {
+    const a = piece.auth as any;
+    if (a?.authUrl && a?.tokenUrl) {
+      const oauth: IndexOAuth = {
+        authUrl: String(a.authUrl),
+        tokenUrl: String(a.tokenUrl),
+        scope: Array.isArray(a.scope) ? a.scope.map(String) : [],
+      };
+      if (a.pkce) oauth.pkce = true;
+      if (a.authorizationMethod) oauth.authorizationMethod = String(a.authorizationMethod).toLowerCase();
+      if (a.extra && typeof a.extra === 'object') {
+        const extra: Record<string, string> = {};
+        for (const [k, v] of Object.entries(a.extra)) if (typeof v === 'string') extra[k] = v;
+        if (Object.keys(extra).length > 0) oauth.extra = extra;
+      }
+      auth.oauth = oauth;
+    }
   }
   return auth;
 }

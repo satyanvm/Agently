@@ -122,30 +122,20 @@ func (s *Scheduler) alreadyFired(workflowID domain.WorkflowId, fireAt time.Time)
 	return false
 }
 
-// dueAt parses a schedule string and returns the most recent fire instant that has
-// already passed at `now`, plus ok=true if the workflow is due in the current period.
+// dueAt returns the most recent fire instant of a schedule (schedule.go)
+// that has already passed at `now`, if it is within catchUpWindow; ok=false
+// for an unparseable schedule or when nothing fired recently. The caller's
+// alreadyFired check turns "most recent fire" into "fire once".
 //
-//	"daily HH:MM" → today's HH:MM in loc, if now is at/after it; else not due yet.
-//	"hourly"      → the top of the current hour (always "due"; idempotency dedupes).
-//
-// ok=false for an unparseable schedule or a daily time still in the future today.
+//	"daily 09:00" at 10:15 → today 09:00
+//	"daily 11:00" at 10:15 → not due (yesterday's 11:00 is outside the window)
+//	"hourly"      at 10:15 → 10:00
 func dueAt(schedule string, now time.Time, loc *time.Location) (time.Time, bool) {
-	sched := strings.ToLower(strings.TrimSpace(schedule))
-	if sched == "hourly" {
-		return time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, loc), true
+	spec, err := parseSchedule(schedule)
+	if err != nil {
+		return time.Time{}, false
 	}
-	if rest, found := strings.CutPrefix(sched, "daily"); found {
-		hh, mm, ok := parseHHMM(strings.TrimSpace(rest))
-		if !ok {
-			return time.Time{}, false
-		}
-		fire := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, loc)
-		if now.Before(fire) {
-			return time.Time{}, false // today's slot hasn't arrived yet
-		}
-		return fire, true
-	}
-	return time.Time{}, false
+	return spec.prev(now.In(loc), catchUpWindow)
 }
 
 // parseHHMM reads "HH:MM" (24-hour). Returns ok=false on any malformed input.

@@ -52,7 +52,7 @@ export default function WorkflowPage() {
   if (state === "notfound") {
     return (
       <>
-        <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: "Not found" }]} />
+        <TopBar crumbs={[{ label: "Playbooks", href: "/workflows" }, { label: "Not found" }]} />
         <PageContainer>
           <div className="py-20 text-center text-sm text-faint">Workflow not found.</div>
         </PageContainer>
@@ -62,7 +62,7 @@ export default function WorkflowPage() {
   if (!wf) {
     return (
       <>
-        <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: "Loading…" }]} />
+        <TopBar crumbs={[{ label: "Playbooks", href: "/workflows" }, { label: "Loading…" }]} />
         <PageContainer>
           <div className="py-20 text-center text-sm text-faint">Loading workflow…</div>
         </PageContainer>
@@ -74,7 +74,7 @@ export default function WorkflowPage() {
 
   return (
     <>
-      <TopBar crumbs={[{ label: "Workflows", href: "/workflows" }, { label: wf.name }]} />
+      <TopBar crumbs={[{ label: "Playbooks", href: "/workflows" }, { label: wf.name }]} />
       <PageContainer>
         <WorkflowDetail wf={wf} agents={agents} runs={runs.slice(0, 6)} activeRun={activeRun} />
       </PageContainer>

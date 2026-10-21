@@ -208,7 +208,7 @@ func clusterIndex(f catalogFile) string {
 
 // nodeSchema renders one node's full schema for the reduce prompt: everything the
 // model needs to fill the node correctly and reference its outputs downstream.
-func nodeSchema(n CatalogNode) string {
+func nodeSchema(n CatalogNode, has func(CatalogNode, string) bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### %s (%s, runtime=%s)\n%s\n", n.ID, n.Label, n.Runtime, n.Description)
 	if len(n.Config) > 0 {
@@ -234,10 +234,20 @@ func nodeSchema(n CatalogNode) string {
 	}
 	if len(n.Credentials) > 0 {
 		keys := make([]string, len(n.Credentials))
+		configured := true
 		for i, c := range n.Credentials {
 			keys[i] = c.Key
+			if has == nil || !has(n, c.Key) {
+				configured = false
+			}
 		}
-		fmt.Fprintf(&b, "credentials (required at run time; missing values fail the node): %s\n", strings.Join(keys, ", "))
+		state := "NOT SIGNED IN yet — prefer a configured alternative for generic needs, but if the request " +
+			"NAMES this service as where something goes (\"a Google Doc\", \"on X\", \"on LinkedIn\"), use THIS node " +
+			"anyway: the user signs in before running. Never replace a named destination with output.report or tool.http"
+		if configured {
+			state = "CONFIGURED"
+		}
+		fmt.Fprintf(&b, "credentials: %s — %s\n", strings.Join(keys, ", "), state)
 	}
 	return b.String()
 }
@@ -311,6 +321,8 @@ func validateGraph(nodes []domain.GraphNode, cat *Catalog) []string {
 	if cycle := findCycle(nodes); cycle != "" {
 		errs = append(errs, "cycle detected among nodes: "+cycle)
 	}
+	// Nothing publishes without a person's approval (publishing.go).
+	errs = append(errs, publishingErrors(nodes)...)
 	return errs
 }
 
@@ -421,6 +433,8 @@ func roleForType(nodeType string) domain.AgentRole {
 		return domain.RoleAnalyst
 	case "output":
 		return domain.RoleWriter
+	case "human":
+		return domain.RoleValidator
 	}
 	// Integration nodes ("slack.sendMessage", "github.createIssue", …) execute
 	// via tools; browser-tone keeps the run view honest about external reach.

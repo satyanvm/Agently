@@ -2,47 +2,47 @@
 
 /* ------------------------------------------------------------------ *
    Agently — Design System
-   Light-mode-first. Premium, minimal, AI-native.
-   Token philosophy: white canvas, soft hairline borders, a single
-   vivid indigo-purple accent (Relevance-inspired), and a precise
-   functional-status palette tuned for contrast on white.
+   Light-mode-first. Calm, warm, paper-like.
+   Token philosophy: white canvas, warm hairline borders, cream insets,
+   a single walnut-brown accent, and a muted functional-status palette
+   tuned for contrast on white.
  * ------------------------------------------------------------------ */
 
 @theme {
   /* ---- Surfaces ---- */
   --color-bg: #ffffff;            /* app canvas (pure white) */
   --color-surface: #ffffff;       /* cards / panels */
-  --color-surface-2: #f3f3f8;     /* elevated / hover */
-  --color-surface-3: #e9e9f2;     /* active / popovers */
-  --color-inset: #f5f5f9;         /* sunken (log/terminal wells) */
+  --color-surface-2: #f8f4ee;     /* elevated / hover (warm paper) */
+  --color-surface-3: #efe7da;     /* active / popovers */
+  --color-inset: #f4ecdf;         /* sunken wells (cream, like a page) */
 
   /* ---- Hairlines ---- */
-  --color-border: rgba(17, 18, 38, 0.09);
-  --color-border-strong: rgba(17, 18, 38, 0.16);
+  --color-border: rgba(58, 40, 22, 0.1);
+  --color-border-strong: rgba(58, 40, 22, 0.18);
 
   /* ---- Text ---- */
-  --color-fg: #0b0e1a;            /* near-black navy (headings) */
-  --color-muted: #565d70;         /* body / secondary */
-  --color-faint: #868ca0;         /* meta */
-  --color-ghost: #b6bac8;         /* faint dividers / placeholders */
+  --color-fg: #1a1714;            /* warm near-black (headings) */
+  --color-muted: #5c544b;         /* body / secondary */
+  --color-faint: #8c8277;         /* meta */
+  --color-ghost: #c3b9ac;         /* faint dividers / placeholders */
 
-  /* ---- Accent (Relevance indigo-purple) ---- */
-  --color-accent: #5e4ff2;
-  --color-accent-soft: #7d70ff;
+  /* ---- Accent (walnut brown) ---- */
+  --color-accent: #7a5a3a;
+  --color-accent-soft: #8e6b48;
   --color-accent-fg: #ffffff;
-  --color-accent-bg: rgba(94, 79, 242, 0.1);
+  --color-accent-bg: rgba(122, 90, 58, 0.1);
 
   /* ---- Functional status (contrast-tuned for white) ---- */
-  --color-success: #15a34a;
-  --color-success-bg: rgba(21, 163, 74, 0.1);
-  --color-running: #2563eb;
-  --color-running-bg: rgba(37, 99, 235, 0.1);
-  --color-warn: #c2740a;
-  --color-warn-bg: rgba(217, 119, 6, 0.12);
-  --color-danger: #dc2649;
-  --color-danger-bg: rgba(220, 38, 73, 0.1);
-  --color-neutral: #6b7280;
-  --color-neutral-bg: rgba(107, 114, 128, 0.1);
+  --color-success: #3d7a4a;
+  --color-success-bg: rgba(61, 122, 74, 0.11);
+  --color-running: #3c6ea8;
+  --color-running-bg: rgba(60, 110, 168, 0.1);
+  --color-warn: #b4700f;
+  --color-warn-bg: rgba(180, 112, 15, 0.12);
+  --color-danger: #b8402f;
+  --color-danger-bg: rgba(184, 64, 47, 0.1);
+  --color-neutral: #7a7268;
+  --color-neutral-bg: rgba(122, 114, 104, 0.1);
 
   /* ---- Radii ---- */
   --radius-xs: 5px;
@@ -81,8 +81,8 @@
   }
 
   ::selection {
-    background: rgba(94, 79, 242, 0.18);
-    color: #0b0e1a;
+    background: rgba(122, 90, 58, 0.2);
+    color: #1a1714;
   }
 
   /* Scrollbars — thin, unobtrusive. */
@@ -91,13 +91,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(17, 18, 38, 0.16);
+    background: rgba(58, 40, 22, 0.16);
     border-radius: 999px;
     border: 3px solid transparent;
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(17, 18, 38, 0.28);
+    background: rgba(58, 40, 22, 0.28);
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-corner {
@@ -110,30 +110,30 @@
   .bg-grid {
     background-image: linear-gradient(
         to right,
-        rgba(17, 18, 38, 0.04) 1px,
+        rgba(58, 40, 22, 0.04) 1px,
         transparent 1px
       ),
-      linear-gradient(to bottom, rgba(17, 18, 38, 0.04) 1px, transparent 1px);
+      linear-gradient(to bottom, rgba(58, 40, 22, 0.04) 1px, transparent 1px);
     background-size: 56px 56px;
   }
 
   .bg-dots {
     background-image: radial-gradient(
-      rgba(17, 18, 38, 0.07) 1px,
+      rgba(58, 40, 22, 0.07) 1px,
       transparent 1px
     );
     background-size: 22px 22px;
   }
 
   .text-gradient {
-    background: linear-gradient(175deg, #0b0e1a 0%, #3a4156 130%);
+    background: linear-gradient(175deg, #1a1714 0%, #4a4037 130%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 
   .text-gradient-accent {
-    background: linear-gradient(110deg, #7d70ff 0%, #5e4ff2 60%, #4636dd 110%);
+    background: linear-gradient(110deg, #a5805a 0%, #7a5a3a 60%, #5a4029 110%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -153,25 +153,19 @@
   /* Soft elevated card shadow tuned for light UI — layered for real depth */
   .shadow-card {
     box-shadow:
-      0 1px 1px rgba(16, 18, 40, 0.04),
-      0 2px 4px -1px rgba(16, 18, 40, 0.06),
-      0 6px 12px -2px rgba(16, 18, 40, 0.08),
-      0 16px 32px -12px rgba(16, 18, 40, 0.12);
+      0 1px 1px rgba(0, 0, 0, 0.04),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06),
+      0 6px 12px -2px rgba(0, 0, 0, 0.08),
+      0 16px 32px -12px rgba(0, 0, 0, 0.12);
   }
 
   .shadow-pop {
     box-shadow:
       0 0 0 1px var(--color-border),
-      0 4px 12px -2px rgba(16, 18, 40, 0.1),
-      0 24px 56px -16px rgba(16, 18, 40, 0.3);
+      0 4px 12px -2px rgba(0, 0, 0, 0.1),
+      0 24px 56px -16px rgba(0, 0, 0, 0.3);
   }
 
-  /* Accent glow for primary CTAs */
-  .glow-accent {
-    box-shadow:
-      0 1px 2px rgba(94, 79, 242, 0.28),
-      0 10px 26px -8px rgba(94, 79, 242, 0.5);
-  }
 
   .animate-in {
     animation: fade-in 0.5s var(--ease-out-soft) both;
@@ -269,39 +263,41 @@
 :root.dark {
   color-scheme: dark;
 
-  --color-bg: #0a0b0f;
-  --color-surface: #14161c;
-  --color-surface-2: #1c1f27;
-  --color-surface-3: #262a34;
-  --color-inset: #0b0d13;
+  /* Neutral near-black (Claude-like): no warm tint on surfaces — the brown
+     lives only in the accent. */
+  --color-bg: #0e0e0e;
+  --color-surface: #151515;
+  --color-surface-2: #1d1d1d;
+  --color-surface-3: #262626;
+  --color-inset: #0a0a0a;
 
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-strong: rgba(255, 255, 255, 0.15);
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.13);
 
-  --color-fg: #edeef1;
-  --color-muted: #9ba1ad;
-  --color-faint: #6b717e;
-  --color-ghost: #444a55;
+  --color-fg: #ececec;
+  --color-muted: #a6a6a6;
+  --color-faint: #737373;
+  --color-ghost: #474747;
 
-  --color-accent: #7d70ff;
-  --color-accent-soft: #9b90ff;
-  --color-accent-fg: #ffffff;
-  --color-accent-bg: rgba(125, 112, 255, 0.16);
+  --color-accent: #c79c6d;
+  --color-accent-soft: #d6b089;
+  --color-accent-fg: #1a1209;
+  --color-accent-bg: rgba(199, 156, 109, 0.15);
 
-  --color-success: #3ad07a;
-  --color-success-bg: rgba(58, 208, 122, 0.13);
-  --color-running: #3b9eff;
-  --color-running-bg: rgba(59, 158, 255, 0.13);
-  --color-warn: #f2b84b;
-  --color-warn-bg: rgba(242, 184, 75, 0.13);
-  --color-danger: #ff6172;
-  --color-danger-bg: rgba(255, 97, 114, 0.13);
-  --color-neutral: #7b818d;
-  --color-neutral-bg: rgba(255, 255, 255, 0.08);
+  --color-success: #7cc48a;
+  --color-success-bg: rgba(124, 196, 138, 0.13);
+  --color-running: #82acdf;
+  --color-running-bg: rgba(130, 172, 223, 0.13);
+  --color-warn: #e8b660;
+  --color-warn-bg: rgba(232, 182, 96, 0.13);
+  --color-danger: #ec8574;
+  --color-danger-bg: rgba(236, 133, 116, 0.13);
+  --color-neutral: #8a8a8a;
+  --color-neutral-bg: rgba(255, 255, 255, 0.07);
 }
 
 :root.dark ::selection {
-  background: rgba(155, 144, 255, 0.32);
+  background: rgba(199, 156, 109, 0.32);
   color: #fff;
 }
 
@@ -324,27 +320,20 @@
 }
 
 .dark .text-gradient {
-  background: linear-gradient(180deg, #fff 0%, #b9bcc6 130%);
+  background: linear-gradient(180deg, #ffffff 0%, #b8b8b8 130%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
 .dark .shadow-card {
-  box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
-    0 1px 2px rgba(0, 0, 0, 0.4),
-    0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  /* Flat in dark mode — surfaces separate by tone and hairline, not shadow. */
+  box-shadow: none;
 }
 .dark .shadow-pop {
   box-shadow:
     0 0 0 1px var(--color-border-strong),
     0 24px 56px -16px rgba(0, 0, 0, 0.72);
-}
-.dark .glow-accent {
-  box-shadow:
-    0 0 0 1px rgba(125, 112, 255, 0.5),
-    0 10px 30px -6px rgba(125, 112, 255, 0.55);
 }
 
 /* Lift the raw palette shades used by the log viewer + glyphs so they read on
@@ -360,7 +349,7 @@
 .dark .text-red-600 { color: #ff8088; }
 .dark .text-rose-600 { color: #ff8aa3; }
 .dark .text-teal-600 { color: #56d6c2; }
-.dark .text-violet-600 { color: #a89dff; }
+.dark .text-violet-600 { color: #b9a6e8; }
 
 /* ------------------------------------------------------------------ *
    React Flow customization

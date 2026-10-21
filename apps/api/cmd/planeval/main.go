@@ -24,11 +24,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/agently/api/internal/services"
+	"github.com/joho/godotenv"
 )
 
 type golden struct {
@@ -81,6 +83,23 @@ var goldens = []golden{
 		[][]string{{"gmail", "microsoft-outlook", "imap"}, {"todoist", "ticktick", "microsoft-todo", "google-tasks", "clickup", "asana"}}},
 	{"record form submissions in a spreadsheet and let the team know on slack",
 		[][]string{{"google-sheets", "microsoft-excel-365"}, {"slack"}}},
+
+	// Marketing playbooks (the signal → draft → approve → publish loop): do the
+	// publishing destinations surface?
+	{"when a competitor changes pricing, draft a linkedin post and publish it after approval",
+		[][]string{{"linkedin"}}},
+	{"when a competitor ships a feature, draft a blog post into a google doc for review",
+		[][]string{{"google-docs", "notion"}}},
+	{"save a gmail draft to at-risk customers when a competitor raises prices",
+		[][]string{{"gmail"}}},
+	{"schedule a tweet about our launch for tomorrow morning",
+		[][]string{{"twitter", "typefully", "buffer", "hootsuite"}}},
+	{"put the weekly content plan in notion and post the best idea on linkedin",
+		[][]string{{"notion", "google-docs"}, {"linkedin"}}},
+	{"publish the approved post to our wordpress blog",
+		[][]string{{"wordpress", "ghostcms", "webflow"}}},
+	{"send the newsletter campaign to our mailchimp audience once it is approved",
+		[][]string{{"mailchimp", "convertkit", "beehiiv"}}},
 }
 
 func main() {
@@ -88,8 +107,18 @@ func main() {
 	verbose := flag.Bool("v", false, "print every missed group")
 	pause := flag.Duration("pause", 0, "wait between prompts (rate-limit hygiene, e.g. -pause 10s)")
 	retries := flag.Int("retries", 0, "re-attempt a prompt when the router got rate-limited (waits -pause between tries)")
+	graphs := flag.Bool("graphs", false, "instead of recall, compile the marketing playbook prompts end to end and check the graphs' structure (graphs.go)")
+	only := flag.Int("only", 0, "with -graphs: run just this golden (1-based)")
 	flag.Parse()
+	// The repo's .env, from wherever this runs; real environment variables
+	// win. One file per call: Load stops at the first file that's missing.
+	for _, f := range []string{".env", "../.env", "../../.env"} {
+		_ = godotenv.Load(f)
+	}
 	ctx := context.Background()
+	if *graphs {
+		os.Exit(runGraphEval(ctx, *pause, *only, *verbose))
+	}
 
 	type tally struct{ hit, total, prompts int }
 	stats := map[string]*tally{}

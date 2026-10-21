@@ -93,7 +93,7 @@ OUTLINE MODE — for THIS call do not write any nodes. Return ONE JSON object:
 {
   "name": "short title",
   "description": "one sentence",
-  "schedule": "daily HH:MM" | "hourly" | "",
+  "schedule": "hourly" | "daily HH:MM" | "weekdays HH:MM" | "weekly <mon..sun> HH:MM" | "<5-field cron>" | "",
   "defaultInput": { "topic": "...", ... },
   "estimatedNodes": <how many nodes the complete graph needs>,
   "sections": [ { "key": "snake_case", "goal": "what this part of the graph does", "nodes": <count> } ]
@@ -192,6 +192,9 @@ func authorSection(ctx context.Context, cat *Catalog, system, prompt string, out
 		problems := sectionProblems(nodes, idx, len(outline.Sections))
 		if len(problems) == 0 {
 			problems = graphProblems(append(append([]domain.GraphNode{}, prior...), nodes...), cat, inputKeys)
+		}
+		if len(problems) == 0 {
+			problems = validateCredentials(nodes, cat, credentialAvailability(ctx), prompt)
 		}
 		if len(problems) > 0 {
 			lastComplaint = strings.Join(problems, "; ")

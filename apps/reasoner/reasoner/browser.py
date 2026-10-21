@@ -29,6 +29,14 @@ async def _create_browserbase_session() -> dict[str, Any]:
 
 async def run_browse(run_id: str, label: str, urls: list[str], *, max_chars: int = 4000) -> str:
     """Visit each url, extract visible text, persist the session, return findings."""
+    pages = await browse_pages(run_id, label, urls, max_chars=max_chars)
+    return "\n\n".join(f"# {title} ({url})\n{text}" for url, title, text in pages)
+
+
+async def browse_pages(run_id: str, label: str, urls: list[str], *, max_chars: int = 4000) -> list[tuple[str, str, str]]:
+    """Visit each url in one Browserbase session; return (url, title, body text)
+    per page. The session, navigations and screenshots are persisted for the
+    run's Browser tab."""
     if not urls:
         raise RuntimeError("browser node has no URLs to visit")
     if not CONFIG.browserbase_enabled:
@@ -38,10 +46,10 @@ async def run_browse(run_id: str, label: str, urls: list[str], *, max_chars: int
     session_id = await db.create_browser_session(run_id, label)
     await db.record_console(session_id, "info", "session started (browserbase)")
 
-    findings: list[str] = []
+    pages: list[tuple[str, str, str]] = []
     ok = True
     try:
-        findings = await _browse_real(run_id, session_id, urls, max_chars)
+        pages = await _browse_real(run_id, session_id, urls, max_chars)
     except Exception as exc:  # noqa: BLE001 - persist failure, then propagate it
         ok = False
         await db.record_console(session_id, "error", f"browse failed: {exc}")
@@ -51,17 +59,17 @@ async def run_browse(run_id: str, label: str, urls: list[str], *, max_chars: int
         raise RuntimeError(f"Browserbase browse failed: {exc}") from exc
     finally:
         await db.finish_browser_session(session_id, "succeeded" if ok else "failed")
-    return "\n\n".join(findings)
+    return pages
 
 
-async def _browse_real(run_id: str, session_id: str, urls: list[str], max_chars: int) -> list[str]:
+async def _browse_real(run_id: str, session_id: str, urls: list[str], max_chars: int) -> list[tuple[str, str, str]]:
     from playwright.async_api import async_playwright  # imported lazily
 
     session = await _create_browserbase_session()
     connect_url = session.get("connectUrl") or session.get("connect_url")
     await db.append_log(run_id, "info", "browser", "browser", f"Browserbase session {session.get('id','')}")
 
-    out: list[str] = []
+    out: list[tuple[str, str, str]] = []
     async with async_playwright() as pw:
         browser = await pw.chromium.connect_over_cdp(connect_url)
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
@@ -75,6 +83,6 @@ async def _browse_real(run_id: str, session_id: str, urls: list[str], max_chars:
             await db.record_shot(session_id, url, title, "after navigate")
             text = (await page.inner_text("body"))[:max_chars]
             await db.record_action(session_id, "extract", url, "body text", "ok", 0)
-            out.append(f"# {title} ({url})\n{text}")
+            out.append((page.url or url, title, text))
         await browser.close()
     return out

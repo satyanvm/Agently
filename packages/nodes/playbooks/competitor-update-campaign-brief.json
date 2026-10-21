@@ -1,0 +1,37 @@
+{
+  "id": "competitor-update-campaign-brief",
+  "name": "Competitor update to campaign brief",
+  "summary": "Check every page of your competitors and write a competitor update on what changed and why it matters. Once you approve (and edit) the update, turn it into a campaign brief for the response. Both wait for approval before they're saved to Google Docs.",
+  "trigger": "schedule",
+  "schedule": "weekly mon 09:00",
+  "publishesTo": ["Google Docs (competitor update, campaign brief)"],
+  "inputs": [
+    { "key": "approver", "label": "Who approves the drafts", "required": true, "example": "Rahul" },
+    { "key": "competitors", "label": "Only these competitors", "required": false, "help": "Comma-separated names from the Competitors page. Blank = all." },
+    { "key": "campaign_goal", "label": "What campaigns are for", "required": false, "example": "Pipeline from mid-market teams evaluating alternatives", "help": "Steers the brief's objective. Blank = the brief proposes one." }
+  ],
+  "defaultInput": { "approver": "", "competitors": "", "campaign_goal": "" },
+  "nodes": [
+    { "key": "start", "type": "trigger.schedule", "name": "Every Monday 09:00", "config": { "cron": "weekly mon 09:00" } },
+    { "key": "watch", "type": "intel.watchCompetitors", "name": "Check competitor pages", "dependsOn": ["start"],
+      "config": { "competitors": "{{input.competitors}}" } },
+    { "key": "changed", "type": "logic.branch", "name": "Did anything change?", "dependsOn": ["watch"],
+      "config": { "condition": "outputs.watch.changed == true" } },
+    { "key": "update", "type": "agent.llm", "name": "Write the competitor update", "dependsOn": ["changed", "watch"],
+      "config": { "brand": "true",
+        "system": "You are a competitive-intelligence analyst for a B2B software company. Be specific, short and factual; never invent numbers, features or dates that are not in the input.",
+        "prompt": "These competitor pages changed since the last check (lines starting with + were added, - removed):\n\n{{outputs.watch.text}}\n\nWrite a competitor update for our marketing team. Plain text with these headings:\nHeadline: one sentence on the most important move.\nWhat changed: one short paragraph per competitor, old versus new.\nWhy it matters to us: compared with our product facts and positioning.\nWho it affects: which buyers or customer segments.\nWhat we don't know yet: open questions the changes don't answer.\nSkip changes that are only layout, dates or wording noise, and say so if that's all there is." } },
+    { "key": "approve_update", "type": "human.approval", "name": "Approve competitor update", "dependsOn": ["update"],
+      "config": { "draft": "{{outputs.update.text}}", "title": "Competitor update", "channel": "Competitor update (Google Docs)", "assignee": "{{input.approver}}" } },
+    { "key": "update_doc", "type": "pieces.google-docs.create_document", "name": "Save the competitor update", "dependsOn": ["approve_update"],
+      "config": { "title": "Competitor update", "body": "{{outputs.approve_update.content}}" } },
+    { "key": "brief", "type": "agent.llm", "name": "Turn the update into a campaign brief", "dependsOn": ["approve_update"],
+      "config": { "brand": "true",
+        "system": "You are a B2B product marketer who writes campaign briefs. Use only claims backed by our product facts; never attack the competitor by name in customer-facing messaging.",
+        "prompt": "Turn this approved competitor update into a campaign brief for our response.\n\nCompetitor update:\n{{outputs.approve_update.content}}\n\nWhat our campaigns are for (may be blank): {{input.campaign_goal}}\n\nPlain text. Write each heading below exactly as named, on its own line, followed by its content; the text in brackets is guidance for you, not part of the heading:\nCampaign name\nWhy now [the competitor move, in two sentences]\nObjective [one measurable goal]\nTarget audience [who, and what they care about]\nKey message [one sentence]\nProof points [three to five, each backed by our product facts]\nChannels and deliverables [what to make for each channel]\nCall to action\nTimeline [a two-to-four-week plan]\nSuccess metrics\nRisks and claims to avoid" } },
+    { "key": "approve_brief", "type": "human.approval", "name": "Approve campaign brief", "dependsOn": ["brief"],
+      "config": { "draft": "{{outputs.brief.text}}", "title": "Campaign brief from competitor update", "channel": "Campaign brief (Google Docs)", "assignee": "{{input.approver}}" } },
+    { "key": "brief_doc", "type": "pieces.google-docs.create_document", "name": "Save the campaign brief", "dependsOn": ["approve_brief"],
+      "config": { "title": "Campaign brief (approved)", "body": "{{outputs.approve_brief.content}}" } }
+  ]
+}

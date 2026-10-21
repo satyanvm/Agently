@@ -348,6 +348,10 @@ if __name__ == "__main__":
 class HttpResilienceTest(unittest.TestCase):
     """Retries on 429/503 and soft-fails reads from flaky public sources."""
 
+    def setUp(self):
+        # The retry path logs; without a fake DB it tries to reach Postgres.
+        FakeDB().install()
+
     def _run(self, node, statuses):
         calls = []
 

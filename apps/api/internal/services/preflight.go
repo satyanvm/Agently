@@ -170,8 +170,12 @@ func checkNodeCredentials(repo platform.CredentialRepo, workspace domain.Workspa
 			switch {
 			case need.pieces && credID != "":
 				if haveFields {
-					for _, f := range types[need.credType].Fields {
-						if f.Required && !hasValue(data[f.Key]) {
+					def := types[need.credType]
+					for _, f := range def.Fields {
+						// OAuth types list access_token as optional (sign-in fills it,
+						// so the form doesn't ask), but a run can't go without it.
+						required := f.Required || (def.AuthType == "oauth2" && f.Key == "access_token")
+						if required && !hasValue(data[f.Key]) {
 							missing = append(missing, f.Key)
 						}
 					}

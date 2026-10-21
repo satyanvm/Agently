@@ -18,6 +18,8 @@ from temporalio.contrib.langgraph import LangGraphPlugin
 from temporalio.worker import Worker
 
 from .activities import ALL_ACTIVITIES
+from .approval import ACTIVITIES as APPROVAL_ACTIVITIES
+from .waits import ACTIVITIES as WAIT_ACTIVITIES
 from .config import CONFIG
 from .dispatcher import run_dispatcher
 from .graph import GRAPH_NAME, build_graph
@@ -46,7 +48,7 @@ async def main() -> None:
         workflows=[ReasoningWorkflow, DynamicWorkflow],
         # The per-node dynamic orchestrator's activities run alongside the LangGraph
         # plugin's static-node activities on the same queue.
-        activities=ALL_ACTIVITIES,
+        activities=ALL_ACTIVITIES + APPROVAL_ACTIVITIES + WAIT_ACTIVITIES,
         plugins=[plugin],
     )
 

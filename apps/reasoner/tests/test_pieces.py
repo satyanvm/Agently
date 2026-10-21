@@ -273,3 +273,26 @@ class RecordPieceResultTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoredOutputTest(unittest.TestCase):
+    """Node outputs/errors land on the agent row for the builder's data panel."""
+
+    def setUp(self):
+        self.fake = FakeDB()
+        self.fake.install()
+
+    def test_piece_output_and_error_are_stored(self):
+        ok = activities.RecordPieceInput(run_id="run_1", node={"key": "s", "type": "pieces.slack.x"},
+                                         agent_id="ra_s", result={"ok": True, "output": {"ts": "1"}}, mode="execute")
+        asyncio.run(activities.record_piece_result(ok))
+        self.assertEqual(self.fake.agents["ra_s"]["output"]["ts"], "1")
+        bad = activities.RecordPieceInput(run_id="run_1", node={"key": "t", "type": "pieces.slack.x"},
+                                          agent_id="ra_t", result={"ok": False, "error": "nope"}, mode="execute")
+        asyncio.run(activities.record_piece_result(bad))
+        self.assertIn("nope", self.fake.agents["ra_t"]["error"])
+
+    def test_reserved_config_keys_are_lifted(self):
+        n = activities._lift_reserved({"key": "a", "config": {"x": 1, "__pinned": {"v": 1}, "__settings": {"retries": 2}}})
+        self.assertEqual(n["config"], {"x": 1})
+        self.assertEqual((n["pinned"], n["settings"]), ({"v": 1}, {"retries": 2}))

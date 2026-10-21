@@ -123,6 +123,14 @@ func (s *RunService) Launch(slug string, input validate.LaunchRunInput) (domain.
 	}
 
 	runInput := mergeInput(wf.DefaultInput, input.Input)
+	delete(runInput, ExecKey) // only stepExec may set it
+	exec, err := s.stepExec(wf, input)
+	if err != nil {
+		return domain.RunDetail{}, err
+	}
+	if exec != nil {
+		runInput[ExecKey] = exec
+	}
 	total := wf.AgentCount * 4
 	if total < 1 {
 		total = 1

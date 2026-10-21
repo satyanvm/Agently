@@ -27,6 +27,8 @@ _KIND_ROLE = {
     "tool": "browser",
     "logic": "analyst",
     "output": "writer",
+    "intel": "browser",
+    "human": "validator",
 }
 
 # run_agents has no "skipped" status in the schema (see ValidAgentStatuses in
@@ -36,7 +38,7 @@ _SKIPPED_STATUS = "blocked"
 
 # Node types that decide whether their downstream subgraph runs. Their handler
 # returns output["passed"] = bool; when false the engine prunes their descendants.
-_GATE_TYPES = {"logic.branch", "logic.filter"}
+_GATE_TYPES = {"logic.branch", "logic.filter", "human.approval"}
 
 
 def _role_for(node: dict[str, Any]) -> str:
@@ -232,3 +234,33 @@ def agent_name(node: dict[str, Any], key: str) -> str:
 
 def agent_model(node: dict[str, Any]) -> str:
     return node.get("config", {}).get("model") or node.get("model") or "gemini-3.5-flash-lite"
+
+
+def ancestors(key: str, ordered: list[dict[str, Any]]) -> set[str]:
+    """Every node `key` depends on, transitively (pure; used by step runs)."""
+    deps = {n["key"]: list(n.get("dependsOn") or []) for n in ordered}
+    out: set[str] = set()
+    stack = list(deps.get(key, []))
+    while stack:
+        k = stack.pop()
+        if k not in out:
+            out.add(k)
+            stack.extend(deps.get(k, []))
+    return out
+
+
+def node_policy(node: dict[str, Any]) -> tuple[int, float, float | None, bool]:
+    """(retries, retry wait s, timeout s or None, continue on fail) from the
+    node's builder settings (__settings), clamped to sane bounds."""
+    s = node.get("settings") or {}
+
+    def num(k: str, default: float, lo: float, hi: float) -> float:
+        try:
+            return min(max(float(s.get(k, default)), lo), hi)
+        except (TypeError, ValueError):
+            return default
+
+    retries = int(num("retries", 0, 0, 10))
+    wait = num("retryWaitSec", 5, 0, 3600)
+    timeout = num("timeoutSec", 0, 0, 86400) or None
+    return retries, wait, timeout, bool(s.get("continueOnFail"))

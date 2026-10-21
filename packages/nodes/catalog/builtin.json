@@ -28,11 +28,11 @@
     {
       "id": "trigger.schedule",
       "label": "Schedule trigger",
-      "description": "Run on a cron schedule (e.g. every weekday at 9am).",
+      "description": "Run on a schedule: hourly, daily 09:00, weekdays 09:00, weekly mon 09:00, or a 5-field cron (0 9 * * 1-5). Times are in the scheduler timezone (SCHEDULER_TZ).",
       "kind": "trigger",
       "runtime": "builtin",
-      "search": "schedule cron daily hourly recurring timer trigger",
-      "config": [{ "key": "cron", "label": "Cron", "control": "text", "required": false, "placeholder": "0 9 * * 1-5" }],
+      "search": "schedule cron daily hourly weekly weekdays every monday recurring timer trigger",
+      "config": [{ "key": "cron", "label": "Schedule", "control": "text", "required": false, "placeholder": "weekly mon 09:00", "help": "hourly, daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or a 5-field cron like 0 9 * * 1-5. Saving the playbook makes this the schedule that runs." }],
       "outputs": ["input"],
       "credentials": []
     },
@@ -46,9 +46,11 @@
       "config": [
         { "key": "system", "label": "System prompt", "control": "textarea", "required": false },
         { "key": "prompt", "label": "Prompt", "control": "textarea", "required": true, "help": "Supports {{input.x}} and {{outputs.key.field}}" },
-        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"], "help": "Leave unset to use the deployment default (REASONER_MODEL). Set only when the user names a specific model." }
+        { "key": "model", "label": "Model", "control": "select", "required": false, "options": ["ollama/qwen3:8b", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"], "help": "Leave unset to use the deployment default (REASONER_MODEL). Set only when the user names a specific model." },
+        { "key": "responseFormat", "label": "Response format", "control": "select", "required": false, "options": ["text", "json"], "help": "json: the reply is parsed into outputs.<key>.data so branches and loops can use its fields (e.g. outputs.assess.data.verdict). Say in the prompt exactly which fields to return. A reply that isn't JSON fails the step." },
+        { "key": "brand", "label": "Use brand context", "control": "select", "required": false, "options": ["false", "true"], "help": "Set true on every step that DRAFTS content for an audience (posts, emails, blog copy, battlecards, ad copy): the workspace's brand voice, product facts, positioning and claims to avoid are added to the system prompt. Leave false for analysis and classification." }
       ],
-      "outputs": ["text", "model"],
+      "outputs": ["text", "model", "data", "brandContextUpdatedAt"],
       "credentials": []
     },
     {
@@ -75,6 +77,74 @@
       "search": "browser navigate scrape extract page web visit javascript render click",
       "config": [{ "key": "urls", "label": "URLs (one per line)", "control": "textarea", "required": true, "placeholder": "https://example.com" }],
       "outputs": ["text", "urls", "pages"],
+      "credentials": []
+    },
+    {
+      "id": "intel.watchCompetitors",
+      "label": "Watch competitors",
+      "description": "Snapshot every registered page (pricing, changelog, blog, careers) of the chosen competitors and report what changed since the last check. Each change is recorded as a signal. The usual first step of a competitor playbook.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "competitor watch monitor track pricing changelog blog careers page changes diff market intelligence signal",
+      "config": [
+        { "key": "competitors", "label": "Competitors (names, comma-separated; blank = all)", "control": "text", "required": false, "placeholder": "Acme, Globex" },
+        { "key": "pageKinds", "label": "Page kinds (blank = all)", "control": "text", "required": false, "placeholder": "pricing, changelog", "help": "Any of pricing, changelog, blog, careers, other." },
+        { "key": "ignore", "label": "Ignore lines matching (one regex per line)", "control": "textarea", "required": false, "help": "Lines that change on every load but mean nothing (a visitor counter, a rotating quote). Timestamps, 'x minutes ago' and copyright years are already ignored." }
+      ],
+      "outputs": ["changed", "changes", "checked", "baselines", "failed", "text", "signalIds"],
+      "credentials": []
+    },
+    {
+      "id": "intel.snapshotPage",
+      "label": "Snapshot page",
+      "description": "Fetch a web page (plain HTTP, honouring robots.txt, or a real browser for JavaScript pages), reduce it to its visible text, and store it when it differs from the last stored version.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "snapshot page capture save web page version monitor scrape competitor",
+      "config": [
+        { "key": "url", "label": "URL", "control": "text", "required": true, "placeholder": "https://competitor.com/pricing" },
+        { "key": "competitor", "label": "Competitor (name, optional)", "control": "text", "required": false },
+        { "key": "pageKind", "label": "Page kind", "control": "select", "required": false, "options": ["pricing", "changelog", "blog", "careers", "other"] },
+        { "key": "render", "label": "Fetch with", "control": "select", "required": false, "options": ["http", "browser"] },
+        { "key": "ignore", "label": "Ignore lines matching (one regex per line)", "control": "textarea", "required": false, "help": "Lines that change on every load but mean nothing (a visitor counter, a rotating quote). Timestamps, 'x minutes ago' and copyright years are already ignored." }
+      ],
+      "outputs": ["snapshotId", "url", "title", "fetchedVia", "newVersion", "first", "contentHash", "text"],
+      "credentials": []
+    },
+    {
+      "id": "intel.diffPage",
+      "label": "Diff against last snapshot",
+      "description": "Compare a page snapshot with the version before it: lines added and removed. Records a page_change signal when this run found a new version.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "diff compare changes previous snapshot what changed page version",
+      "config": [
+        { "key": "snapshotId", "label": "Snapshot id", "control": "text", "required": false, "placeholder": "{{outputs.snapshot.snapshotId}}", "help": "From an upstream Snapshot page node. Or leave blank and set URL to diff that page's latest snapshot." },
+        { "key": "url", "label": "URL", "control": "text", "required": false },
+        { "key": "recordSignal", "label": "Record a signal on change", "control": "select", "required": false, "options": ["true", "false"] }
+      ],
+      "outputs": ["changed", "first", "summary", "added", "removed", "addedCount", "removedCount", "url", "pageKind", "snapshotId", "previousSnapshotId", "signalId"],
+      "credentials": []
+    },
+    {
+      "id": "intel.recordSignal",
+      "label": "Record signal",
+      "description": "Record a market signal (news article, RSS item, Reddit or Hacker News post, review) so drafts can be traced back to it. Give one title, or a list of items with the path to each item's title and URL. Items already recorded are not recorded twice.",
+      "kind": "action",
+      "runtime": "builtin",
+      "search": "record signal save news article post review mention event traceability",
+      "config": [
+        { "key": "source", "label": "Source", "control": "select", "required": true, "options": ["news", "rss", "reddit", "hackernews", "review", "page_change", "other"] },
+        { "key": "items", "label": "Items expression (optional)", "control": "text", "required": false, "placeholder": "outputs.news.articles" },
+        { "key": "titleField", "label": "Title field (with items)", "control": "text", "required": false, "placeholder": "title" },
+        { "key": "urlField", "label": "URL field (with items)", "control": "text", "required": false, "placeholder": "url" },
+        { "key": "summaryField", "label": "Summary field (with items)", "control": "text", "required": false },
+        { "key": "title", "label": "Title (single signal)", "control": "text", "required": false },
+        { "key": "url", "label": "URL (single signal)", "control": "text", "required": false },
+        { "key": "summary", "label": "Summary (single signal)", "control": "textarea", "required": false },
+        { "key": "competitor", "label": "Competitor (name, optional)", "control": "text", "required": false }
+      ],
+      "outputs": ["signalIds", "count", "created", "duplicates"],
       "credentials": []
     },
     {
@@ -142,6 +212,41 @@
       "credentials": []
     },
     {
+      "id": "human.approval",
+      "label": "Human approval",
+      "description": "Pause until a person approves, edits or rejects a draft in the Inbox (with a timeout). Required before anything is published. Approved: downstream nodes run and read the final text as outputs.<key>.content. Rejected or timed out: everything downstream is skipped.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "approval approve review human in the loop sign off wait for person reject edit draft gate publish",
+      "config": [
+        { "key": "draft", "label": "Draft to approve", "control": "textarea", "required": true, "placeholder": "{{outputs.write_post.text}}", "help": "What the person reviews. They can edit it; the edited version is outputs.<this node>.content." },
+        { "key": "title", "label": "Title", "control": "text", "required": false, "placeholder": "LinkedIn post: Acme cut prices" },
+        { "key": "channel", "label": "Publishes to", "control": "text", "required": false, "placeholder": "LinkedIn" },
+        { "key": "assignee", "label": "Approver", "control": "text", "required": false, "placeholder": "Rahul", "help": "Who should decide. Shown in the Inbox and the notification." },
+        { "key": "notifySlackWebhook", "label": "Notify Slack (incoming webhook URL)", "control": "text", "required": false, "help": "Defaults to APPROVAL_SLACK_WEBHOOK_URL. The Inbox works without any notification." },
+        { "key": "notifyEmail", "label": "Notify email", "control": "text", "required": false, "placeholder": "rahul@example.com" },
+        { "key": "timeoutHours", "label": "Timeout (hours)", "control": "text", "required": false, "default": "72", "placeholder": "72" },
+        { "key": "onTimeout", "label": "When it times out", "control": "select", "required": false, "options": ["skip", "fail"], "help": "skip: nothing downstream runs, the run finishes. fail: the run fails." },
+        { "key": "signalIds", "label": "Signals (ids, optional)", "control": "text", "required": false, "help": "Defaults to every signal recorded earlier in this run." }
+      ],
+      "outputs": ["approvalId", "decision", "approved", "content", "approver", "note", "decidedAt", "passed", "url"],
+      "credentials": []
+    },
+    {
+      "id": "logic.wait",
+      "label": "Wait",
+      "description": "Pause the run on a durable timer, then continue: schedule an approved post for later. hours can come from upstream (e.g. {{item.delayHours}} inside a loop). from = run_start gives absolute slots (24 = a day after the run started) so items of a loop don't add their waits up.",
+      "kind": "logic",
+      "runtime": "builtin",
+      "search": "wait delay pause schedule later timer sleep publish at time slot",
+      "config": [
+        { "key": "hours", "label": "Hours", "control": "text", "required": true, "placeholder": "24" },
+        { "key": "from", "label": "Counted from", "control": "select", "required": false, "options": ["now", "run_start"] }
+      ],
+      "outputs": ["waitedHours", "resumedAt", "fromRunStart"],
+      "credentials": []
+    },
+    {
       "id": "logic.loop",
       "label": "Loop",
       "description": "Fan out: resolve a list and run the downstream branch once per item. Inside the body, {{item}} is the current element and {{loop.<key>.index}} the position; collected results appear as outputs.<key>.results.",
@@ -155,7 +260,7 @@
     {
       "id": "output.email",
       "label": "Send email",
-      "description": "Deliver an email over the platform SMTP seam; records intent when SMTP is unconfigured.",
+      "description": "Send an email over the platform SMTP server. Fails the node when SMTP is not configured or delivery fails.",
       "kind": "output",
       "runtime": "builtin",
       "search": "email send mail deliver notify digest smtp",
@@ -170,7 +275,7 @@
     {
       "id": "output.slack",
       "label": "Send to Slack",
-      "description": "Post a message to a Slack incoming webhook; records intent when unconfigured.",
+      "description": "Post a message to a Slack incoming webhook. Fails the node when the webhook URL is missing or Slack rejects the post.",
       "kind": "output",
       "runtime": "builtin",
       "search": "slack post webhook message notify output",

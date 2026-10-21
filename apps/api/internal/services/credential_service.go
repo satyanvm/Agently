@@ -49,11 +49,16 @@ type CredentialTypeField struct {
 
 // CredentialTypeDef mirrors one entry of credential-types.generated.json (§3).
 type CredentialTypeDef struct {
-	ID       string                `json:"id"`
-	Label    string                `json:"label"`
-	Source   string                `json:"source"`
-	AuthType string                `json:"authType,omitempty"`
-	Fields   []CredentialTypeField `json:"fields"`
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Source   string `json:"source"`
+	AuthType string `json:"authType,omitempty"`
+	// Catalog types that sign in through a piece's OAuth flow
+	// (packages/nodes/build-web.mjs CATALOG_OAUTH): the piece type whose
+	// auth.oauth block to use, and the field the access token is stored under.
+	OAuthVia      string                `json:"oauthVia,omitempty"`
+	OAuthTokenKey string                `json:"oauthTokenKey,omitempty"`
+	Fields        []CredentialTypeField `json:"fields"`
 }
 
 // CredentialService owns credential CRUD for the current workspace.
