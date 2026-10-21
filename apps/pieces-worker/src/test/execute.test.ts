@@ -5,7 +5,7 @@
  */
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { jsonSafe, makeExecutePiece, normalizeAuth, normalizeDbAuth, withDefaults } from '../execute';
+import { jsonSafe, makeExecutePiece, responseBody, normalizeAuth, normalizeDbAuth, withDefaults } from '../execute';
 import { LoadedPiece, Registry, resolvePieceExport } from '../pieces';
 import { buildIndex } from '../gen-index';
 
@@ -306,4 +306,22 @@ test('piece that failed to load returns PieceLoadFailed with the load error', as
   // Other pieces in the same registry still run.
   const ok = await exec({ piece: '@activepieces/piece-fake', action: 'echo', props: { text: 'hi' } });
   assert.equal(ok.ok, true);
+});
+
+test('responseBody: a googleapis response keeps only its body and status', () => {
+  const res = {
+    config: { url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts', headers: { Authorization: 'Bearer ya29.secret' } },
+    data: { id: 'r-1', message: { id: '18c0ffee', threadId: '18c0ffee' } },
+    headers: { 'content-type': 'application/json' },
+    status: 200,
+    statusText: 'OK',
+  };
+  const out = jsonSafe(responseBody(res));
+  assert.deepEqual(out, { data: { id: 'r-1', message: { id: '18c0ffee', threadId: '18c0ffee' } }, status: 200 });
+  assert.ok(!JSON.stringify(out).includes('ya29.secret'));
+  // Ordinary piece outputs pass through untouched, including ones with a `data` key.
+  assert.deepEqual(responseBody({ data: { id: '1' }, text: 'x' }), { data: { id: '1' }, text: 'x' });
+  assert.deepEqual(responseBody({ success: true, post_urn: 'urn:li:share:1' }), { success: true, post_urn: 'urn:li:share:1' });
+  assert.deepEqual(responseBody([1, 2]), [1, 2]);
+  assert.equal(responseBody(null), null);
 });
