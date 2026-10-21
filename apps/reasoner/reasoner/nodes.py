@@ -362,11 +362,15 @@ async def _agent(ctx: NodeContext) -> NodeResult:
                    "Use exactly the fields the task asks for.")
     model = _cfg(ctx, "model") or CONFIG.model
     out = await llm.complete(ctx.run_id, ctx.node["key"], system=system, user=prompt, model=model)
-    output: dict[str, Any] = {"text": out.text, "model": model}
+    # Feeds hand the model HTML-escaped text and it echoes the entities back
+    # (&amp;, &#34;); unescape so every node's output reads as plain text.
+    text = html.unescape(out.text)
+    output: dict[str, Any] = {"text": text, "model": model}
     if json_mode:
         # Downstream branches and loops read outputs.<key>.data; a reply that
         # isn't JSON fails the node (node retries can ask again) rather than
-        # letting a branch quietly compare against nothing.
+        # letting a branch quietly compare against nothing. Parsed from the raw
+        # reply: unescaping &#34; first could break a JSON string.
         output["data"] = parse_json_reply(out.text)
     if brand is not None:
         # Which version of the brand context shaped this draft (traceability).
@@ -377,7 +381,7 @@ async def _agent(ctx: NodeContext) -> NodeResult:
                             + (f" by {brand['updated_by']}" if brand.get("updated_by") else ""))
     return NodeResult(
         output=output,
-        summary=_clip(out.text),
+        summary=_clip(text),
         tokens_in=out.tokens_in,
         tokens_out=out.tokens_out,
         cost_usd=out.cost_usd,
@@ -698,8 +702,9 @@ async def _integration(ctx: NodeContext) -> NodeResult:
         prompt = render_tpl(llm_spec.get("prompt", ""), ctx, roots)
         model = _cfg(ctx, "model") or CONFIG.model
         out = await llm.complete(ctx.run_id, key, system=system, user=prompt, model=model)
+        text = html.unescape(out.text)
         return NodeResult(
-            output={"text": out.text, "model": model}, summary=_clip(out.text),
+            output={"text": text, "model": model}, summary=_clip(text),
             tokens_in=out.tokens_in, tokens_out=out.tokens_out, cost_usd=out.cost_usd,
         )
 

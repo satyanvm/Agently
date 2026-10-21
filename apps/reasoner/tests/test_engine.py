@@ -571,3 +571,20 @@ class UrlQueryTest(unittest.TestCase):
     def test_urls_without_empty_params_are_unchanged(self):
         for url in ("https://api.example.com/x", "https://api.example.com/x?a=1&b=2"):
             self.assertEqual(nodes._drop_empty_query_params(url), url)
+
+
+class AgentOutputTest(unittest.TestCase):
+    def test_html_entities_echoed_by_the_model_are_unescaped(self):
+        async def fake_complete(run_id, node, system, user, *, model=None):
+            return Completion(text="R&amp;D &#34;Plugins&#34; Microsoft&#39;s", tokens_in=1, tokens_out=1, cost_usd=0.0)
+
+        orig = nodes.llm.complete
+        nodes.llm.complete = fake_complete
+        try:
+            ctx = NodeContext(run_id="run_1", agent_id="ra_x",
+                              node={"key": "p", "type": "agent.llm", "config": {"prompt": "x"}},
+                              upstream={}, run_input={})
+            res = _run(nodes._agent(ctx))
+        finally:
+            nodes.llm.complete = orig
+        self.assertEqual(res.output["text"], 'R&D "Plugins" Microsoft\'s')
