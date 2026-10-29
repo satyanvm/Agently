@@ -133,6 +133,11 @@ class FinishInput:
 
 
 @dataclass
+class CancelCleanupInput:
+    run_id: str
+
+
+@dataclass
 class PreparePieceInput:
     """Same shape as RunNodeInput — a piece node is just another node; only the
     execution backend (the Node pieces worker) differs."""
@@ -289,6 +294,19 @@ async def set_progress(inp: ProgressInput) -> None:
 @activity.defn
 async def finish_run(inp: FinishInput) -> None:
     await db.finish_run(inp.run_id, inp.status, inp.step, error=(inp.error or None))
+    obs.flush()
+
+
+@activity.defn
+async def stop_canceled_run(inp: CancelCleanupInput) -> None:
+    """The workflow was canceled (dispatcher.relay_cancellations): mark what
+    never finished as stopped and withdraw pending drafts from the Inbox. The
+    run row itself is already canceled by the API."""
+    nodes, approvals = await db.stop_canceled_run(inp.run_id)
+    note = f"Run canceled: stopped {nodes} unfinished node(s)"
+    if approvals:
+        note += f", withdrew {approvals} draft(s) waiting for approval"
+    await db.append_log(inp.run_id, "warn", "system", "runtime", note)
     obs.flush()
 
 
@@ -456,5 +474,5 @@ async def record_piece_result(inp: RecordPieceInput) -> RunNodeResult:
 # Exported so the worker can register every activity in one place.
 ALL_ACTIVITIES = [
     load_graph, run_node, skip_node, add_edge, set_progress, finish_run,
-    prepare_piece_node, record_piece_result, use_output, fail_node,
+    prepare_piece_node, record_piece_result, use_output, fail_node, stop_canceled_run,
 ]
