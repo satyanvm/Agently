@@ -4,7 +4,8 @@ with fake activities registered under the real names.
 Covers: approve (with an edit) → downstream runs with the final text; reject
 and timeout → downstream skipped; onTimeout=fail; two approvals open at once
 (neither waits for the other); an approval nothing depends on; approvals
-inside a loop; and a worker restart while the run is waiting.
+inside a loop; a worker restart while the run is waiting; and cancelling a
+run while it waits (on an approval, or on a logic.wait timer).
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ os.environ.setdefault("BROWSERBASE_PROJECT_ID", "test-project")
 os.environ.setdefault("SMTP_HOST", "localhost")
 
 from temporalio import activity  # noqa: E402
+from temporalio.client import WorkflowFailureError  # noqa: E402
+from temporalio.exceptions import CancelledError  # noqa: E402
 from temporalio.testing import WorkflowEnvironment  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
@@ -51,6 +54,8 @@ class Fake:
         self.outcomes: list[tuple[str, str, tuple[str, ...]]] = []  # (node, status, approval ids)
         self.outcome_ids: list[str] = []
         self.waited: list[tuple[str, float, bool, str]] = []  # (node, hours, from start, resumed at)
+        self.cleaned: list[str] = []                       # stop_canceled_run calls (run ids)
+        self.hold: dict[str, asyncio.Event] = {}           # node key → run_node waits on it
 
     def decide(self, approval_id: str, status: str, content: str | None = None, by: str = "Rahul") -> None:
         row = self.rows[approval_id]
@@ -70,6 +75,8 @@ class Fake:
             key = inp.node["key"]
             f.ran.append(key)
             f.upstream[key] = inp.upstream
+            if key in f.hold:
+                await f.hold[key].wait()
             if inp.node.get("type") == "logic.loop":
                 return A.RunNodeResult(output={"items": ["a", "b"], "count": 2})
             return A.RunNodeResult(output={"text": f"{key} output"})
@@ -155,9 +162,13 @@ class Fake:
             f.waited.append((inp.key, inp.hours, inp.from_run_start, inp.resumed_at))
             return A.RunNodeResult(output={"waitedHours": inp.hours, "resumedAt": inp.resumed_at})
 
+        @activity.defn(name="stop_canceled_run")
+        async def stop_canceled_run(inp: A.CancelCleanupInput) -> None:
+            f.cleaned.append(inp.run_id)
+
         return [load_graph, run_node, skip_node, use_output, fail_node, finish_run, add_edge,
                 set_progress, open_approval, set_waiting, resolve_approval, record_outcome,
-                prepare_wait, finish_wait]
+                prepare_wait, finish_wait, stop_canceled_run]
 
 
 def llm(key: str, deps: list[str] | None = None) -> dict[str, Any]:
@@ -388,6 +399,61 @@ class ApprovalWorkflowTest(unittest.TestCase):
         self.assertEqual(fake.ran.count("draft"), 1, "completed nodes must not re-run")
         self.assertEqual(fake.upstream["publish"]["ok"]["content"], "final")
         self.assertEqual(fake.outcomes, [("publish", "succeeded", ("apr_ok_0",))])
+
+    def cancel_when(self, fake: Fake, ready, after_cancel=None) -> BaseException:
+        """Start the run, cancel it once `ready(fake)` holds (what
+        dispatcher.relay_cancellations does), and return how it ended."""
+        async def go():
+            async with Worker(self.env.client, task_queue=QUEUE, workflows=[DynamicWorkflow],
+                              activities=fake.acts()):
+                handle = await self.env.client.start_workflow(
+                    DynamicWorkflow.run, {"run_id": "run_x", "input": {}, "exec": {}},
+                    id=f"wf-{uuid.uuid4()}", task_queue=QUEUE)
+                await self._until(lambda: ready(fake))
+                await handle.cancel()
+                if after_cancel:
+                    after_cancel()
+                try:
+                    await handle.result()
+                except WorkflowFailureError as exc:
+                    return exc
+                self.fail("a canceled run must not complete")
+        return self.loop.run_until_complete(go())
+
+    def test_cancel_while_waiting_for_approval_stops_the_run(self):
+        fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"])])
+        exc = self.cancel_when(fake, lambda f: f.waiting == [True])
+        self.assertIsInstance(exc.cause, CancelledError, "Temporal records the workflow as Cancelled")
+        self.assertNotIn("publish", fake.ran, "nothing after the cancel point may run")
+        self.assertEqual(fake.cleaned, ["run_x"], "leftover nodes and the pending draft are cleaned up once")
+        self.assertIsNone(fake.finish, "a canceled run is never finished as succeeded or failed")
+
+    def test_cancel_during_a_wait_in_parallel_mode(self):
+        # No approval in the graph → the parallel loop; the run sleeps on a
+        # durable timer when the cancel arrives.
+        fake = Fake([llm("fetch"),
+                     {"key": "pause", "type": "logic.wait", "dependsOn": ["fetch"], "config": {"hours": "2"}},
+                     llm("post", ["pause"]), llm("side", ["fetch"])])
+        exc = self.cancel_when(fake, lambda f: f.waiting == [True] and "side" in f.ran)
+        self.assertIsInstance(exc.cause, CancelledError)
+        self.assertNotIn("post", fake.ran)
+        self.assertEqual(fake.waited, [], "the wait never finished")
+        self.assertEqual(fake.cleaned, ["run_x"])
+        self.assertIsNone(fake.finish)
+
+    def test_cancel_while_a_node_is_executing(self):
+        # The cancel lands while a node's activity is still running. Node
+        # activities don't heartbeat, so the call in flight finishes on its own
+        # (released right after the cancel here) and its result is discarded:
+        # the workflow ends as Cancelled, not as a failed or finished run, and
+        # nothing downstream starts.
+        fake = Fake([llm("fetch"), llm("slow", ["fetch"]), llm("post", ["slow"])])
+        fake.hold["slow"] = asyncio.Event()
+        exc = self.cancel_when(fake, lambda f: "slow" in f.ran, after_cancel=fake.hold["slow"].set)
+        self.assertIsInstance(exc.cause, CancelledError)
+        self.assertNotIn("post", fake.ran)
+        self.assertEqual(fake.cleaned, ["run_x"])
+        self.assertIsNone(fake.finish)
 
     def test_nodes_before_the_approval_record_no_outcome(self):
         fake = Fake([llm("draft"), approve("ok", ["draft"]), llm("publish", ["ok"]), llm("side", ["draft"])])

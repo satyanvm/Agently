@@ -67,10 +67,16 @@ class _FakeHandle:
             raise RPCError("workflow execution already completed", RPCStatusCode.NOT_FOUND, b"")
         self.client.signals.append((self.wf_id, payload))
 
+    async def cancel(self):
+        if self.wf_id in self.client.gone:
+            raise RPCError("workflow not found for ID: " + self.wf_id, RPCStatusCode.NOT_FOUND, b"")
+        self.client.cancels.append(self.wf_id)
+
 
 class _FakeClient:
     def __init__(self):
         self.signals: list[tuple[str, dict]] = []
+        self.cancels: list[str] = []
         self.gone: set[str] = set()
 
     def get_workflow_handle(self, wf_id):
@@ -223,6 +229,59 @@ class ApprovalDbTest(unittest.TestCase):
         self.assertEqual(asyncio.run(dispatcher.relay_decisions(client)), 1)
         self.assertIsNotNone(asyncio.run(db.approval_by_id(opened.approval_id)) and
                              asyncio.run(self._sql("select signaled_at from approvals where id = %s", (opened.approval_id,)))[0][0])
+
+    # ── cancelling a run ──
+
+    def cancel(self):
+        """What the API's RunService.Cancel writes."""
+        asyncio.run(self._sql("update runs set status='canceled', finished_at=now(), current_step='Canceled' "
+                              "where id = %s", (self.run,)))
+
+    def run_row(self):
+        return asyncio.run(self._sql("select status, current_step, cancel_signaled_at from runs where id = %s",
+                                     (self.run,)))[0]
+
+    def test_cancel_is_relayed_to_the_workflow_once(self):
+        client = _FakeClient()
+        self.assertEqual(asyncio.run(dispatcher.relay_cancellations(client)), 0, "a running run is left alone")
+        self.cancel()
+        self.assertEqual(asyncio.run(dispatcher.relay_cancellations(client)), 1)
+        self.assertEqual(client.cancels, [f"agently-run-{self.run}"])
+        self.assertIsNotNone(self.run_row()[2], "cancel_signaled_at is stamped")
+        self.assertEqual(asyncio.run(dispatcher.relay_cancellations(client)), 0, "delivered once")
+
+    def test_cancel_of_a_run_with_no_workflow_is_stamped(self):
+        # Canceled while still queued (never dispatched), or the workflow already finished.
+        client = _FakeClient()
+        client.gone.add(f"agently-run-{self.run}")
+        self.cancel()
+        self.assertEqual(asyncio.run(dispatcher.relay_cancellations(client)), 1)
+        self.assertEqual(client.cancels, [])
+        self.assertIsNotNone(self.run_row()[2])
+
+    def test_a_canceled_run_is_never_overwritten(self):
+        self.cancel()
+        # A node that was still executing when the cancel landed finishes, and
+        # the reasoner's usual writes arrive late.
+        asyncio.run(db.set_run_running(self.run, "Running"))
+        asyncio.run(db.set_run_progress(self.run, 5, 9, "Ran fetch"))
+        asyncio.run(db.set_run_waiting(self.run, True, "Waiting for approval"))
+        asyncio.run(db.finish_run(self.run, "succeeded", "Completed"))
+        status, step, _ = self.run_row()
+        self.assertEqual((status, step), ("canceled", "Canceled"))
+
+    def test_cleanup_stops_leftover_nodes_and_withdraws_drafts(self):
+        opened = self.open()
+        asyncio.run(self._sql("insert into run_agents (id, run_id, name, role, model, status) "
+                              "values ('ra_done', %s, 'done', 'writer', 'none', 'succeeded')", (self.run,)))
+        self.cancel()
+        nodes, drafts = asyncio.run(db.stop_canceled_run(self.run))
+        self.assertEqual((nodes, drafts), (1, 1))
+        rows = dict(asyncio.run(self._sql("select id, status from run_agents where run_id = %s", (self.run,))))
+        self.assertEqual(rows, {"ra_ok": "blocked", "ra_done": "succeeded"}, "finished nodes keep their status")
+        self.assertEqual(asyncio.run(db.approval_by_id(opened.approval_id))["status"], "canceled",
+                         "the draft leaves the Inbox")
+        self.assertEqual(asyncio.run(db.undelivered_decisions()), [], "a withdrawn draft is never relayed")
 
 
 if __name__ == "__main__":

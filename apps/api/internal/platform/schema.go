@@ -29,6 +29,8 @@ var schemaUpgrades = []string{
 	`create index if not exists run_agents_run_node_key_idx on run_agents (run_id, node_key)`,
 	`alter table workflows add column if not exists settings jsonb not null default '{}'::jsonb`,
 	`alter table runs add column if not exists failure_handled_at timestamptz`,
+	// 0016_run_cancel_relay.sql
+	`alter table runs add column if not exists cancel_signaled_at timestamptz`,
 }
 
 // EnsureSchema applies schemaUpgrades, then the embedded whole-file migrations.
